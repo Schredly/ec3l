@@ -1,0 +1,282 @@
+🧭 Step 0 — Create the Replit Project
+Project Type
+
+Choose:
+
+Node.js + TypeScript
+
+Enable Nix / Docker support if available
+
+Use a monorepo structure
+
+Project name suggestion:
+
+changeops-platform
+
+🧠 Prompt 1 — Generate the Base Monorepo Structure
+
+Paste this into Replit AI:
+
+PROMPT 1: Initialize Platform Skeleton
+Create a monorepo Node.js + TypeScript project structured like this:
+
+apps/
+  web/        (Next.js frontend using App Router, Tailwind, shadcn)
+  api/        (Fastify backend API server)
+  runner/     (workspace runner service)
+
+packages/
+  shared/     (shared types and utilities)
+  github/     (GitHub integration module)
+  skills/     (agent skill interfaces)
+
+infra/
+  docker/
+  local/
+
+Requirements:
+- Use pnpm workspaces
+- Root tsconfig with path aliases
+- Basic dev scripts:
+    pnpm dev:web
+    pnpm dev:api
+    pnpm dev:runner
+- ESLint + Prettier configured
+- Dockerfile for runner service
+
+Do not add extra features.
+Keep it minimal and clean.
+
+
+Let Replit scaffold this.
+
+Fix any dependency issues it creates.
+
+🧠 Prompt 2 — Add Core Data Model + API
+
+Now we build Change Records.
+
+Paste this:
+
+PROMPT 2: Add Change Record API
+Inside apps/api:
+
+1. Add a Postgres connection using Prisma.
+2. Create models:
+
+Project:
+  id
+  name
+  githubRepo
+  defaultBranch
+  createdAt
+
+ChangeRecord:
+  id
+  projectId
+  baseSha
+  modulePath
+  status (Draft | WorkspaceRunning | Validating | Ready | Merged)
+  branchName
+  createdAt
+
+Workspace:
+  id
+  changeId
+  containerId
+  previewUrl
+  status
+  createdAt
+
+3. Create Fastify routes:
+
+POST /projects
+POST /changes
+POST /changes/:id/start-workspace
+POST /changes/:id/checkin
+GET  /changes/:id
+
+4. Do NOT implement business logic yet.
+Just scaffold handlers and DB wiring.
+
+
+Run prisma migrate dev and ensure DB works.
+
+🧠 Prompt 3 — Implement GitHub Integration
+
+Now we wire GitHub as master.
+
+PROMPT 3: Add GitHub Module
+Inside packages/github:
+
+Implement:
+
+- createBranch(repo, baseSha, branchName)
+- commitFiles(repo, branchName, files)
+- openPullRequest(repo, branchName, baseBranch)
+
+Use Octokit.
+
+Assume GitHub App installation token is available via env var.
+
+Add a minimal test route in apps/api:
+
+POST /test/create-pr
+
+that:
+- creates a branch
+- commits a dummy file
+- opens a PR
+
+Keep implementation minimal.
+
+
+Test against a test repo.
+
+You now have GitHub PR automation working.
+
+🧠 Prompt 4 — Implement the Workspace Runner
+
+This is the engine.
+
+PROMPT 4: Basic Runner Service
+Inside apps/runner:
+
+Create a service that can:
+
+- Clone a GitHub repo at a specific commit SHA
+- Run a shell command inside that repo
+- Stream logs
+- Return git diff against base SHA
+
+Use simple child_process for now.
+No container orchestration yet.
+Keep it local filesystem based.
+
+Expose HTTP endpoints:
+
+POST /workspace/start
+POST /workspace/run-command
+GET  /workspace/diff
+GET  /workspace/logs
+
+
+Now connect API → runner.
+
+When /changes/:id/start-workspace is called:
+
+clone repo
+
+record workspace entry
+
+return workspace ID
+
+🧠 Prompt 5 — Build Minimal Frontend
+
+Now make it feel real.
+
+PROMPT 5: Basic UI
+Inside apps/web:
+
+Create pages:
+
+/projects
+/projects/[id]
+/changes/[id]
+
+Add:
+- Create Project form
+- Create Change form
+- Start Workspace button
+- View diff button
+- Check-in button
+
+Add Monaco editor component that can edit a file in workspace.
+
+Add preview iframe that loads a dev server URL if provided.
+
+Keep UI minimal.
+
+
+You now have:
+
+GitHub as master
+
+Change Records
+
+Workspace
+
+Edit
+
+Diff
+
+PR
+
+That’s a functioning platform core.
+
+🧠 Prompt 6 — Add First Agent Skill
+
+Now we add agentic layer, but small.
+
+PROMPT 6: Add Basic Skill System
+Inside packages/skills:
+
+Create a Skill interface:
+
+type Skill<Input, Output> = {
+  name: string
+  execute(input: Input, context: SkillContext): Promise<Output>
+}
+
+Implement skills:
+
+- editFile
+- runCommand
+- runLint
+
+Create a simple Agent class that:
+- accepts intent
+- selects skills
+- executes sequentially
+- stops when validation passes
+
+Keep logic simple and deterministic.
+
+
+Now wire:
+
+POST /changes/:id/agent-run
+
+Agent edits file
+
+Runs lint
+
+If pass → mark change Ready
+
+🔥 Important Discipline
+
+Do NOT:
+
+Add Kubernetes yet
+
+Add DB marketplace yet
+
+Add multi-agent orchestration yet
+
+Prove the loop first.
+
+🧭 What You Will Have After This
+
+A primitive but powerful system:
+
+GitHub master repo
+
+Change Records
+
+Isolated workspace
+
+Agent skill execution
+
+PR generation
+
+That’s your core thesis working.
