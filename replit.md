@@ -38,18 +38,37 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
   - templateService.ts: systemGetTemplates(), systemGetTemplate(), systemGetTemplateModules() — require SystemContext (not tenant-owned data)
 
 ## Module Execution Context
-- **ModuleExecutionContext** (server/moduleContext.ts): Explicit context type required for all execution paths. Contains tenantContext, moduleId, moduleRootPath, and capabilities (required Capability[]).
+- **ModuleExecutionContext** (server/moduleContext.ts): Explicit context type required for all execution paths. Contains tenantContext, moduleId, moduleRootPath, capabilityProfile, and derived capabilities.
+- **buildModuleExecutionContext()** (server/moduleContext.ts): Factory that constructs context from tenant context + module metadata; resolves capabilities from module's assigned profile via resolveProfile().
 - **ModuleContextError** (server/moduleContext.ts): Error class for missing module execution context.
 - **Required by**: All runner execution functions (startWorkspace, runCommand, getDiff, getLogs, validateFilePath), enforceModuleBoundary, agentRunService.createAgentRun, workspaceService.startWorkspace.
-- **Constructed in**: Route handlers (start-workspace, agent-run) build ModuleExecutionContext from tenant context, module metadata, and defaultCapabilities(), then pass it downstream.
+- **Constructed in**: Route handlers (start-workspace, agent-run) call buildModuleExecutionContext() with tenant context and module record.
 - **Compile-time enforcement**: Calling execution functions without ModuleExecutionContext fails at compile time.
 
+## Capability Profiles
+- **Profile definitions** (server/capabilityProfiles.ts): Named profiles mapping to specific capability sets:
+  - `CODE_MODULE_DEFAULT`: [FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF] — standard code modules
+  - `WORKFLOW_MODULE_DEFAULT`: [FS_READ, CMD_RUN, GIT_DIFF] — workflow modules (no write)
+  - `READ_ONLY`: [FS_READ, GIT_DIFF] — read-only inspection modules
+  - `SYSTEM_PRIVILEGED`: [FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF, NET_HTTP] — platform operations only
+- **resolveProfile()** (server/capabilityProfiles.ts): Maps profile name to capability set; throws on unknown profiles (fail-closed).
+- **Schema column**: `capabilityProfile` enum on modules table with default `CODE_MODULE_DEFAULT`. Stored at module level, resolved at runtime.
+- **Module creation**: New modules receive profile based on type; defaults to CODE_MODULE_DEFAULT.
+
+## SystemContext
+- **SystemContext** (server/systemContext.ts): Branded type using unique symbol to prevent accidental creation. Always uses SYSTEM_PRIVILEGED profile.
+- **createSystemContext()** (server/systemContext.ts): Factory function — only way to create SystemContext. Returns branded object with source "system" and SYSTEM_PRIVILEGED capabilities.
+- **isSystemContext()** (server/systemContext.ts): Type guard for runtime context discrimination.
+- **ExecutionContext** (server/capabilities.ts): Union type (ModuleExecutionContext | SystemContext) accepted by assertCapability for flexible but type-safe capability checks.
+- **Used by**: templateService for read-only platform data access (templates are not tenant-owned).
+
 ## Agent Capability Model
-- **Canonical vocabulary** (server/capabilities.ts): Defines Capability type and Capabilities const (FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF, NET_HTTP). Exports assertCapability(ctx, cap) that throws CapabilityDeniedError if capability is missing. Exports defaultCapabilities() returning MVP set [FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF].
+- **Canonical vocabulary** (server/capabilities.ts): Defines Capability type and Capabilities const (FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF, NET_HTTP). Exports assertCapability(ctx, cap) that throws CapabilityDeniedError if capability is missing. Accepts ExecutionContext union type.
 - **CapabilityDeniedError** (server/capabilities.ts): Typed error with capability field. Thrown by assertCapability on denial.
-- **Skill Registry** (server/skills/registry.ts): Central registry where each skill declares name, requiredCapabilities, and execute(). Skills can only be invoked via skillRegistry.invoke(name, ctx, input) which asserts all requiredCapabilities before execution.
+- **Skill Registry** (server/skills/registry.ts): Central registry where each skill declares name, requiredCapabilities, and execute(). Skills can only be invoked via skillRegistry.invoke(name, ctx, input) which asserts all requiredCapabilities before execution. runnerService is private to registry — no direct imports by agent logic.
+- **controlPlane** (server/skills/registry.ts): Narrow exported interface for non-agent workspace lifecycle operations (startWorkspace, stopWorkspace).
 - **Registered skills**: editFile (fs:read, fs:write), runCommand (cmd:run), runLint (fs:read, cmd:run), getDiff (git:diff).
-- **Enforcement flow**: agentRunService.createAgentRun invokes skills via registry. On CapabilityDeniedError: agent run fails with failureReason "CAPABILITY_DENIED", structured denial artifact is recorded in logs. Route handler also catches CapabilityDeniedError and returns 403.
+- **Enforcement flow**: agentRunService.createAgentRun invokes skills via registry. On CapabilityDeniedError: agent run fails with failureReason "CAPABILITY_DENIED", structured denial artifact records contextType and capabilityProfile. Route handler also catches CapabilityDeniedError and returns 403.
 - **Fail-closed**: Any missing capability causes immediate denial — no fallback or soft-return.
 
 ## Module Boundary Enforcement
