@@ -1,0 +1,219 @@
+PHASE 1 — Introduce TENANCY (foundational, minimal)
+Prompt 1 — Add Tenant model (no usage yet)
+
+Goal: Add tenancy to the data model without breaking anything.
+
+Add a new Tenant model to the shared database schema.
+
+Requirements:
+- Create a Tenant table with:
+  - id (primary key)
+  - name
+  - slug (unique)
+  - plan (string, nullable)
+  - createdAt
+- Do NOT remove or change existing tables.
+- Do NOT yet wire Tenant into queries or routes.
+- Update migrations accordingly.
+
+This step is schema-only.
+
+
+✅ Expected result:
+
+New tenant table
+
+No runtime behavior change
+
+App still works exactly as before
+
+Prompt 2 — Attach Project → Tenant (softly)
+
+Goal: Make projects tenant-owned without enforcing yet.
+
+Update the Project model so that each Project belongs to a Tenant.
+
+Requirements:
+- Add tenantId to Project (foreign key to Tenant).
+- Allow tenantId to be nullable for now (backwards compatibility).
+- Update relations in schema files.
+- Do NOT enforce tenant scoping in API logic yet.
+- Do NOT remove any existing fields.
+
+This is a non-breaking schema evolution.
+
+
+✅ Expected result:
+
+projects.tenant_id exists
+
+Existing data still valid
+
+PHASE 2 — Make MODULES a first-class concept
+
+This is the biggest conceptual upgrade.
+
+Prompt 3 — Create Module entity
+
+Goal: Teach the platform what a “module” actually is.
+
+Add a new Module model to the shared schema.
+
+Module represents a change-scoped unit such as code, workflow, or UI.
+
+Requirements:
+- Module fields:
+  - id
+  - projectId (FK to Project)
+  - name
+  - type (enum: code | schema | workflow | ui | integration)
+  - rootPath (string, e.g. "src/auth")
+  - version (string, default "0.1.0")
+  - createdAt
+- Do NOT yet remove any logic that uses raw paths.
+- Do NOT refactor UI yet.
+- This is a data model addition only.
+
+
+✅ Expected result:
+
+Modules table exists
+
+No functional change yet
+
+Prompt 4 — Seed Modules from existing paths (safe migration)
+
+Goal: Bridge old “path-based” logic to Modules.
+
+Add a lightweight migration or utility that can create Module records
+from existing Change or Project data.
+
+Requirements:
+- For each existing Project:
+  - Create at least one default Module:
+    - name: "default"
+    - type: "code"
+    - rootPath: "src"
+- This should be safe to run multiple times (idempotent).
+- Do NOT delete or modify existing Change records.
+- This is preparation for module-scoped changes.
+
+
+✅ Expected result:
+
+Every project now has ≥1 Module
+
+Existing UI still works
+
+PHASE 3 — Upgrade ChangeRecords to be MODULE-SCOPED
+
+This aligns directly with your ChangeOps vision.
+
+Prompt 5 — ChangeRecord → Module relationship
+Update ChangeRecord to explicitly reference a Module.
+
+Requirements:
+- Add moduleId (FK to Module) on ChangeRecord.
+- Keep existing modulePath field for backwards compatibility.
+- Do NOT remove modulePath yet.
+- Update types and schema only.
+- API routes should still accept modulePath, but internally prefer moduleId when present.
+
+
+✅ Expected result:
+
+Changes can now be explicitly tied to modules
+
+Old changes still render
+
+Prompt 6 — Enforce module scope in Change creation (soft)
+Update the Change creation logic so that:
+
+- When creating a Change:
+  - If moduleId is provided, associate Change with that Module.
+  - If only modulePath is provided, resolve or create a Module automatically.
+- Do NOT block existing behavior.
+- Log (console) when auto-resolution happens (for visibility).
+
+
+✅ Expected result:
+
+Platform starts behaving “module-aware”
+
+No breaking UI changes
+
+PHASE 4 — Introduce ENVIRONMENTS (dev / test / prod)
+
+This unlocks real enterprise rollout.
+
+Prompt 7 — Add Environment model
+Add an Environment model.
+
+Requirements:
+- Environment fields:
+  - id
+  - projectId
+  - name (enum: dev | test | prod)
+  - isDefault (boolean)
+- Each Project should have:
+  - dev (default)
+  - test
+  - prod
+- Create a safe initializer for existing projects.
+- No behavior changes yet.
+
+Prompt 8 — Attach ChangeRecord → Environment
+Update ChangeRecord to include environmentId.
+
+Requirements:
+- Default new Changes to dev environment.
+- Do NOT enforce promotion rules yet.
+- Update types and DB schema only.
+
+
+✅ Expected result:
+
+Every change now knows where it lives
+
+Promotion can be layered later
+
+PHASE 5 — Prepare for Templates (without implementing them)
+
+This sets you up for HR / Finance / Legal.
+
+Prompt 9 — Introduce Template model (read-only for now)
+Add a Template model.
+
+Requirements:
+- Template fields:
+  - id
+  - name
+  - domain (HR | Finance | Legal | Facilities | Custom)
+  - version
+  - description
+- Add TemplateModule join table:
+  - templateId
+  - moduleId
+- Do NOT wire template enablement yet.
+- This is structural groundwork only.
+
+PHASE 6 — Guardrails for scale (no features)
+Prompt 10 — Control Plane vs Runner boundary
+
+This is subtle but critical.
+
+Refactor runner-related logic to ensure:
+
+- The API server (control plane):
+  - Creates ChangeRecords
+  - Tracks status
+  - Never executes filesystem or shell commands directly
+
+- Runner logic:
+  - Is isolated behind a service interface
+  - Receives explicit instructions (workspaceId, moduleId, command)
+  - Returns logs and results
+
+Do NOT add orchestration.
+Do NOT add containers yet.
+This is an internal boundary refactor only.

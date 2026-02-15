@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, pgEnum, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -25,12 +25,55 @@ export const agentRunStatusEnum = pgEnum("agent_run_status", [
   "Failed",
 ]);
 
+export const moduleTypeEnum = pgEnum("module_type", [
+  "code",
+  "schema",
+  "workflow",
+  "ui",
+  "integration",
+]);
+
+export const environmentNameEnum = pgEnum("environment_name", [
+  "dev",
+  "test",
+  "prod",
+]);
+
+export const templateDomainEnum = pgEnum("template_domain", [
+  "HR",
+  "Finance",
+  "Legal",
+  "Facilities",
+  "Custom",
+]);
+
+// Phase 1: Tenant
+export const tenants = pgTable("tenants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  plan: text("plan"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const projects = pgTable("projects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   githubRepo: text("github_repo").notNull(),
   defaultBranch: text("default_branch").notNull().default("main"),
   description: text("description"),
+  tenantId: varchar("tenant_id").references(() => tenants.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Phase 2: Module
+export const modules = pgTable("modules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  name: text("name").notNull(),
+  type: moduleTypeEnum("type").notNull().default("code"),
+  rootPath: text("root_path").notNull().default("src"),
+  version: text("version").notNull().default("0.1.0"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -41,8 +84,10 @@ export const changeRecords = pgTable("change_records", {
   description: text("description"),
   baseSha: text("base_sha"),
   modulePath: text("module_path"),
+  moduleId: varchar("module_id").references(() => modules.id),
   status: changeStatusEnum("status").notNull().default("Draft"),
   branchName: text("branch_name"),
+  environmentId: varchar("environment_id").references(() => environments.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -65,7 +110,43 @@ export const agentRuns = pgTable("agent_runs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Phase 4: Environment
+export const environments = pgTable("environments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  name: environmentNameEnum("name").notNull(),
+  isDefault: boolean("is_default").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Phase 5: Template
+export const templates = pgTable("templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  domain: templateDomainEnum("domain").notNull(),
+  version: text("version").notNull().default("1.0.0"),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const templateModules = pgTable("template_modules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateId: varchar("template_id").notNull().references(() => templates.id),
+  moduleId: varchar("module_id").notNull().references(() => modules.id),
+});
+
+// Insert schemas
+export const insertTenantSchema = createInsertSchema(tenants).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertProjectSchema = createInsertSchema(projects).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertModuleSchema = createInsertSchema(modules).omit({
   id: true,
   createdAt: true,
 });
@@ -91,8 +172,29 @@ export const insertAgentRunSchema = createInsertSchema(agentRuns).omit({
   logs: true,
 });
 
+export const insertEnvironmentSchema = createInsertSchema(environments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertTemplateSchema = createInsertSchema(templates).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertTemplateModuleSchema = createInsertSchema(templateModules).omit({
+  id: true,
+});
+
+// Types
+export type InsertTenant = z.infer<typeof insertTenantSchema>;
+export type Tenant = typeof tenants.$inferSelect;
+
 export type InsertProject = z.infer<typeof insertProjectSchema>;
 export type Project = typeof projects.$inferSelect;
+
+export type InsertModule = z.infer<typeof insertModuleSchema>;
+export type Module = typeof modules.$inferSelect;
 
 export type InsertChangeRecord = z.infer<typeof insertChangeRecordSchema>;
 export type ChangeRecord = typeof changeRecords.$inferSelect;
@@ -102,3 +204,12 @@ export type Workspace = typeof workspaces.$inferSelect;
 
 export type InsertAgentRun = z.infer<typeof insertAgentRunSchema>;
 export type AgentRun = typeof agentRuns.$inferSelect;
+
+export type InsertEnvironment = z.infer<typeof insertEnvironmentSchema>;
+export type Environment = typeof environments.$inferSelect;
+
+export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
+export type Template = typeof templates.$inferSelect;
+
+export type InsertTemplateModule = z.infer<typeof insertTemplateModuleSchema>;
+export type TemplateModule = typeof templateModules.$inferSelect;

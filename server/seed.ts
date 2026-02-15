@@ -1,21 +1,30 @@
 import { db } from "./db";
-import { projects, changeRecords, workspaces, agentRuns } from "@shared/schema";
+import { tenants, projects, modules, changeRecords, workspaces, agentRuns, environments } from "@shared/schema";
 import { log } from "./index";
 
 export async function seedDatabase() {
   const existingProjects = await db.select().from(projects);
   if (existingProjects.length > 0) {
     log("Database already seeded, skipping");
+    await seedModulesForExistingProjects();
+    await seedEnvironmentsForExistingProjects();
     return;
   }
 
   log("Seeding database...");
+
+  const [tenant1] = await db.insert(tenants).values({
+    name: "ec3l Labs",
+    slug: "ec3l-labs",
+    plan: "enterprise",
+  }).returning();
 
   const [project1] = await db.insert(projects).values({
     name: "frontend-app",
     githubRepo: "ec3l/frontend-app",
     defaultBranch: "main",
     description: "Core frontend application built with React and TypeScript. Contains the main user interface and client-side logic.",
+    tenantId: tenant1.id,
   }).returning();
 
   const [project2] = await db.insert(projects).values({
@@ -23,6 +32,7 @@ export async function seedDatabase() {
     githubRepo: "ec3l/api-gateway",
     defaultBranch: "main",
     description: "Central API gateway service handling request routing, authentication, and rate limiting across microservices.",
+    tenantId: tenant1.id,
   }).returning();
 
   const [project3] = await db.insert(projects).values({
@@ -30,7 +40,22 @@ export async function seedDatabase() {
     githubRepo: "ec3l/auth-service",
     defaultBranch: "develop",
     description: "Authentication and authorization microservice with OAuth2 and JWT support.",
+    tenantId: tenant1.id,
   }).returning();
+
+  const allProjects = [project1, project2, project3];
+  for (const p of allProjects) {
+    await db.insert(modules).values({ projectId: p.id, name: "default", type: "code", rootPath: "src" });
+    await db.insert(environments).values({ projectId: p.id, name: "dev", isDefault: true });
+    await db.insert(environments).values({ projectId: p.id, name: "test", isDefault: false });
+    await db.insert(environments).values({ projectId: p.id, name: "prod", isDefault: false });
+  }
+
+  await db.insert(modules).values({ projectId: project1.id, name: "dashboard", type: "ui", rootPath: "src/pages/dashboard" });
+  await db.insert(modules).values({ projectId: project1.id, name: "theme", type: "ui", rootPath: "src/components/theme" });
+  await db.insert(modules).values({ projectId: project2.id, name: "middleware", type: "code", rootPath: "src/middleware" });
+  await db.insert(modules).values({ projectId: project2.id, name: "websocket", type: "code", rootPath: "src/ws" });
+  await db.insert(modules).values({ projectId: project3.id, name: "auth", type: "code", rootPath: "src/auth" });
 
   const [change1] = await db.insert(changeRecords).values({
     projectId: project1.id,
@@ -127,4 +152,30 @@ export async function seedDatabase() {
   });
 
   log("Database seeded successfully");
+}
+
+async function seedModulesForExistingProjects() {
+  const existingModules = await db.select().from(modules);
+  if (existingModules.length > 0) return;
+
+  log("Seeding modules for existing projects...");
+  const allProjects = await db.select().from(projects);
+  for (const p of allProjects) {
+    await db.insert(modules).values({ projectId: p.id, name: "default", type: "code", rootPath: "src" });
+  }
+  log("Modules seeded for existing projects");
+}
+
+async function seedEnvironmentsForExistingProjects() {
+  const existingEnvs = await db.select().from(environments);
+  if (existingEnvs.length > 0) return;
+
+  log("Seeding environments for existing projects...");
+  const allProjects = await db.select().from(projects);
+  for (const p of allProjects) {
+    await db.insert(environments).values({ projectId: p.id, name: "dev", isDefault: true });
+    await db.insert(environments).values({ projectId: p.id, name: "test", isDefault: false });
+    await db.insert(environments).values({ projectId: p.id, name: "prod", isDefault: false });
+  }
+  log("Environments seeded for existing projects");
 }

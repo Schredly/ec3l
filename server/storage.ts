@@ -1,24 +1,49 @@
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { db } from "./db";
 import {
+  tenants,
   projects,
+  modules,
   changeRecords,
   workspaces,
   agentRuns,
+  environments,
+  templates,
+  templateModules,
+  type Tenant,
+  type InsertTenant,
   type Project,
   type InsertProject,
+  type Module,
+  type InsertModule,
   type ChangeRecord,
   type InsertChangeRecord,
   type Workspace,
   type InsertWorkspace,
   type AgentRun,
   type InsertAgentRun,
+  type Environment,
+  type InsertEnvironment,
+  type Template,
+  type InsertTemplate,
+  type TemplateModule,
+  type InsertTemplateModule,
 } from "@shared/schema";
 
 export interface IStorage {
+  getTenants(): Promise<Tenant[]>;
+  getTenant(id: string): Promise<Tenant | undefined>;
+  createTenant(data: InsertTenant): Promise<Tenant>;
+
   getProjects(): Promise<Project[]>;
   getProject(id: string): Promise<Project | undefined>;
   createProject(data: InsertProject): Promise<Project>;
+
+  getModules(): Promise<Module[]>;
+  getModule(id: string): Promise<Module | undefined>;
+  getModulesByProject(projectId: string): Promise<Module[]>;
+  getModuleByProjectAndPath(projectId: string, rootPath: string): Promise<Module | undefined>;
+  createModule(data: InsertModule): Promise<Module>;
 
   getChanges(): Promise<ChangeRecord[]>;
   getChange(id: string): Promise<ChangeRecord | undefined>;
@@ -34,9 +59,35 @@ export interface IStorage {
   getAgentRunsByChange(changeId: string): Promise<AgentRun[]>;
   createAgentRun(data: InsertAgentRun): Promise<AgentRun>;
   updateAgentRun(id: string, status: AgentRun["status"], skillsUsed?: string, logs?: string): Promise<AgentRun | undefined>;
+
+  getEnvironmentsByProject(projectId: string): Promise<Environment[]>;
+  getEnvironment(id: string): Promise<Environment | undefined>;
+  getDefaultEnvironment(projectId: string): Promise<Environment | undefined>;
+  createEnvironment(data: InsertEnvironment): Promise<Environment>;
+
+  getTemplates(): Promise<Template[]>;
+  getTemplate(id: string): Promise<Template | undefined>;
+  createTemplate(data: InsertTemplate): Promise<Template>;
+
+  getTemplateModules(templateId: string): Promise<TemplateModule[]>;
+  createTemplateModule(data: InsertTemplateModule): Promise<TemplateModule>;
 }
 
 export class DatabaseStorage implements IStorage {
+  async getTenants(): Promise<Tenant[]> {
+    return db.select().from(tenants).orderBy(desc(tenants.createdAt));
+  }
+
+  async getTenant(id: string): Promise<Tenant | undefined> {
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id));
+    return tenant;
+  }
+
+  async createTenant(data: InsertTenant): Promise<Tenant> {
+    const [tenant] = await db.insert(tenants).values(data).returning();
+    return tenant;
+  }
+
   async getProjects(): Promise<Project[]> {
     return db.select().from(projects).orderBy(desc(projects.createdAt));
   }
@@ -49,6 +100,31 @@ export class DatabaseStorage implements IStorage {
   async createProject(data: InsertProject): Promise<Project> {
     const [project] = await db.insert(projects).values(data).returning();
     return project;
+  }
+
+  async getModules(): Promise<Module[]> {
+    return db.select().from(modules).orderBy(desc(modules.createdAt));
+  }
+
+  async getModule(id: string): Promise<Module | undefined> {
+    const [mod] = await db.select().from(modules).where(eq(modules.id, id));
+    return mod;
+  }
+
+  async getModulesByProject(projectId: string): Promise<Module[]> {
+    return db.select().from(modules).where(eq(modules.projectId, projectId)).orderBy(desc(modules.createdAt));
+  }
+
+  async getModuleByProjectAndPath(projectId: string, rootPath: string): Promise<Module | undefined> {
+    const [mod] = await db.select().from(modules).where(
+      and(eq(modules.projectId, projectId), eq(modules.rootPath, rootPath))
+    );
+    return mod;
+  }
+
+  async createModule(data: InsertModule): Promise<Module> {
+    const [mod] = await db.insert(modules).values(data).returning();
+    return mod;
   }
 
   async getChanges(): Promise<ChangeRecord[]> {
@@ -115,6 +191,50 @@ export class DatabaseStorage implements IStorage {
     if (logs !== undefined) updates.logs = logs;
     const [run] = await db.update(agentRuns).set(updates).where(eq(agentRuns.id, id)).returning();
     return run;
+  }
+
+  async getEnvironmentsByProject(projectId: string): Promise<Environment[]> {
+    return db.select().from(environments).where(eq(environments.projectId, projectId));
+  }
+
+  async getEnvironment(id: string): Promise<Environment | undefined> {
+    const [env] = await db.select().from(environments).where(eq(environments.id, id));
+    return env;
+  }
+
+  async getDefaultEnvironment(projectId: string): Promise<Environment | undefined> {
+    const [env] = await db.select().from(environments).where(
+      and(eq(environments.projectId, projectId), eq(environments.isDefault, true))
+    );
+    return env;
+  }
+
+  async createEnvironment(data: InsertEnvironment): Promise<Environment> {
+    const [env] = await db.insert(environments).values(data).returning();
+    return env;
+  }
+
+  async getTemplates(): Promise<Template[]> {
+    return db.select().from(templates).orderBy(desc(templates.createdAt));
+  }
+
+  async getTemplate(id: string): Promise<Template | undefined> {
+    const [template] = await db.select().from(templates).where(eq(templates.id, id));
+    return template;
+  }
+
+  async createTemplate(data: InsertTemplate): Promise<Template> {
+    const [template] = await db.insert(templates).values(data).returning();
+    return template;
+  }
+
+  async getTemplateModules(templateId: string): Promise<TemplateModule[]> {
+    return db.select().from(templateModules).where(eq(templateModules.templateId, templateId));
+  }
+
+  async createTemplateModule(data: InsertTemplateModule): Promise<TemplateModule> {
+    const [tm] = await db.insert(templateModules).values(data).returning();
+    return tm;
   }
 }
 
