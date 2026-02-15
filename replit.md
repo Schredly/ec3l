@@ -45,13 +45,15 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 ## Workflow Engine (server/services/workflowEngine.ts & workflowService.ts)
 - **ModuleExecutionContext enforcement**: Requires CMD_RUN capability via assertModuleCapability before execution.
 - **Sequential execution**: Steps ordered by orderIndex ASC; each step output merged into input for subsequent steps as `step_{orderIndex}`.
-- **Step handlers**: assignment (resolve assignee by type), approval (auto-approve or pause), notification (emit channel/recipient), decision (evaluate condition with equals/not_equals/truthy/falsy operators).
+- **Step handlers**: assignment (resolve assignee by type), approval (auto-approve or pause with awaiting_approval), notification (emit channel/recipient), decision (evaluate condition with equals/not_equals/truthy/falsy operators and explicit branch targets).
 - **Fail-fast**: Step failure marks execution as failed; no remaining steps execute.
-- **Approval pause**: Non-auto-approved approval steps leave execution in "running" status.
+- **Approval pause/resume**: Non-auto-approved approval steps set step execution to `awaiting_approval`, execution to `paused` with `pausedAtStepId` and `accumulatedInput` persisted. Resume via `resumeWorkflowExecution(executionId, stepExecutionId, outcome)` validates tenant, context, paused state, and step match. Approved outcome continues at next step; rejected outcome fails the execution.
+- **Explicit decision branching**: Decision steps require `onTrueStepIndex` and `onFalseStepIndex` in config — deterministic jump to specified orderIndex. No implicit fallthrough. Invalid branch configs rejected at activation time via `validateDecisionSteps()`.
+- **Index-based execution loop**: Steps execute via while loop with array index that supports decision jumps. Decision output contains `targetStepIndex` used to jump to the corresponding step.
 - **Change lifecycle integration**: Workflow definitions require linked Change to be Ready/Merged before activation (fail-closed).
 - **Tenant isolation**: All CRUD and execution verifies tenant ownership.
 - **SystemContext inspection**: systemInspectWorkflows() and systemInspectExecution() for platform-level read access.
-- **API Routes**: GET/POST /api/workflow-definitions, POST /api/workflow-definitions/:id/activate, POST /api/workflow-definitions/:id/retire, GET/POST /api/workflow-definitions/:id/steps, POST /api/workflow-definitions/:id/execute, GET /api/workflow-executions, GET /api/workflow-executions/:id, GET /api/workflow-executions/:id/steps
+- **API Routes**: GET/POST /api/workflow-definitions, POST /api/workflow-definitions/:id/activate, POST /api/workflow-definitions/:id/retire, GET/POST /api/workflow-definitions/:id/steps, POST /api/workflow-definitions/:id/execute, GET /api/workflow-executions, GET /api/workflow-executions/:id, GET /api/workflow-executions/:id/steps, POST /api/workflow-executions/:id/resume
 
 ## External Dependencies
 - **GitHub**: For project connectivity and code repository management.

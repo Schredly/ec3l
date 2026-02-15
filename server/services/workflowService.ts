@@ -2,7 +2,7 @@ import type { TenantContext } from "../tenant";
 import type { SystemContext } from "../systemContext";
 import type { ModuleExecutionContext } from "../moduleContext";
 import { storage } from "../storage";
-import { executeWorkflow as runWorkflow, WorkflowExecutionError } from "./workflowEngine";
+import { executeWorkflow as runWorkflow, resumeWorkflowExecution as engineResumeWorkflow, validateDecisionSteps, WorkflowExecutionError } from "./workflowEngine";
 import type {
   WorkflowDefinition,
   InsertWorkflowDefinition,
@@ -117,6 +117,14 @@ export async function activateWorkflowDefinition(
     throw new WorkflowServiceError("Cannot activate workflow with no steps", 400);
   }
 
+  const decisionViolations = validateDecisionSteps(steps);
+  if (decisionViolations.length > 0) {
+    throw new WorkflowServiceError(
+      `Cannot activate workflow — invalid decision step config: ${decisionViolations.join("; ")}`,
+      400,
+    );
+  }
+
   const updated = await storage.updateWorkflowDefinitionStatus(id, "active");
   return updated!;
 }
@@ -203,6 +211,32 @@ export async function executeWorkflow(
 
   try {
     return await runWorkflow(moduleCtx, workflowDefinitionId, input);
+  } catch (err) {
+    if (err instanceof WorkflowExecutionError) {
+      throw new WorkflowServiceError(err.message, err.statusCode);
+    }
+    throw err;
+  }
+}
+
+export async function resumeWorkflowExecution(
+  ctx: TenantContext,
+  moduleCtx: ModuleExecutionContext,
+  workflowExecutionId: string,
+  stepExecutionId: string,
+  outcome: { approved: boolean; resolvedBy?: string },
+): Promise<WorkflowExecution> {
+  const exec = await storage.getWorkflowExecution(workflowExecutionId);
+  if (!exec) {
+    throw new WorkflowServiceError("Workflow execution not found", 404);
+  }
+
+  if (exec.tenantId !== ctx.tenantId) {
+    throw new WorkflowServiceError("Workflow execution does not belong to this tenant", 403);
+  }
+
+  try {
+    return await engineResumeWorkflow(moduleCtx, workflowExecutionId, stepExecutionId, outcome);
   } catch (err) {
     if (err instanceof WorkflowExecutionError) {
       throw new WorkflowServiceError(err.message, err.statusCode);

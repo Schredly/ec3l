@@ -553,6 +553,50 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/workflow-executions/:id/resume", async (req, res) => {
+    try {
+      const { moduleId, stepExecutionId, outcome } = req.body;
+      if (!moduleId) {
+        return res.status(400).json({ message: "moduleId is required" });
+      }
+      if (!stepExecutionId) {
+        return res.status(400).json({ message: "stepExecutionId is required" });
+      }
+      if (!outcome || typeof outcome.approved !== "boolean") {
+        return res.status(400).json({ message: "outcome with approved (boolean) is required" });
+      }
+
+      const mod = await storage.getModule(moduleId);
+      if (!mod) {
+        return res.status(404).json({ message: "Module not found" });
+      }
+
+      const moduleCtx = buildModuleExecutionContext({
+        tenantContext: req.tenantContext,
+        moduleId: mod.id,
+        moduleRootPath: mod.rootPath,
+        capabilityProfile: mod.capabilityProfile as any,
+      });
+
+      const execution = await workflowService.resumeWorkflowExecution(
+        req.tenantContext,
+        moduleCtx,
+        req.params.id,
+        stepExecutionId,
+        outcome,
+      );
+      res.json(execution);
+    } catch (err) {
+      if (err instanceof CapabilityDeniedError) {
+        return res.status(403).json({ message: err.message, capability: err.capability });
+      }
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/workflow-executions/:id/steps", async (req, res) => {
     try {
       const steps = await workflowService.getWorkflowExecutionSteps(req.tenantContext, req.params.id);

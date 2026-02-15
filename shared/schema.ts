@@ -88,12 +88,14 @@ export const wfStepTypeEnum = pgEnum("wf_step_type", [
 
 export const wfExecutionStatusEnum = pgEnum("wf_execution_status", [
   "running",
+  "paused",
   "completed",
   "failed",
 ]);
 
 export const wfStepExecutionStatusEnum = pgEnum("wf_step_execution_status", [
   "pending",
+  "awaiting_approval",
   "completed",
   "failed",
 ]);
@@ -279,6 +281,8 @@ export const workflowExecutions = pgTable("workflow_executions", {
   workflowDefinitionId: varchar("workflow_definition_id").notNull().references(() => workflowDefinitions.id),
   status: wfExecutionStatusEnum("status").notNull().default("running"),
   input: jsonb("input"),
+  accumulatedInput: jsonb("accumulated_input"),
+  pausedAtStepId: varchar("paused_at_step_id").references(() => workflowSteps.id),
   error: text("error"),
   startedAt: timestamp("started_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
@@ -383,6 +387,8 @@ export const insertWorkflowExecutionSchema = createInsertSchema(workflowExecutio
   completedAt: true,
   status: true,
   error: true,
+  accumulatedInput: true,
+  pausedAtStepId: true,
 });
 
 export const insertWorkflowStepExecutionSchema = createInsertSchema(workflowStepExecutions).omit({

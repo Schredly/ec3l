@@ -135,6 +135,7 @@ export interface IStorage {
   getWorkflowExecutionsByDefinition(workflowDefinitionId: string): Promise<WorkflowExecution[]>;
   createWorkflowExecution(data: InsertWorkflowExecution): Promise<WorkflowExecution>;
   updateWorkflowExecutionStatus(id: string, status: WorkflowExecution["status"], error?: string): Promise<WorkflowExecution | undefined>;
+  pauseWorkflowExecution(id: string, pausedAtStepId: string, accumulatedInput: unknown): Promise<WorkflowExecution | undefined>;
   completeWorkflowExecution(id: string): Promise<WorkflowExecution | undefined>;
 
   getWorkflowStepExecution(id: string): Promise<WorkflowStepExecution | undefined>;
@@ -493,9 +494,17 @@ export class DatabaseStorage implements IStorage {
     return exec;
   }
 
+  async pauseWorkflowExecution(id: string, pausedAtStepId: string, accumulatedInput: unknown): Promise<WorkflowExecution | undefined> {
+    const [exec] = await db.update(workflowExecutions)
+      .set({ status: "paused", pausedAtStepId, accumulatedInput })
+      .where(eq(workflowExecutions.id, id))
+      .returning();
+    return exec;
+  }
+
   async completeWorkflowExecution(id: string): Promise<WorkflowExecution | undefined> {
     const [exec] = await db.update(workflowExecutions)
-      .set({ status: "completed", completedAt: new Date() })
+      .set({ status: "completed", completedAt: new Date(), pausedAtStepId: null, accumulatedInput: null })
       .where(eq(workflowExecutions.id, id))
       .returning();
     return exec;
