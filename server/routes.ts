@@ -3,11 +3,11 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema } from "@shared/schema";
 import { tenantResolution } from "./middleware/tenant";
-import type { SystemContext } from "./tenant";
-import type { ModuleExecutionContext } from "./moduleContext";
+import { buildModuleExecutionContext } from "./moduleContext";
 import { ModuleBoundaryViolationError } from "./moduleContext";
 import { CapabilityDeniedError } from "./capabilities";
-import { defaultCapabilities } from "./capabilities";
+import { createSystemContext } from "./systemContext";
+import type { CapabilityProfileName } from "./capabilityProfiles";
 import * as projectService from "./services/projectService";
 import * as changeService from "./services/changeService";
 import { ChangeServiceError } from "./services/changeService";
@@ -17,7 +17,7 @@ import * as moduleService from "./services/moduleService";
 import * as environmentService from "./services/environmentService";
 import * as templateService from "./services/templateService";
 
-const systemCtx: SystemContext = { source: "system", reason: "read-only template access" };
+const systemCtx = createSystemContext("read-only template access");
 
 export async function registerRoutes(
   httpServer: Server,
@@ -128,12 +128,12 @@ export async function registerRoutes(
       mod = await storage.getModule(change.moduleId);
     }
 
-    const moduleCtx: ModuleExecutionContext = {
+    const moduleCtx = buildModuleExecutionContext({
       tenantContext: req.tenantContext,
       moduleId: change.moduleId ?? "",
       moduleRootPath: mod?.rootPath ?? "",
-      capabilities: defaultCapabilities(),
-    };
+      capabilityProfile: (mod?.capabilityProfile as CapabilityProfileName) ?? "CODE_MODULE_DEFAULT",
+    });
 
     const updated = await workspaceService.startWorkspace(req.tenantContext, change, moduleCtx);
     res.status(201).json(updated);
@@ -197,12 +197,12 @@ export async function registerRoutes(
       mod = await storage.getModule(change.moduleId);
     }
 
-    const moduleCtx: ModuleExecutionContext = {
+    const moduleCtx = buildModuleExecutionContext({
       tenantContext: req.tenantContext,
       moduleId: change.moduleId ?? "",
       moduleRootPath: mod?.rootPath ?? "",
-      capabilities: defaultCapabilities(),
-    };
+      capabilityProfile: (mod?.capabilityProfile as CapabilityProfileName) ?? "CODE_MODULE_DEFAULT",
+    });
 
     try {
       const run = await agentRunService.createAgentRun(req.tenantContext, parsed.data, change, moduleCtx);

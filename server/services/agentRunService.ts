@@ -40,7 +40,9 @@ export async function createAgentRun(
     `[agent] Received intent: "${run.intent}"`,
     `[agent] Change: ${change.id}, Module: ${moduleId || "none"}`,
     `[agent] Module scope: ${moduleRootPath || "unrestricted"}`,
+    `[agent] Profile: ${moduleCtx.capabilityProfile}`,
     `[agent] Capabilities: [${moduleCtx.capabilities.join(", ")}]`,
+    `[agent] Context: ModuleExecutionContext`,
   ];
 
   for (const skill of requestedSkills) {
@@ -61,6 +63,8 @@ export async function createAgentRun(
           moduleId: moduleId || "",
           tenantId: moduleCtx.tenantContext.tenantId,
           changeId: change.id,
+          contextType: "ModuleExecutionContext" as const,
+          capabilityProfile: moduleCtx.capabilityProfile,
           timestamp: new Date().toISOString(),
         };
         logs.push(`[agent] Skill "${skill.name}" DENIED — CAPABILITY_DENIED: ${err.message}`);
@@ -80,6 +84,8 @@ export async function createAgentRun(
           reason: err.reason,
           skill: skill.name,
           changeId: change.id,
+          contextType: "ModuleExecutionContext" as const,
+          capabilityProfile: moduleCtx.capabilityProfile,
           timestamp: new Date().toISOString(),
         };
         logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" DENIED — MODULE_BOUNDARY_VIOLATION: ${err.reason}`);

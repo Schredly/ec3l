@@ -34,6 +34,12 @@ export const moduleTypeEnum = pgEnum("module_type", [
   "integration",
 ]);
 
+export const capabilityProfileEnum = pgEnum("capability_profile", [
+  "CODE_MODULE_DEFAULT",
+  "WORKFLOW_MODULE_DEFAULT",
+  "READ_ONLY",
+]);
+
 export const environmentNameEnum = pgEnum("environment_name", [
   "dev",
   "test",
@@ -75,6 +81,7 @@ export const modules = pgTable("modules", {
   type: moduleTypeEnum("type").notNull().default("code"),
   rootPath: text("root_path").notNull().default("src"),
   version: text("version").notNull().default("0.1.0"),
+  capabilityProfile: capabilityProfileEnum("capability_profile").notNull().default("CODE_MODULE_DEFAULT"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

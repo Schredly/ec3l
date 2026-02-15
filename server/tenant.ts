@@ -5,11 +5,6 @@ export type TenantContext = {
   source: "header" | "system";
 };
 
-export type SystemContext = {
-  source: "system";
-  reason: string;
-};
-
 export class TenantResolutionError extends Error {
   constructor(message = "Missing tenant context") {
     super(message);

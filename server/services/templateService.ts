@@ -1,4 +1,4 @@
-import type { SystemContext } from "../tenant";
+import type { SystemContext } from "../systemContext";
 import { storage } from "../storage";
 import type { Template, TemplateModule } from "@shared/schema";
 

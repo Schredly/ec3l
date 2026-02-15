@@ -1,4 +1,5 @@
 import type { ModuleExecutionContext } from "./moduleContext";
+import type { SystemContext } from "./systemContext";
 
 export type Capability = string;
 
@@ -10,6 +11,8 @@ export const Capabilities = {
   NET_HTTP: "net:http",
 } as const;
 
+export type ExecutionContext = ModuleExecutionContext | SystemContext;
+
 export class CapabilityDeniedError extends Error {
   public readonly capability: string;
 
@@ -20,17 +23,8 @@ export class CapabilityDeniedError extends Error {
   }
 }
 
-export function assertCapability(ctx: ModuleExecutionContext, cap: Capability): void {
+export function assertCapability(ctx: ExecutionContext, cap: Capability): void {
   if (!ctx.capabilities.includes(cap)) {
     throw new CapabilityDeniedError(cap);
   }
-}
-
-export function defaultCapabilities(): Capability[] {
-  return [
-    Capabilities.FS_READ,
-    Capabilities.FS_WRITE,
-    Capabilities.CMD_RUN,
-    Capabilities.GIT_DIFF,
-  ];
 }
