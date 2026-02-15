@@ -18,6 +18,8 @@ import {
   workflowSteps,
   workflowExecutions,
   workflowStepExecutions,
+  workflowTriggers,
+  workflowExecutionIntents,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -52,6 +54,10 @@ import {
   type InsertWorkflowExecution,
   type WorkflowStepExecution,
   type InsertWorkflowStepExecution,
+  type WorkflowTrigger,
+  type InsertWorkflowTrigger,
+  type WorkflowExecutionIntent,
+  type InsertWorkflowExecutionIntent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -142,6 +148,20 @@ export interface IStorage {
   getWorkflowStepExecutionsByExecution(workflowExecutionId: string): Promise<WorkflowStepExecution[]>;
   createWorkflowStepExecution(data: InsertWorkflowStepExecution): Promise<WorkflowStepExecution>;
   updateWorkflowStepExecution(id: string, status: WorkflowStepExecution["status"], output?: unknown): Promise<WorkflowStepExecution | undefined>;
+
+  getWorkflowTrigger(id: string): Promise<WorkflowTrigger | undefined>;
+  getWorkflowTriggersByTenant(tenantId: string): Promise<WorkflowTrigger[]>;
+  getWorkflowTriggersByDefinition(workflowDefinitionId: string): Promise<WorkflowTrigger[]>;
+  getActiveTriggersByTenantAndType(tenantId: string, triggerType: string): Promise<WorkflowTrigger[]>;
+  createWorkflowTrigger(data: InsertWorkflowTrigger): Promise<WorkflowTrigger>;
+  updateWorkflowTriggerStatus(id: string, status: WorkflowTrigger["status"]): Promise<WorkflowTrigger | undefined>;
+
+  getWorkflowExecutionIntent(id: string): Promise<WorkflowExecutionIntent | undefined>;
+  getWorkflowExecutionIntentsByTenant(tenantId: string): Promise<WorkflowExecutionIntent[]>;
+  getPendingIntents(): Promise<WorkflowExecutionIntent[]>;
+  createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent>;
+  updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined>;
+  updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -530,6 +550,81 @@ export class DatabaseStorage implements IStorage {
     if (output !== undefined) updates.output = output;
     const [stepExec] = await db.update(workflowStepExecutions).set(updates).where(eq(workflowStepExecutions.id, id)).returning();
     return stepExec;
+  }
+
+  async getWorkflowTrigger(id: string): Promise<WorkflowTrigger | undefined> {
+    const [trigger] = await db.select().from(workflowTriggers).where(eq(workflowTriggers.id, id));
+    return trigger;
+  }
+
+  async getWorkflowTriggersByTenant(tenantId: string): Promise<WorkflowTrigger[]> {
+    return db.select().from(workflowTriggers)
+      .where(eq(workflowTriggers.tenantId, tenantId))
+      .orderBy(desc(workflowTriggers.createdAt));
+  }
+
+  async getWorkflowTriggersByDefinition(workflowDefinitionId: string): Promise<WorkflowTrigger[]> {
+    return db.select().from(workflowTriggers)
+      .where(eq(workflowTriggers.workflowDefinitionId, workflowDefinitionId))
+      .orderBy(desc(workflowTriggers.createdAt));
+  }
+
+  async getActiveTriggersByTenantAndType(tenantId: string, triggerType: string): Promise<WorkflowTrigger[]> {
+    return db.select().from(workflowTriggers)
+      .where(and(
+        eq(workflowTriggers.tenantId, tenantId),
+        eq(workflowTriggers.triggerType, triggerType as any),
+        eq(workflowTriggers.status, "active"),
+      ))
+      .orderBy(desc(workflowTriggers.createdAt));
+  }
+
+  async createWorkflowTrigger(data: InsertWorkflowTrigger): Promise<WorkflowTrigger> {
+    const [trigger] = await db.insert(workflowTriggers).values(data).returning();
+    return trigger;
+  }
+
+  async updateWorkflowTriggerStatus(id: string, status: WorkflowTrigger["status"]): Promise<WorkflowTrigger | undefined> {
+    const [trigger] = await db.update(workflowTriggers).set({ status }).where(eq(workflowTriggers.id, id)).returning();
+    return trigger;
+  }
+
+  async getWorkflowExecutionIntent(id: string): Promise<WorkflowExecutionIntent | undefined> {
+    const [intent] = await db.select().from(workflowExecutionIntents).where(eq(workflowExecutionIntents.id, id));
+    return intent;
+  }
+
+  async getWorkflowExecutionIntentsByTenant(tenantId: string): Promise<WorkflowExecutionIntent[]> {
+    return db.select().from(workflowExecutionIntents)
+      .where(eq(workflowExecutionIntents.tenantId, tenantId))
+      .orderBy(desc(workflowExecutionIntents.createdAt));
+  }
+
+  async getPendingIntents(): Promise<WorkflowExecutionIntent[]> {
+    return db.select().from(workflowExecutionIntents)
+      .where(eq(workflowExecutionIntents.status, "pending"))
+      .orderBy(asc(workflowExecutionIntents.createdAt));
+  }
+
+  async createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent> {
+    const [intent] = await db.insert(workflowExecutionIntents).values(data).returning();
+    return intent;
+  }
+
+  async updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined> {
+    const [intent] = await db.update(workflowExecutionIntents)
+      .set({ status: "dispatched", executionId, dispatchedAt: new Date() })
+      .where(eq(workflowExecutionIntents.id, id))
+      .returning();
+    return intent;
+  }
+
+  async updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined> {
+    const [intent] = await db.update(workflowExecutionIntents)
+      .set({ status: "failed", error, dispatchedAt: new Date() })
+      .where(eq(workflowExecutionIntents.id, id))
+      .returning();
+    return intent;
   }
 }
 

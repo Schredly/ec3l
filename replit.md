@@ -55,6 +55,18 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **SystemContext inspection**: systemInspectWorkflows() and systemInspectExecution() for platform-level read access.
 - **API Routes**: GET/POST /api/workflow-definitions, POST /api/workflow-definitions/:id/activate, POST /api/workflow-definitions/:id/retire, GET/POST /api/workflow-definitions/:id/steps, POST /api/workflow-definitions/:id/execute, GET /api/workflow-executions, GET /api/workflow-executions/:id, GET /api/workflow-executions/:id/steps, POST /api/workflow-executions/:id/resume
 
+## Workflow Triggers & Execution Intents (server/services/triggerService.ts, schedulerService.ts, intentDispatcher.ts)
+- **WorkflowTrigger model**: id, tenantId, workflowDefinitionId, triggerType (record_event | schedule | manual), triggerConfig (json), status (active | disabled), createdAt.
+- **WorkflowExecutionIntent model**: id, tenantId, workflowDefinitionId, triggerType, triggerPayload, status (pending | dispatched | failed), executionId, error, createdAt, dispatchedAt.
+- **Trigger types**:
+  - `record_event`: Matches on recordType + optional fieldConditions. Supported events: record.created, record.updated.
+  - `schedule`: Config includes cron or interval (e.g., "5m", "1h"). Scheduler runs in control plane, polls every 60s, emits intents at fire time. Idempotent via lastCheckByTrigger map.
+  - `manual`: Fired via API. Permission-gated, tenant-scoped, auditable.
+- **Safety invariants**: Triggers cannot execute workflows directly — they emit execution intents. Intents are consumed by the intent dispatcher which executes workflows and links executionId. All trigger operations enforce tenant isolation.
+- **Intent dispatcher**: Consumes pending intents, resolves module context, executes workflow via engine, updates intent status to dispatched (with executionId) or failed (with error).
+- **Validation**: record_event requires triggerConfig.recordType, schedule requires cron or interval, manual triggers cannot be fired when disabled, non-manual triggers rejected from fire endpoint, unsupported events rejected.
+- **API Routes**: GET/POST /api/workflow-triggers, GET /api/workflow-triggers/:id, POST /api/workflow-triggers/:id/disable, POST /api/workflow-triggers/:id/enable, POST /api/workflow-triggers/:id/fire, GET /api/workflow-definitions/:id/triggers, POST /api/record-events, GET /api/workflow-intents, GET /api/workflow-intents/:id, POST /api/workflow-intents/dispatch
+
 ## External Dependencies
 - **GitHub**: For project connectivity and code repository management.
 - **PostgreSQL**: The primary database for persistent storage.

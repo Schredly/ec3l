@@ -22,6 +22,11 @@ import * as overrideService from "./services/overrideService";
 import { OverrideServiceError, OverridePatchValidationError } from "./services/overrideService";
 import * as workflowService from "./services/workflowService";
 import { WorkflowServiceError } from "./services/workflowService";
+import * as triggerService from "./services/triggerService";
+import { TriggerServiceError } from "./services/triggerService";
+import { insertWorkflowTriggerSchema } from "@shared/schema";
+import { dispatchPendingIntents } from "./services/intentDispatcher";
+import { startScheduler } from "./services/schedulerService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -608,6 +613,145 @@ export async function registerRoutes(
       throw err;
     }
   });
+
+  app.get("/api/workflow-triggers", async (req, res) => {
+    try {
+      const triggers = await triggerService.getTriggersByTenant(req.tenantContext);
+      res.json(triggers);
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-triggers/:id", async (req, res) => {
+    try {
+      const trigger = await triggerService.getTrigger(req.tenantContext, req.params.id);
+      if (!trigger) return res.status(404).json({ message: "Trigger not found" });
+      res.json(trigger);
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-triggers", async (req, res) => {
+    try {
+      const parsed = insertWorkflowTriggerSchema.omit({ tenantId: true }).parse(req.body);
+      const trigger = await triggerService.createTrigger(req.tenantContext, parsed);
+      res.status(201).json(trigger);
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-triggers/:id/disable", async (req, res) => {
+    try {
+      const trigger = await triggerService.disableTrigger(req.tenantContext, req.params.id);
+      res.json(trigger);
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-triggers/:id/enable", async (req, res) => {
+    try {
+      const trigger = await triggerService.enableTrigger(req.tenantContext, req.params.id);
+      res.json(trigger);
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-triggers/:id/fire", async (req, res) => {
+    try {
+      const intent = await triggerService.fireManualTrigger(
+        req.tenantContext,
+        req.params.id,
+        req.body.payload || {},
+      );
+      res.status(201).json(intent);
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-definitions/:id/triggers", async (req, res) => {
+    try {
+      const triggers = await triggerService.getTriggersByDefinition(
+        req.tenantContext,
+        req.params.id,
+      );
+      res.json(triggers);
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/record-events", async (req, res) => {
+    try {
+      const { event, recordType, recordData } = req.body;
+      if (!event || !recordType) {
+        return res.status(400).json({ message: "event and recordType are required" });
+      }
+      const intents = await triggerService.emitRecordEvent(
+        req.tenantContext,
+        event,
+        recordType,
+        recordData || {},
+      );
+      res.status(201).json({ matched: intents.length, intents });
+    } catch (err) {
+      if (err instanceof TriggerServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-intents", async (req, res) => {
+    const intents = await storage.getWorkflowExecutionIntentsByTenant(req.tenantContext.tenantId);
+    res.json(intents);
+  });
+
+  app.get("/api/workflow-intents/:id", async (req, res) => {
+    const intent = await storage.getWorkflowExecutionIntent(req.params.id);
+    if (!intent) return res.status(404).json({ message: "Intent not found" });
+    if (intent.tenantId !== req.tenantContext.tenantId) {
+      return res.status(403).json({ message: "Intent does not belong to this tenant" });
+    }
+    res.json(intent);
+  });
+
+  app.post("/api/workflow-intents/dispatch", async (req, res) => {
+    try {
+      const dispatched = await dispatchPendingIntents();
+      res.json({ dispatched: dispatched.length, intents: dispatched });
+    } catch (err) {
+      throw err;
+    }
+  });
+
+  startScheduler();
 
   return httpServer;
 }

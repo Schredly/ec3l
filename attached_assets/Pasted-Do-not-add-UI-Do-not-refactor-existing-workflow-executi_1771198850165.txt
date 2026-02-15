@@ -1,0 +1,85 @@
+Do not add UI.
+Do not refactor existing workflow execution logic.
+Do not introduce external integrations.
+
+Objective:
+Add tenant-scoped workflow triggers that safely initiate workflow executions from events and schedules.
+
+Instructions:
+
+1) Add Workflow Trigger Models
+   Introduce trigger metadata:
+
+   - WorkflowTrigger
+     - id
+     - tenantId
+     - workflowDefinitionId
+     - triggerType (record_event | schedule | manual)
+     - triggerConfig (json)
+     - status (active | disabled)
+     - createdAt
+
+2) Record Event Triggers (v1)
+   Implement record-based triggers:
+   - Supported events:
+       - record.created
+       - record.updated
+   - triggerConfig must define:
+       - recordType
+       - optional fieldConditions
+   - On matching event:
+       - enqueue workflow execution intent
+       - do NOT execute inline
+
+3) Scheduled Triggers (v1)
+   Implement schedule-based triggers:
+   - triggerConfig includes:
+       - cron or interval
+   - Scheduler:
+       - runs in control plane
+       - emits execution intent at fire time
+   - Scheduler must be:
+       - tenant-scoped
+       - idempotent
+       - auditable
+
+4) Manual Triggers
+   - Allow workflows to be started manually via API:
+       - tenant-scoped
+       - permission-gated
+       - auditable
+   - Manual trigger emits execution intent, not execution
+
+5) Execution Intent Queue
+   Introduce a minimal execution intent mechanism:
+   - WorkflowExecutionIntent
+     - id
+     - tenantId
+     - workflowDefinitionId
+     - triggerType
+     - triggerPayload
+     - createdAt
+     - status (pending | dispatched | failed)
+
+   - Runner consumes intents and:
+       - executes workflow
+       - updates intent status
+       - links executionId
+
+6) Safety & Invariants
+   - Triggers:
+       - cannot execute workflows directly
+       - cannot bypass Change or override rules
+       - must respect tenant isolation
+   - SystemContext may register triggers
+   - Only tenant execution contexts may dispatch execution
+   - All trigger firings must be auditable
+
+Constraints:
+- No async fan-out
+- No cross-tenant triggers
+- No external event sources yet
+- No UI
+
+Goal:
+Workflows can be safely initiated by record events, schedules, or manual actions via auditable, tenant-scoped trigger metadata.

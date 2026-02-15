@@ -100,6 +100,17 @@ export const wfStepExecutionStatusEnum = pgEnum("wf_step_execution_status", [
   "failed",
 ]);
 
+export const wfTriggerStatusEnum = pgEnum("wf_trigger_status", [
+  "active",
+  "disabled",
+]);
+
+export const wfIntentStatusEnum = pgEnum("wf_intent_status", [
+  "pending",
+  "dispatched",
+  "failed",
+]);
+
 export const overrideTypeEnum = pgEnum("override_type", [
   "workflow",
   "form",
@@ -297,6 +308,30 @@ export const workflowStepExecutions = pgTable("workflow_step_executions", {
   executedAt: timestamp("executed_at"),
 });
 
+// Phase 10: Workflow Triggers & Execution Intents
+export const workflowTriggers = pgTable("workflow_triggers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  workflowDefinitionId: varchar("workflow_definition_id").notNull().references(() => workflowDefinitions.id),
+  triggerType: wfTriggerTypeEnum("trigger_type").notNull(),
+  triggerConfig: jsonb("trigger_config"),
+  status: wfTriggerStatusEnum("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const workflowExecutionIntents = pgTable("workflow_execution_intents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  workflowDefinitionId: varchar("workflow_definition_id").notNull().references(() => workflowDefinitions.id),
+  triggerType: wfTriggerTypeEnum("trigger_type").notNull(),
+  triggerPayload: jsonb("trigger_payload"),
+  status: wfIntentStatusEnum("status").notNull().default("pending"),
+  executionId: varchar("execution_id").references(() => workflowExecutions.id),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  dispatchedAt: timestamp("dispatched_at"),
+});
+
 // Insert schemas
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -398,6 +433,21 @@ export const insertWorkflowStepExecutionSchema = createInsertSchema(workflowStep
   output: true,
 });
 
+export const insertWorkflowTriggerSchema = createInsertSchema(workflowTriggers).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+});
+
+export const insertWorkflowExecutionIntentSchema = createInsertSchema(workflowExecutionIntents).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+  executionId: true,
+  error: true,
+  dispatchedAt: true,
+});
+
 // Types
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
@@ -449,3 +499,9 @@ export type WorkflowExecution = typeof workflowExecutions.$inferSelect;
 
 export type InsertWorkflowStepExecution = z.infer<typeof insertWorkflowStepExecutionSchema>;
 export type WorkflowStepExecution = typeof workflowStepExecutions.$inferSelect;
+
+export type InsertWorkflowTrigger = z.infer<typeof insertWorkflowTriggerSchema>;
+export type WorkflowTrigger = typeof workflowTriggers.$inferSelect;
+
+export type InsertWorkflowExecutionIntent = z.infer<typeof insertWorkflowExecutionIntentSchema>;
+export type WorkflowExecutionIntent = typeof workflowExecutionIntents.$inferSelect;
