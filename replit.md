@@ -22,14 +22,20 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **TemplateModules**: Join table linking templates to modules
 
 ## Multi-Tenancy Architecture
-- **Tenant Resolution** (server/tenant.ts): Defines TenantContext type, TenantResolutionError, and resolveTenantContext() function that reads x-tenant-id header.
+- **Tenant Resolution** (server/tenant.ts): Defines TenantContext type, SystemContext type, TenantResolutionError, and resolveTenantContext() function that reads x-tenant-id header.
 - **Tenant Middleware** (server/middleware/tenant.ts): Enforces tenant context on all /api routes (returns 401 if missing). Attaches req.tenantContext with tenantId and source.
-- **Tenant Storage** (server/tenantStorage.ts): getTenantStorage(tenantId) returns tenant-scoped methods for getProjects(), getProject(), createProject(), getChangesByProject(). Used in tenant-scoped routes.
+- **Tenant Storage** (server/tenantStorage.ts): getTenantStorage(ctx: TenantContext) returns tenant-scoped methods for getProjects(), getProject(), createProject(), getChangesByProject(). Accepts TenantContext (not raw tenantId).
 - **Tenant Bootstrap** (client/src/hooks/use-tenant.ts): Frontend auto-fetches /api/tenants on first load and stores tenantId in localStorage. All API calls include x-tenant-id header via queryClient.
 - **Default Tenant**: Seed ensures a "default" tenant (slug: "default") always exists.
-- **Tenant-Scoped Routes**: GET/POST /api/projects, GET /api/projects/:id, GET /api/projects/:id/changes, POST /api/changes (project ownership check). Other routes have console.warn for unscoped access.
-- **Service Layer** (server/services/projectService.ts): getProjects(), getProject(), createProject() — each requires TenantContext as first argument, enforced at compile time. Route handlers delegate to services with no direct DB access. createProject includes module/environment bootstrapping.
-- **Legacy Helper** (server/helpers/tenant-scoped.ts): Old TenantScopedQueries class, superseded by tenantStorage.ts.
+- **Tenant-Scoped Routes**: All /api routes pass TenantContext through service functions. No route handler accesses tenant-owned data directly via storage.
+- **Service Layer** (server/services/): Every service function requires TenantContext as first argument, enforced at compile time. Route handlers delegate to services with no direct DB access.
+  - projectService.ts: getProjects(), getProject(), createProject()
+  - changeService.ts: getChanges(), getChange(), getChangesByProject(), createChange(), updateChangeStatus()
+  - workspaceService.ts: getWorkspaceByChange(), startWorkspace(), stopWorkspace()
+  - agentRunService.ts: getAgentRuns(), getAgentRunsByChange(), createAgentRun()
+  - moduleService.ts: getModules(), getModulesByProject()
+  - environmentService.ts: getEnvironmentsByProject(), getEnvironment()
+  - templateService.ts: systemGetTemplates(), systemGetTemplate(), systemGetTemplateModules() — require SystemContext (not tenant-owned data)
 
 ## Module Boundary Enforcement
 - **enforceModuleBoundary()** (server/runner.ts): Validates that requested paths stay within module rootPath. Denies absolute paths, ".." traversal, and out-of-scope resolution.

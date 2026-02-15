@@ -7,8 +7,10 @@ import {
   type InsertProject,
   type ChangeRecord,
 } from "@shared/schema";
+import type { TenantContext } from "./tenant";
 
-export function getTenantStorage(tenantId: string) {
+export function getTenantStorage(ctx: TenantContext) {
+  const tenantId = ctx.tenantId;
   return {
     async getProjects(): Promise<Project[]> {
       return db

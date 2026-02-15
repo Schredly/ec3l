@@ -4,12 +4,12 @@ import { storage } from "../storage";
 import type { Project, InsertProject } from "@shared/schema";
 
 export async function getProjects(ctx: TenantContext): Promise<Project[]> {
-  const ts = getTenantStorage(ctx.tenantId);
+  const ts = getTenantStorage(ctx);
   return ts.getProjects();
 }
 
 export async function getProject(ctx: TenantContext, id: string): Promise<Project | undefined> {
-  const ts = getTenantStorage(ctx.tenantId);
+  const ts = getTenantStorage(ctx);
   return ts.getProject(id);
 }
 
@@ -17,7 +17,7 @@ export async function createProject(
   ctx: TenantContext,
   input: Omit<InsertProject, "tenantId">
 ): Promise<Project> {
-  const ts = getTenantStorage(ctx.tenantId);
+  const ts = getTenantStorage(ctx);
   const project = await ts.createProject(input as InsertProject);
 
   await storage.createModule({ projectId: project.id, name: "default", type: "code", rootPath: "src" });
