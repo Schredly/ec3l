@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, pgEnum, boolean, integer, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, pgEnum, boolean, integer, jsonb, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -59,6 +59,12 @@ export const installedAppStatusEnum = pgEnum("installed_app_status", [
   "installed",
   "upgrading",
   "failed",
+]);
+
+export const installEventTypeEnum = pgEnum("install_event_type", [
+  "install_started",
+  "install_completed",
+  "install_failed",
 ]);
 
 // Phase 1: Tenant
@@ -161,9 +167,11 @@ export const installedApps = pgTable("installed_apps", {
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   templateId: varchar("template_id").notNull().references(() => templates.id),
   templateVersion: text("template_version").notNull(),
-  status: installedAppStatusEnum("status").notNull().default("installed"),
+  status: installedAppStatusEnum("status").notNull().default("upgrading"),
   installedAt: timestamp("installed_at").defaultNow().notNull(),
-});
+}, (table) => [
+  unique("uq_installed_apps_tenant_template").on(table.tenantId, table.templateId),
+]);
 
 export const installedModules = pgTable("installed_modules", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -172,6 +180,17 @@ export const installedModules = pgTable("installed_modules", {
   templateModuleId: varchar("template_module_id").notNull().references(() => templateModules.id),
   capabilityProfile: capabilityProfileEnum("capability_profile").notNull().default("CODE_MODULE_DEFAULT"),
   isOverride: boolean("is_override").notNull().default(false),
+});
+
+// Phase 7: Install Audit Events
+export const installedAppEvents = pgTable("installed_app_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  installedAppId: varchar("installed_app_id").notNull().references(() => installedApps.id),
+  templateId: varchar("template_id").notNull(),
+  tenantId: varchar("tenant_id").notNull(),
+  eventType: installEventTypeEnum("event_type").notNull(),
+  errorDetails: text("error_details"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // Insert schemas
@@ -235,6 +254,11 @@ export const insertInstalledModuleSchema = createInsertSchema(installedModules).
   id: true,
 });
 
+export const insertInstalledAppEventSchema = createInsertSchema(installedAppEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
@@ -268,3 +292,6 @@ export type InstalledApp = typeof installedApps.$inferSelect;
 
 export type InsertInstalledModule = z.infer<typeof insertInstalledModuleSchema>;
 export type InstalledModule = typeof installedModules.$inferSelect;
+
+export type InsertInstalledAppEvent = z.infer<typeof insertInstalledAppEventSchema>;
+export type InstalledAppEvent = typeof installedAppEvents.$inferSelect;

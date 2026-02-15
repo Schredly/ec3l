@@ -6,8 +6,8 @@ import { tenantResolution } from "./middleware/tenant";
 import { buildModuleExecutionContext } from "./moduleContext";
 import { ModuleBoundaryViolationError } from "./moduleContext";
 import { CapabilityDeniedError } from "./capabilities";
-import { createSystemContext } from "./systemContext";
 import type { CapabilityProfileName } from "./capabilityProfiles";
+import { PlatformContexts } from "./platformContext";
 import * as projectService from "./services/projectService";
 import * as changeService from "./services/changeService";
 import { ChangeServiceError } from "./services/changeService";
@@ -18,8 +18,6 @@ import * as environmentService from "./services/environmentService";
 import * as templateService from "./services/templateService";
 import * as installService from "./services/installService";
 import { InstallServiceError } from "./services/installService";
-
-const systemCtx = createSystemContext("read-only template access");
 
 export async function registerRoutes(
   httpServer: Server,
@@ -253,27 +251,28 @@ export async function registerRoutes(
 
   // Templates (read-only, system context)
   app.get("/api/templates", async (_req, res) => {
-    const temps = await templateService.systemGetTemplates(systemCtx);
+    const temps = await templateService.systemGetTemplates(PlatformContexts.templateRead());
     res.json(temps);
   });
 
   app.get("/api/templates/:id", async (req, res) => {
-    const template = await templateService.systemGetTemplate(systemCtx, req.params.id);
+    const template = await templateService.systemGetTemplate(PlatformContexts.templateRead(), req.params.id);
     if (!template) return res.status(404).json({ message: "Template not found" });
     res.json(template);
   });
 
   app.get("/api/templates/:id/modules", async (req, res) => {
-    const tms = await templateService.systemGetTemplateModules(systemCtx, req.params.id);
+    const tms = await templateService.systemGetTemplateModules(PlatformContexts.templateRead(), req.params.id);
     res.json(tms);
   });
 
   app.post("/api/templates/:id/install", async (req, res) => {
-    const installCtx = createSystemContext("template installation");
-    const tenantId = req.tenantContext.tenantId;
-
     try {
-      const installed = await installService.installTemplateIntoTenant(installCtx, tenantId, req.params.id);
+      const installed = await installService.installTemplateIntoTenant(
+        PlatformContexts.templateInstall(),
+        req.tenantContext.tenantId,
+        req.params.id,
+      );
       res.status(201).json(installed);
     } catch (err) {
       if (err instanceof InstallServiceError) {
@@ -284,8 +283,10 @@ export async function registerRoutes(
   });
 
   app.get("/api/installed-apps", async (req, res) => {
-    const installCtx = createSystemContext("list installed apps");
-    const apps = await installService.getInstalledApps(installCtx, req.tenantContext.tenantId);
+    const apps = await installService.getInstalledApps(
+      PlatformContexts.installedAppsRead(),
+      req.tenantContext.tenantId,
+    );
     res.json(apps);
   });
 

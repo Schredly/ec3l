@@ -12,6 +12,7 @@ import {
   templateModules,
   installedApps,
   installedModules,
+  installedAppEvents,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -34,6 +35,8 @@ import {
   type InsertInstalledApp,
   type InstalledModule,
   type InsertInstalledModule,
+  type InstalledAppEvent,
+  type InsertInstalledAppEvent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -86,6 +89,10 @@ export interface IStorage {
 
   getInstalledModules(installedAppId: string): Promise<InstalledModule[]>;
   createInstalledModule(data: InsertInstalledModule): Promise<InstalledModule>;
+  deleteInstalledModulesByApp(installedAppId: string): Promise<void>;
+
+  getInstalledAppEvents(installedAppId: string): Promise<InstalledAppEvent[]>;
+  createInstalledAppEvent(data: InsertInstalledAppEvent): Promise<InstalledAppEvent>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -289,6 +296,21 @@ export class DatabaseStorage implements IStorage {
   async createInstalledModule(data: InsertInstalledModule): Promise<InstalledModule> {
     const [mod] = await db.insert(installedModules).values(data).returning();
     return mod;
+  }
+
+  async deleteInstalledModulesByApp(installedAppId: string): Promise<void> {
+    await db.delete(installedModules).where(eq(installedModules.installedAppId, installedAppId));
+  }
+
+  async getInstalledAppEvents(installedAppId: string): Promise<InstalledAppEvent[]> {
+    return db.select().from(installedAppEvents)
+      .where(eq(installedAppEvents.installedAppId, installedAppId))
+      .orderBy(desc(installedAppEvents.createdAt));
+  }
+
+  async createInstalledAppEvent(data: InsertInstalledAppEvent): Promise<InstalledAppEvent> {
+    const [event] = await db.insert(installedAppEvents).values(data).returning();
+    return event;
   }
 }
 

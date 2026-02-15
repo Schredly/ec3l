@@ -1,0 +1,65 @@
+Do not add UI.
+Do not refactor unrelated code.
+Do not change execution, security, or capability behavior.
+
+Objective:
+Harden Template installation so it is idempotent, stateful, and auditable.
+
+Instructions:
+
+1) Enforce Idempotency at the Data Layer
+   - Add a UNIQUE constraint on:
+       installed_apps (tenant_id, template_id)
+   - Ensure retries for the same tenant/template do NOT create duplicate apps or modules.
+
+2) Introduce Explicit Installation States
+   Update InstalledApp.status handling:
+
+   - On install start:
+       status = "upgrading"
+   - On successful completion:
+       status = "installed"
+   - On failure:
+       status = "failed"
+
+   Do NOT mark installed until all modules are created successfully.
+
+3) Make installTemplateIntoTenant Idempotent
+   Update install logic so that:
+   - If an InstalledApp already exists:
+       - If status == "installed": return it (no-op)
+       - If status == "failed" or "upgrading":
+           - resume or replace installation using the same InstalledApp record
+   - Do NOT create a second InstalledApp for the same tenant/template.
+
+4) Add Minimal Install Audit Artifacts
+   Introduce a lightweight audit mechanism:
+
+   - Record install events:
+       - install_started
+       - install_completed
+       - install_failed
+   - Each event must include:
+       - installedAppId
+       - templateId
+       - tenantId
+       - timestamp
+       - error details (if failed)
+
+   This may be:
+   - a new table (e.g., installed_app_events), OR
+   - reuse an existing audit/event table if one already exists.
+
+5) Tighten SystemContext Construction
+   - Move SystemContext creation into a platform service/helper
+   - Routes may call the helper, but must not construct SystemContext inline
+   - This preserves the invariant that privilege is centralized
+
+Constraints:
+- No tenant overrides yet.
+- No upgrade logic yet.
+- No version diffing yet.
+- This step is correctness + safety only.
+
+Goal:
+Template installation is safe to retry, correctly staged, auditable, and impossible to duplicate accidentally.

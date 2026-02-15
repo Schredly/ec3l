@@ -20,8 +20,9 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **AgentRuns**: Agent execution records with intent, skills used, and logs
 - **Templates**: Domain templates (HR, ITSM, Facilities) with isGlobal flag — read-only blueprints for creating tenant projects
 - **TemplateModules**: Blueprint definitions per template (moduleName, moduleType, defaultCapabilityProfile, orderIndex, metadata) — no FK to actual modules; installation creates real modules from these blueprints
-- **InstalledApps**: Tracks template installations per tenant (tenantId, templateId, templateVersion, status: installed/upgrading/failed)
+- **InstalledApps**: Tracks template installations per tenant (tenantId, templateId, templateVersion, status: installed/upgrading/failed). UNIQUE constraint on (tenantId, templateId) prevents duplicates. Default status is "upgrading" — only set to "installed" after all modules created successfully.
 - **InstalledModules**: Links installed apps to actual created modules (installedAppId, moduleId, templateModuleId, capabilityProfile, isOverride)
+- **InstalledAppEvents**: Audit trail for installation lifecycle (install_started, install_completed, install_failed) with installedAppId, templateId, tenantId, timestamp, errorDetails
 
 ## Multi-Tenancy Architecture
 - **Tenant Resolution** (server/tenant.ts): Defines TenantContext type, SystemContext type, TenantResolutionError, and resolveTenantContext() function that reads x-tenant-id header.
@@ -62,6 +63,7 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **SystemContext** (server/systemContext.ts): Branded type using unique symbol to prevent accidental creation. Always uses SYSTEM_PRIVILEGED profile.
 - **createSystemContext()** (server/systemContext.ts): Factory function — only way to create SystemContext. Returns branded object with source "system" and SYSTEM_PRIVILEGED capabilities.
 - **isSystemContext()** (server/systemContext.ts): Type guard for runtime context discrimination.
+- **PlatformContexts** (server/platformContext.ts): Centralized factory for named SystemContext instances. Routes use PlatformContexts.templateRead(), PlatformContexts.templateInstall(), PlatformContexts.installedAppsRead() — no inline createSystemContext in route handlers.
 - **Used by**: templateService for read-only platform data access (templates are not tenant-owned).
 
 ## Agent Capability Model
