@@ -1,25 +1,22 @@
 import type { Request, Response, NextFunction } from "express";
+import { resolveTenantContext, TenantResolutionError, type TenantContext } from "../tenant";
 
 declare global {
   namespace Express {
     interface Request {
-      tenantId?: string | null;
+      tenantContext: TenantContext;
     }
   }
 }
 
-export function tenantResolution(req: Request, _res: Response, next: NextFunction) {
-  const tenantId = req.headers["x-tenant-id"] as string | undefined;
-
-  if (tenantId) {
-    req.tenantId = tenantId;
-  } else {
-    req.tenantId = null;
-    const isDev = process.env.NODE_ENV !== "production";
-    if (!isDev) {
-      console.warn(`[tenant] Missing x-tenant-id header on ${req.method} ${req.path} — production warning (unscoped access)`);
+export function tenantResolution(req: Request, res: Response, next: NextFunction) {
+  try {
+    req.tenantContext = resolveTenantContext(req);
+    next();
+  } catch (err) {
+    if (err instanceof TenantResolutionError) {
+      return res.status(401).json({ message: "Missing tenant context" });
     }
+    next(err);
   }
-
-  next();
 }

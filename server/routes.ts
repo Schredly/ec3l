@@ -4,24 +4,30 @@ import { storage } from "./storage";
 import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema } from "@shared/schema";
 import { runnerService } from "./runner";
 import { tenantResolution } from "./middleware/tenant";
-import { tenantScoped } from "./helpers/tenant-scoped";
+import { getTenantStorage } from "./tenantStorage";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
 
+  app.get("/api/tenants", async (_req, res) => {
+    const tenantList = await storage.getTenants();
+    res.json(tenantList);
+  });
+
   app.use("/api", tenantResolution);
 
-  // Projects — tenant-scoped listing (Prompt 12/13)
+  // Projects — tenant-scoped (Prompts A/B/C)
   app.get("/api/projects", async (req, res) => {
-    const scoped = tenantScoped(req.tenantId);
-    const projects = await scoped.getProjects();
+    const ts = getTenantStorage(req.tenantContext.tenantId);
+    const projects = await ts.getProjects();
     res.json(projects);
   });
 
   app.get("/api/projects/:id", async (req, res) => {
-    const project = await storage.getProject(req.params.id);
+    const ts = getTenantStorage(req.tenantContext.tenantId);
+    const project = await ts.getProject(req.params.id);
     if (!project) return res.status(404).json({ message: "Project not found" });
     res.json(project);
   });
@@ -30,12 +36,9 @@ export async function registerRoutes(
     const parsed = insertProjectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
-    const data = { ...parsed.data };
-    if (req.tenantId) {
-      data.tenantId = req.tenantId;
-    }
-
-    const project = await storage.createProject(data);
+    const { tenantId: _ignored, ...rest } = parsed.data;
+    const ts = getTenantStorage(req.tenantContext.tenantId);
+    const project = await ts.createProject(rest as any);
 
     await storage.createModule({ projectId: project.id, name: "default", type: "code", rootPath: "src" });
     await storage.createEnvironment({ projectId: project.id, name: "dev", isDefault: true });
@@ -46,27 +49,32 @@ export async function registerRoutes(
   });
 
   app.get("/api/projects/:id/changes", async (req, res) => {
-    const changes = await storage.getChangesByProject(req.params.id);
+    const ts = getTenantStorage(req.tenantContext.tenantId);
+    const changes = await ts.getChangesByProject(req.params.id);
     res.json(changes);
   });
 
   app.get("/api/projects/:id/modules", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/projects/:id/modules");
     const mods = await storage.getModulesByProject(req.params.id);
     res.json(mods);
   });
 
   app.get("/api/projects/:id/environments", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/projects/:id/environments");
     const envs = await storage.getEnvironmentsByProject(req.params.id);
     res.json(envs);
   });
 
   // Changes
   app.get("/api/changes", async (_req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes");
     const changes = await storage.getChanges();
     res.json(changes);
   });
 
   app.get("/api/changes/:id", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id");
     const change = await storage.getChange(req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
     res.json(change);
@@ -75,8 +83,10 @@ export async function registerRoutes(
   app.post("/api/changes", async (req, res) => {
     const parsed = insertChangeRecordSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    const project = await storage.getProject(parsed.data.projectId);
-    if (!project) return res.status(400).json({ message: "Project not found" });
+
+    const ts = getTenantStorage(req.tenantContext.tenantId);
+    const project = await ts.getProject(parsed.data.projectId);
+    if (!project) return res.status(404).json({ message: "Project not found" });
 
     const data = { ...parsed.data };
 
@@ -115,6 +125,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/changes/:id/project", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id/project");
     const change = await storage.getChange(req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
     const project = await storage.getProject(change.projectId);
@@ -122,17 +133,20 @@ export async function registerRoutes(
   });
 
   app.get("/api/changes/:id/workspace", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id/workspace");
     const workspace = await storage.getWorkspaceByChange(req.params.id);
     res.json(workspace || null);
   });
 
   app.get("/api/changes/:id/agent-runs", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id/agent-runs");
     const runs = await storage.getAgentRunsByChange(req.params.id);
     res.json(runs);
   });
 
   // Start workspace — control plane delegates to runner service
   app.post("/api/changes/:id/start-workspace", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id/start-workspace");
     const change = await storage.getChange(req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
@@ -154,6 +168,7 @@ export async function registerRoutes(
 
   // Check in
   app.post("/api/changes/:id/checkin", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id/checkin");
     const change = await storage.getChange(req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
@@ -164,6 +179,7 @@ export async function registerRoutes(
 
   // Merge
   app.post("/api/changes/:id/merge", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id/merge");
     const change = await storage.getChange(req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
@@ -176,8 +192,9 @@ export async function registerRoutes(
     res.json(updated);
   });
 
-  // Agent run — with module-scoped permissions (Prompt 15)
+  // Agent run — with module-scoped permissions
   app.post("/api/changes/:id/agent-run", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes/:id/agent-run");
     const change = await storage.getChange(req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
@@ -248,18 +265,21 @@ export async function registerRoutes(
 
   // Agent runs (all)
   app.get("/api/agent-runs", async (_req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/agent-runs");
     const runs = await storage.getAgentRuns();
     res.json(runs);
   });
 
   // Modules
   app.get("/api/modules", async (_req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/modules");
     const mods = await storage.getModules();
     res.json(mods);
   });
 
   // Environments
   app.get("/api/environments/:id", async (req, res) => {
+    console.warn("[tenant-scope] route not yet tenant-scoped: /api/environments/:id");
     const env = await storage.getEnvironment(req.params.id);
     if (!env) return res.status(404).json({ message: "Environment not found" });
     res.json(env);

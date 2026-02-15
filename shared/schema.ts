@@ -62,7 +62,7 @@ export const projects = pgTable("projects", {
   githubRepo: text("github_repo").notNull(),
   defaultBranch: text("default_branch").notNull().default("main"),
   description: text("description"),
-  tenantId: varchar("tenant_id").references(() => tenants.id),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

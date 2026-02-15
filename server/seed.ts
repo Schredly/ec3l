@@ -1,8 +1,23 @@
+import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { tenants, projects, modules, changeRecords, workspaces, agentRuns, environments } from "@shared/schema";
 import { log } from "./index";
 
+async function ensureDefaultTenant() {
+  const [existing] = await db.select().from(tenants).where(eq(tenants.slug, "default"));
+  if (existing) return existing;
+  const [created] = await db.insert(tenants).values({
+    name: "Default",
+    slug: "default",
+    plan: "free",
+  }).returning();
+  log("Created default tenant");
+  return created;
+}
+
 export async function seedDatabase() {
+  await ensureDefaultTenant();
+
   const existingProjects = await db.select().from(projects);
   if (existingProjects.length > 0) {
     log("Database already seeded, skipping");

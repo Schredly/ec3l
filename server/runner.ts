@@ -6,6 +6,7 @@ export interface RunnerInstruction {
   moduleId?: string;
   moduleRootPath?: string;
   command: string;
+  targetPath?: string;
 }
 
 export interface RunnerResult {
@@ -13,6 +14,28 @@ export interface RunnerResult {
   logs: string[];
   containerId?: string;
   previewUrl?: string;
+}
+
+export function enforceModuleBoundary(moduleRootPath: string, requestedPath: string): void {
+  const normalized = path.posix.normalize(requestedPath);
+
+  if (path.posix.isAbsolute(normalized)) {
+    throw new Error(`Absolute path "${requestedPath}" is not allowed — paths must be relative to module root.`);
+  }
+
+  if (normalized.startsWith("..") || normalized.includes("/../") || normalized === "..") {
+    throw new Error(`Path "${requestedPath}" contains path traversal — denied.`);
+  }
+
+  const normalizedRoot = path.posix.normalize(moduleRootPath).replace(/^\/+/, "").replace(/\/+$/, "");
+  const normalizedReq = normalized.replace(/^\/+/, "").replace(/\/+$/, "");
+
+  const resolved = path.posix.resolve(normalizedRoot, normalizedReq);
+  const resolvedRoot = path.posix.resolve(normalizedRoot);
+
+  if (!resolved.startsWith(resolvedRoot + "/") && resolved !== resolvedRoot) {
+    throw new Error(`Path "${requestedPath}" resolves outside module scope "${moduleRootPath}" — denied.`);
+  }
 }
 
 export interface IRunnerService {
@@ -60,7 +83,21 @@ export class SimulatedRunnerService implements IRunnerService {
   }
 
   async runCommand(instruction: RunnerInstruction): Promise<RunnerResult> {
-    if (instruction.moduleRootPath) {
+    if (instruction.moduleRootPath && instruction.targetPath) {
+      try {
+        enforceModuleBoundary(instruction.moduleRootPath, instruction.targetPath);
+      } catch (err: any) {
+        console.warn(`[runner] Module boundary violation: ${err.message}`);
+        return {
+          success: false,
+          logs: [
+            `[runner] Executing in workspace ${instruction.workspaceId}`,
+            `[runner] SECURITY: ${err.message}`,
+            `[runner] Command rejected — module boundary violation`,
+          ],
+        };
+      }
+    } else if (instruction.moduleRootPath) {
       const commandParts = instruction.command.split(" ");
       const targetPath = commandParts[commandParts.length - 1];
       if (targetPath && targetPath.includes("/")) {

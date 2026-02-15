@@ -12,19 +12,28 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 
 ## Data Model
 - **Tenants**: Multi-tenant ownership (id, name, slug, plan)
-- **Projects**: GitHub-connected repositories with optional tenantId FK
+- **Projects**: GitHub-connected repositories with required tenantId FK (NOT NULL)
 - **Modules**: First-class change-scoped units (code, schema, workflow, ui, integration) with rootPath and version
-- **ChangeRecords**: Track code changes with status workflow (Draft → WorkspaceRunning → Validating → Ready → Merged), linked to Module and Environment
+- **ChangeRecords**: Track code changes with status workflow (Draft -> WorkspaceRunning -> Validating -> Ready -> Merged), linked to Module and Environment
 - **Environments**: Per-project environments (dev, test, prod) with isDefault flag
 - **Workspaces**: Simulated isolated environments linked to changes
 - **AgentRuns**: Agent execution records with intent, skills used, and logs
-- **Templates**: Domain templates (HR, Finance, Legal, Facilities, Custom) — read-only structural groundwork
+- **Templates**: Domain templates (HR, Finance, Legal, Facilities, Custom) -- read-only structural groundwork
 - **TemplateModules**: Join table linking templates to modules
 
-## Middleware & Security
-- **Tenant Resolution** (server/middleware/tenant.ts): Resolves tenantId from x-tenant-id header, attaches to req context. Warns on unscoped access in production.
-- **Tenant-Scoped DB Helper** (server/helpers/tenant-scoped.ts): TenantScopedQueries class filters queries by tenantId. Used in GET /api/projects.
-- **Module Guardrails**: Runner validates file paths against module rootPath with path traversal protection. Agent runs validate each skill target against module scope.
+## Multi-Tenancy Architecture
+- **Tenant Resolution** (server/tenant.ts): Defines TenantContext type, TenantResolutionError, and resolveTenantContext() function that reads x-tenant-id header.
+- **Tenant Middleware** (server/middleware/tenant.ts): Enforces tenant context on all /api routes (returns 401 if missing). Attaches req.tenantContext with tenantId and source.
+- **Tenant Storage** (server/tenantStorage.ts): getTenantStorage(tenantId) returns tenant-scoped methods for getProjects(), getProject(), createProject(), getChangesByProject(). Used in tenant-scoped routes.
+- **Tenant Bootstrap** (client/src/hooks/use-tenant.ts): Frontend auto-fetches /api/tenants on first load and stores tenantId in localStorage. All API calls include x-tenant-id header via queryClient.
+- **Default Tenant**: Seed ensures a "default" tenant (slug: "default") always exists.
+- **Tenant-Scoped Routes**: GET/POST /api/projects, GET /api/projects/:id, GET /api/projects/:id/changes, POST /api/changes (project ownership check). Other routes have console.warn for unscoped access.
+- **Legacy Helper** (server/helpers/tenant-scoped.ts): Old TenantScopedQueries class, superseded by tenantStorage.ts.
+
+## Module Boundary Enforcement
+- **enforceModuleBoundary()** (server/runner.ts): Validates that requested paths stay within module rootPath. Denies absolute paths, ".." traversal, and out-of-scope resolution.
+- **RunnerInstruction.targetPath**: Optional field for explicit path boundary checking in runCommand.
+- **validateFilePath()**: Legacy path validation on SimulatedRunnerService, still used for command-level path extraction fallback.
 
 ## Key Pages
 - `/` - Dashboard with stats and recent activity
@@ -36,15 +45,16 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - `/runner` - Runner service endpoint documentation
 
 ## API Routes
-- `GET/POST /api/projects` - List/create projects (auto-creates default module + 3 environments)
-- `GET /api/projects/:id` - Get project
-- `GET /api/projects/:id/changes` - List changes for project
+- `GET /api/tenants` - List all tenants (no auth required, used for bootstrapping)
+- `GET/POST /api/projects` - List/create projects (tenant-scoped, auto-creates default module + 3 environments)
+- `GET /api/projects/:id` - Get project (tenant-scoped)
+- `GET /api/projects/:id/changes` - List changes for project (tenant-scoped)
 - `GET /api/projects/:id/modules` - List modules for project
 - `GET /api/projects/:id/environments` - List environments for project
-- `GET/POST /api/changes` - List/create changes (auto-resolves moduleId from modulePath, defaults environmentId to dev)
+- `GET/POST /api/changes` - List/create changes (POST is tenant-safe: verifies project ownership)
 - `GET /api/changes/:id` - Get change
 - `POST /api/changes/:id/start-workspace` - Start workspace (delegates to runner service)
-- `POST /api/changes/:id/checkin` - Check in change (→ Ready)
+- `POST /api/changes/:id/checkin` - Check in change (-> Ready)
 - `POST /api/changes/:id/merge` - Merge change
 - `POST /api/changes/:id/agent-run` - Start agent run (module-scoped permissions enforced)
 - `GET /api/changes/:id/workspace` - Get workspace for change
