@@ -4,8 +4,6 @@ import type { ModuleExecutionContext } from "./moduleContext";
 
 export interface RunnerInstruction {
   workspaceId: string;
-  moduleId?: string;
-  moduleRootPath?: string;
   command: string;
   targetPath?: string;
 }
@@ -86,7 +84,7 @@ export class SimulatedRunnerService implements IRunnerService {
   }
 
   async runCommand(instruction: RunnerInstruction, moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
-    if (instruction.moduleRootPath && instruction.targetPath) {
+    if (moduleCtx.moduleRootPath && instruction.targetPath) {
       try {
         enforceModuleBoundary(moduleCtx, instruction.targetPath);
       } catch (err: any) {
@@ -100,7 +98,7 @@ export class SimulatedRunnerService implements IRunnerService {
           ],
         };
       }
-    } else if (instruction.moduleRootPath) {
+    } else if (moduleCtx.moduleRootPath) {
       const commandParts = instruction.command.split(" ");
       const targetPath = commandParts[commandParts.length - 1];
       if (targetPath && targetPath.includes("/")) {

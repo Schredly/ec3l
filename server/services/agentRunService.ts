@@ -21,14 +21,11 @@ export async function createAgentRun(
   moduleCtx: ModuleExecutionContext
 ): Promise<AgentRun> {
   void ctx;
-  let mod = null;
-  if (change.moduleId) {
-    mod = await storage.getModule(change.moduleId);
-  }
+  const moduleRootPath = moduleCtx.moduleRootPath || null;
+  const moduleId = moduleCtx.moduleId || null;
 
   let run = await storage.createAgentRun(data);
 
-  const moduleRootPath = mod?.rootPath || null;
   const editTarget = change.modulePath || moduleRootPath || "src/index.ts";
   const lintTarget = moduleRootPath || "src";
 
@@ -40,7 +37,7 @@ export async function createAgentRun(
   const deniedSkills: string[] = [];
   const logs: string[] = [
     `[agent] Received intent: "${run.intent}"`,
-    `[agent] Change: ${change.id}, Module: ${mod ? `${mod.id} (${mod.name})` : "none"}`,
+    `[agent] Change: ${change.id}, Module: ${moduleId || "none"}`,
     `[agent] Module scope: ${moduleRootPath || "unrestricted"}`,
   ];
 
@@ -53,7 +50,7 @@ export async function createAgentRun(
       } else {
         deniedSkills.push(skill.name);
         logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" DENIED — ${check.reason}`);
-        console.warn(`[agent-permissions] Denied skill="${skill.name}" target="${skill.target}" change=${change.id} module=${mod?.id}: ${check.reason}`);
+        console.warn(`[agent-permissions] Denied skill="${skill.name}" target="${skill.target}" change=${change.id} module=${moduleId}: ${check.reason}`);
       }
     } else {
       allowedSkills.push(skill.name);
