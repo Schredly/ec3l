@@ -11,8 +11,6 @@ export const Capabilities = {
   NET_HTTP: "net:http",
 } as const;
 
-export type ExecutionContext = ModuleExecutionContext | SystemContext;
-
 export class CapabilityDeniedError extends Error {
   public readonly capability: string;
 
@@ -23,8 +21,16 @@ export class CapabilityDeniedError extends Error {
   }
 }
 
-export function assertCapability(ctx: ExecutionContext, cap: Capability): void {
-  if (!ctx.capabilities.includes(cap)) {
+function checkCapability(capabilities: readonly Capability[], cap: Capability): void {
+  if (!capabilities.includes(cap)) {
     throw new CapabilityDeniedError(cap);
   }
+}
+
+export function assertModuleCapability(ctx: ModuleExecutionContext, cap: Capability): void {
+  checkCapability(ctx.capabilities, cap);
+}
+
+export function assertSystemCapability(ctx: SystemContext, cap: Capability): void {
+  checkCapability(ctx.capabilities, cap);
 }

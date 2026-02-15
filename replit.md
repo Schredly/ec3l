@@ -59,12 +59,14 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **SystemContext** (server/systemContext.ts): Branded type using unique symbol to prevent accidental creation. Always uses SYSTEM_PRIVILEGED profile.
 - **createSystemContext()** (server/systemContext.ts): Factory function — only way to create SystemContext. Returns branded object with source "system" and SYSTEM_PRIVILEGED capabilities.
 - **isSystemContext()** (server/systemContext.ts): Type guard for runtime context discrimination.
-- **ExecutionContext** (server/capabilities.ts): Union type (ModuleExecutionContext | SystemContext) accepted by assertCapability for flexible but type-safe capability checks.
 - **Used by**: templateService for read-only platform data access (templates are not tenant-owned).
 
 ## Agent Capability Model
-- **Canonical vocabulary** (server/capabilities.ts): Defines Capability type and Capabilities const (FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF, NET_HTTP). Exports assertCapability(ctx, cap) that throws CapabilityDeniedError if capability is missing. Accepts ExecutionContext union type.
-- **CapabilityDeniedError** (server/capabilities.ts): Typed error with capability field. Thrown by assertCapability on denial.
+- **Canonical vocabulary** (server/capabilities.ts): Defines Capability type and Capabilities const (FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF, NET_HTTP). No union types — system and module paths are unambiguous by type.
+- **assertModuleCapability()** (server/capabilities.ts): Requires ModuleExecutionContext explicitly. Used by skill registry for module-scoped agent execution.
+- **assertSystemCapability()** (server/capabilities.ts): Requires SystemContext explicitly. Available for system-level operations.
+- **checkCapability()** (server/capabilities.ts): Pure private helper accepting capabilities array — shared logic with no execution context dependency.
+- **CapabilityDeniedError** (server/capabilities.ts): Typed error with capability field. Thrown on denial.
 - **Skill Registry** (server/skills/registry.ts): Central registry where each skill declares name, requiredCapabilities, and execute(). Skills can only be invoked via skillRegistry.invoke(name, ctx, input) which asserts all requiredCapabilities before execution. runnerService is private to registry — no direct imports by agent logic.
 - **controlPlane** (server/skills/registry.ts): Narrow exported interface for non-agent workspace lifecycle operations (startWorkspace, stopWorkspace).
 - **Registered skills**: editFile (fs:read, fs:write), runCommand (cmd:run), runLint (fs:read, cmd:run), getDiff (git:diff).

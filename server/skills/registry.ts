@@ -1,6 +1,6 @@
 import type { ModuleExecutionContext } from "../moduleContext";
 import type { Capability } from "../capabilities";
-import { assertCapability, CapabilityDeniedError, Capabilities } from "../capabilities";
+import { assertModuleCapability, CapabilityDeniedError, Capabilities } from "../capabilities";
 import { createRunnerService } from "../runner";
 
 const runnerService = createRunnerService();
@@ -46,7 +46,7 @@ class SkillRegistryImpl {
     }
 
     for (const cap of skill.requiredCapabilities) {
-      assertCapability(ctx, cap);
+      assertModuleCapability(ctx, cap);
     }
 
     return skill.execute(ctx, input);
