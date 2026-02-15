@@ -28,6 +28,7 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **Tenant Bootstrap** (client/src/hooks/use-tenant.ts): Frontend auto-fetches /api/tenants on first load and stores tenantId in localStorage. All API calls include x-tenant-id header via queryClient.
 - **Default Tenant**: Seed ensures a "default" tenant (slug: "default") always exists.
 - **Tenant-Scoped Routes**: GET/POST /api/projects, GET /api/projects/:id, GET /api/projects/:id/changes, POST /api/changes (project ownership check). Other routes have console.warn for unscoped access.
+- **Service Layer** (server/services/projectService.ts): getProjects(), getProject(), createProject() — each requires TenantContext as first argument, enforced at compile time. Route handlers delegate to services with no direct DB access. createProject includes module/environment bootstrapping.
 - **Legacy Helper** (server/helpers/tenant-scoped.ts): Old TenantScopedQueries class, superseded by tenantStorage.ts.
 
 ## Module Boundary Enforcement
