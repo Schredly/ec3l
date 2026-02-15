@@ -1,0 +1,59 @@
+Do not add new features beyond capability enforcement.
+Do not refactor unrelated code.
+Do not change happy-path behavior unless a capability is missing.
+
+Objective:
+Implement an agent capability model that centrally enforces which skills an agent can invoke.
+
+Instructions:
+
+1) Define a canonical capability vocabulary in:
+   server/capabilities.ts
+
+   Export:
+   - type Capability = string
+   - const Capabilities = {
+       FS_READ: "fs:read",
+       FS_WRITE: "fs:write",
+       CMD_RUN: "cmd:run",
+       GIT_DIFF: "git:diff",
+       NET_HTTP: "net:http"
+     } as const
+
+   - function assertCapability(ctx: ModuleExecutionContext, cap: Capability): void
+     - if ctx.capabilities does not include cap:
+         throw new CapabilityDeniedError(cap)
+
+   - class CapabilityDeniedError extends Error with:
+       capability
+       message
+
+2) Update ModuleExecutionContext (server/moduleContext.ts) so that:
+   - capabilities: Capability[] is REQUIRED (no optional)
+   - provide a helper to build a default minimal capability set for MVP runs
+
+3) Implement a Skill Registry in:
+   server/skills/registry.ts
+
+   Each skill must declare:
+   - name
+   - requiredCapabilities: Capability[]
+   - execute(ctx: ModuleExecutionContext, input): Promise<output>
+
+4) Update agent execution so that:
+   - skills can ONLY be invoked via the registry
+   - before executing a skill, assert all requiredCapabilities
+   - on CapabilityDeniedError:
+       - fail the agent run with failureReason: "CAPABILITY_DENIED"
+       - record an artifact containing:
+           skill name, required cap, ctx.moduleId, ctx.tenantContext.tenantId
+
+5) Constraints:
+   - Do NOT implement new skills.
+   - Wrap existing execution operations (edit file, run command, diff, etc.) as skills in the registry if they already exist.
+   - Do NOT add UI changes.
+   - Do NOT add role-based access yet.
+   - Keep enforcement centralized (do NOT scatter checks across code).
+
+Goal:
+Any agent action must be capability-gated, auditable, and fail closed when denied.
