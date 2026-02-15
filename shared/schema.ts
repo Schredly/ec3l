@@ -7,6 +7,7 @@ export const changeStatusEnum = pgEnum("change_status", [
   "Draft",
   "WorkspaceRunning",
   "Validating",
+  "ValidationFailed",
   "Ready",
   "Merged",
 ]);

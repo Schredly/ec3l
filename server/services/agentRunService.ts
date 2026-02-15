@@ -1,5 +1,6 @@
 import type { TenantContext } from "../tenant";
 import type { ModuleExecutionContext } from "../moduleContext";
+import { ModuleBoundaryViolationError } from "../moduleContext";
 import { storage } from "../storage";
 import { runnerService } from "../runner";
 import type { AgentRun, InsertAgentRun, ChangeRecord } from "@shared/schema";
@@ -43,26 +44,45 @@ export async function createAgentRun(
 
   for (const skill of requestedSkills) {
     if (moduleRootPath) {
-      const check = runnerService.validateFilePath(skill.target, moduleCtx);
-      if (check.valid) {
-        allowedSkills.push(skill.name);
-        logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — within module scope "${moduleRootPath}"`);
-      } else {
-        deniedSkills.push(skill.name);
-        logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" DENIED — ${check.reason}`);
-        console.warn(`[agent-permissions] Denied skill="${skill.name}" target="${skill.target}" change=${change.id} module=${moduleId}: ${check.reason}`);
+      try {
+        const check = runnerService.validateFilePath(skill.target, moduleCtx);
+        if (check.valid) {
+          allowedSkills.push(skill.name);
+          logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — within module scope "${moduleRootPath}"`);
+        } else {
+          throw new ModuleBoundaryViolationError({
+            moduleId: moduleId || "",
+            attemptedPath: skill.target,
+            reason: check.reason || `Path "${skill.target}" is outside module scope "${moduleRootPath}".`,
+          });
+        }
+      } catch (err) {
+        if (err instanceof ModuleBoundaryViolationError) {
+          const violationArtifact = {
+            type: "MODULE_BOUNDARY_VIOLATION",
+            moduleId: err.moduleId,
+            attemptedPath: err.attemptedPath,
+            reason: err.reason,
+            skill: skill.name,
+            changeId: change.id,
+            timestamp: new Date().toISOString(),
+          };
+          logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" DENIED — MODULE_BOUNDARY_VIOLATION: ${err.reason}`);
+          logs.push(`[agent] Violation artifact: ${JSON.stringify(violationArtifact)}`);
+          logs.push(`[agent] Execution halted — module boundary violation is terminal`);
+          console.error(`[agent-boundary-violation] change=${change.id} module=${err.moduleId} path="${err.attemptedPath}": ${err.reason}`);
+
+          run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+          await storage.updateChangeStatus(change.id, "ValidationFailed");
+
+          return run;
+        }
+        throw err;
       }
     } else {
       allowedSkills.push(skill.name);
       logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — no module scope enforced`);
     }
-  }
-
-  if (deniedSkills.length > 0) {
-    logs.push(`[agent] ${deniedSkills.length} skill(s) denied due to module scope restrictions`);
-    logs.push(`[agent] Validation failed — scope violations detected`);
-    run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
-    return run;
   }
 
   logs.push(`[agent] All skills approved: ${allowedSkills.join(", ")}`);

@@ -1,6 +1,7 @@
 import { randomBytes } from "crypto";
 import path from "path";
 import type { ModuleExecutionContext } from "./moduleContext";
+import { ModuleBoundaryViolationError } from "./moduleContext";
 
 export interface RunnerInstruction {
   workspaceId: string;
@@ -13,6 +14,7 @@ export interface RunnerResult {
   logs: string[];
   containerId?: string;
   previewUrl?: string;
+  failureReason?: string;
 }
 
 export function enforceModuleBoundary(moduleCtx: ModuleExecutionContext, requestedPath: string): void {
@@ -20,11 +22,19 @@ export function enforceModuleBoundary(moduleCtx: ModuleExecutionContext, request
   const normalized = path.posix.normalize(requestedPath);
 
   if (path.posix.isAbsolute(normalized)) {
-    throw new Error(`Absolute path "${requestedPath}" is not allowed — paths must be relative to module root.`);
+    throw new ModuleBoundaryViolationError({
+      moduleId: moduleCtx.moduleId,
+      attemptedPath: requestedPath,
+      reason: `Absolute path "${requestedPath}" is not allowed — paths must be relative to module root.`,
+    });
   }
 
   if (normalized.startsWith("..") || normalized.includes("/../") || normalized === "..") {
-    throw new Error(`Path "${requestedPath}" contains path traversal — denied.`);
+    throw new ModuleBoundaryViolationError({
+      moduleId: moduleCtx.moduleId,
+      attemptedPath: requestedPath,
+      reason: `Path "${requestedPath}" contains path traversal — denied.`,
+    });
   }
 
   const normalizedRoot = path.posix.normalize(moduleRootPath).replace(/^\/+/, "").replace(/\/+$/, "");
@@ -34,7 +44,11 @@ export function enforceModuleBoundary(moduleCtx: ModuleExecutionContext, request
   const resolvedRoot = path.posix.resolve(normalizedRoot);
 
   if (!resolved.startsWith(resolvedRoot + "/") && resolved !== resolvedRoot) {
-    throw new Error(`Path "${requestedPath}" resolves outside module scope "${moduleRootPath}" — denied.`);
+    throw new ModuleBoundaryViolationError({
+      moduleId: moduleCtx.moduleId,
+      attemptedPath: requestedPath,
+      reason: `Path "${requestedPath}" resolves outside module scope "${moduleRootPath}" — denied.`,
+    });
   }
 }
 
@@ -48,24 +62,15 @@ export interface IRunnerService {
 
 export class SimulatedRunnerService implements IRunnerService {
   validateFilePath(filePath: string, moduleCtx: ModuleExecutionContext): { valid: boolean; reason?: string } {
-    const moduleRootPath = moduleCtx.moduleRootPath;
-    const normalizedFile = path.posix.normalize(filePath).replace(/^\/+/, "").replace(/\/+$/, "");
-    const normalizedRoot = path.posix.normalize(moduleRootPath).replace(/^\/+/, "").replace(/\/+$/, "");
-
-    if (normalizedFile.startsWith("..") || normalizedFile.includes("/../")) {
-      return {
-        valid: false,
-        reason: `Path "${filePath}" contains path traversal — denied.`,
-      };
+    try {
+      enforceModuleBoundary(moduleCtx, filePath);
+      return { valid: true };
+    } catch (err) {
+      if (err instanceof ModuleBoundaryViolationError) {
+        return { valid: false, reason: err.reason };
+      }
+      throw err;
     }
-
-    if (!normalizedFile.startsWith(normalizedRoot + "/") && normalizedFile !== normalizedRoot) {
-      return {
-        valid: false,
-        reason: `Path "${filePath}" is outside module scope "${moduleRootPath}". Changes are restricted to the module's rootPath.`,
-      };
-    }
-    return { valid: true };
   }
 
   async startWorkspace(workspaceId: string, _moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
@@ -85,35 +90,12 @@ export class SimulatedRunnerService implements IRunnerService {
 
   async runCommand(instruction: RunnerInstruction, moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
     if (moduleCtx.moduleRootPath && instruction.targetPath) {
-      try {
-        enforceModuleBoundary(moduleCtx, instruction.targetPath);
-      } catch (err: any) {
-        console.warn(`[runner] Module boundary violation: ${err.message}`);
-        return {
-          success: false,
-          logs: [
-            `[runner] Executing in workspace ${instruction.workspaceId}`,
-            `[runner] SECURITY: ${err.message}`,
-            `[runner] Command rejected — module boundary violation`,
-          ],
-        };
-      }
+      enforceModuleBoundary(moduleCtx, instruction.targetPath);
     } else if (moduleCtx.moduleRootPath) {
       const commandParts = instruction.command.split(" ");
       const targetPath = commandParts[commandParts.length - 1];
       if (targetPath && targetPath.includes("/")) {
-        const check = this.validateFilePath(targetPath, moduleCtx);
-        if (!check.valid) {
-          console.warn(`[runner] Module scope violation: ${check.reason}`);
-          return {
-            success: false,
-            logs: [
-              `[runner] Executing in workspace ${instruction.workspaceId}`,
-              `[runner] DENIED: ${check.reason}`,
-              `[runner] Command rejected — module scope violation`,
-            ],
-          };
-        }
+        enforceModuleBoundary(moduleCtx, targetPath);
       }
     }
 

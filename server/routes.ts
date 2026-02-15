@@ -5,6 +5,7 @@ import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema } f
 import { tenantResolution } from "./middleware/tenant";
 import type { SystemContext } from "./tenant";
 import type { ModuleExecutionContext } from "./moduleContext";
+import { ModuleBoundaryViolationError } from "./moduleContext";
 import * as projectService from "./services/projectService";
 import * as changeService from "./services/changeService";
 import { ChangeServiceError } from "./services/changeService";
@@ -113,6 +114,13 @@ export async function registerRoutes(
     const change = await changeService.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
+    if (change.status === "ValidationFailed") {
+      return res.status(403).json({
+        message: "Cannot start workspace on change — module boundary violation detected. A new Change is required.",
+        failureReason: "MODULE_BOUNDARY_VIOLATION",
+      });
+    }
+
     let mod = null;
     if (change.moduleId) {
       mod = await storage.getModule(change.moduleId);
@@ -133,6 +141,13 @@ export async function registerRoutes(
     const change = await changeService.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
+    if (change.status === "ValidationFailed") {
+      return res.status(403).json({
+        message: "Cannot promote change — module boundary violation detected. A new Change is required.",
+        failureReason: "MODULE_BOUNDARY_VIOLATION",
+      });
+    }
+
     await changeService.updateChangeStatus(req.tenantContext, change.id, "Ready");
     const updated = await changeService.getChange(req.tenantContext, change.id);
     res.json(updated);
@@ -142,6 +157,13 @@ export async function registerRoutes(
   app.post("/api/changes/:id/merge", async (req, res) => {
     const change = await changeService.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
+
+    if (change.status === "ValidationFailed") {
+      return res.status(403).json({
+        message: "Cannot merge change — module boundary violation detected. A new Change is required.",
+        failureReason: "MODULE_BOUNDARY_VIOLATION",
+      });
+    }
 
     await changeService.updateChangeStatus(req.tenantContext, change.id, "Merged");
     const workspace = await workspaceService.getWorkspaceByChange(req.tenantContext, change.id);
@@ -157,6 +179,13 @@ export async function registerRoutes(
     const change = await changeService.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
+    if (change.status === "ValidationFailed") {
+      return res.status(403).json({
+        message: "Cannot run agent on change — module boundary violation detected. A new Change is required.",
+        failureReason: "MODULE_BOUNDARY_VIOLATION",
+      });
+    }
+
     const parsed = insertAgentRunSchema.safeParse({ changeId: change.id, intent: req.body.intent });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
@@ -171,8 +200,23 @@ export async function registerRoutes(
       moduleRootPath: mod?.rootPath ?? "",
     };
 
-    const run = await agentRunService.createAgentRun(req.tenantContext, parsed.data, change, moduleCtx);
-    res.status(201).json(run);
+    try {
+      const run = await agentRunService.createAgentRun(req.tenantContext, parsed.data, change, moduleCtx);
+      res.status(201).json(run);
+    } catch (err) {
+      if (err instanceof ModuleBoundaryViolationError) {
+        return res.status(403).json({
+          message: "Agent run aborted — module boundary violation.",
+          failureReason: "MODULE_BOUNDARY_VIOLATION",
+          violation: {
+            moduleId: err.moduleId,
+            attemptedPath: err.attemptedPath,
+            reason: err.reason,
+          },
+        });
+      }
+      throw err;
+    }
   });
 
   // Agent runs (all)
