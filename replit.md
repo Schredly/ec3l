@@ -38,11 +38,19 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
   - templateService.ts: systemGetTemplates(), systemGetTemplate(), systemGetTemplateModules() — require SystemContext (not tenant-owned data)
 
 ## Module Execution Context
-- **ModuleExecutionContext** (server/moduleContext.ts): Explicit context type required for all execution paths. Contains tenantContext, moduleId, moduleRootPath, and optional capabilities.
+- **ModuleExecutionContext** (server/moduleContext.ts): Explicit context type required for all execution paths. Contains tenantContext, moduleId, moduleRootPath, and capabilities (required Capability[]).
 - **ModuleContextError** (server/moduleContext.ts): Error class for missing module execution context.
 - **Required by**: All runner execution functions (startWorkspace, runCommand, getDiff, getLogs, validateFilePath), enforceModuleBoundary, agentRunService.createAgentRun, workspaceService.startWorkspace.
-- **Constructed in**: Route handlers (start-workspace, agent-run) build ModuleExecutionContext from tenant context and module metadata, then pass it downstream.
+- **Constructed in**: Route handlers (start-workspace, agent-run) build ModuleExecutionContext from tenant context, module metadata, and defaultCapabilities(), then pass it downstream.
 - **Compile-time enforcement**: Calling execution functions without ModuleExecutionContext fails at compile time.
+
+## Agent Capability Model
+- **Canonical vocabulary** (server/capabilities.ts): Defines Capability type and Capabilities const (FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF, NET_HTTP). Exports assertCapability(ctx, cap) that throws CapabilityDeniedError if capability is missing. Exports defaultCapabilities() returning MVP set [FS_READ, FS_WRITE, CMD_RUN, GIT_DIFF].
+- **CapabilityDeniedError** (server/capabilities.ts): Typed error with capability field. Thrown by assertCapability on denial.
+- **Skill Registry** (server/skills/registry.ts): Central registry where each skill declares name, requiredCapabilities, and execute(). Skills can only be invoked via skillRegistry.invoke(name, ctx, input) which asserts all requiredCapabilities before execution.
+- **Registered skills**: editFile (fs:read, fs:write), runCommand (cmd:run), runLint (fs:read, cmd:run), getDiff (git:diff).
+- **Enforcement flow**: agentRunService.createAgentRun invokes skills via registry. On CapabilityDeniedError: agent run fails with failureReason "CAPABILITY_DENIED", structured denial artifact is recorded in logs. Route handler also catches CapabilityDeniedError and returns 403.
+- **Fail-closed**: Any missing capability causes immediate denial — no fallback or soft-return.
 
 ## Module Boundary Enforcement
 - **ModuleBoundaryViolationError** (server/moduleContext.ts): Typed error with moduleId, attemptedPath, reason. Thrown on all boundary violations — never downgraded to warning.

@@ -1,8 +1,9 @@
 import type { TenantContext } from "../tenant";
 import type { ModuleExecutionContext } from "../moduleContext";
 import { ModuleBoundaryViolationError } from "../moduleContext";
+import { CapabilityDeniedError } from "../capabilities";
 import { storage } from "../storage";
-import { runnerService } from "../runner";
+import { skillRegistry } from "../skills/registry";
 import type { AgentRun, InsertAgentRun, ChangeRecord } from "@shared/schema";
 
 export async function getAgentRuns(ctx: TenantContext): Promise<AgentRun[]> {
@@ -34,64 +35,71 @@ export async function createAgentRun(
     { name: "editFile", target: editTarget },
     { name: "runLint", target: lintTarget },
   ];
-  const allowedSkills: string[] = [];
-  const deniedSkills: string[] = [];
+  const executedSkills: string[] = [];
   const logs: string[] = [
     `[agent] Received intent: "${run.intent}"`,
     `[agent] Change: ${change.id}, Module: ${moduleId || "none"}`,
     `[agent] Module scope: ${moduleRootPath || "unrestricted"}`,
+    `[agent] Capabilities: [${moduleCtx.capabilities.join(", ")}]`,
   ];
 
   for (const skill of requestedSkills) {
-    if (moduleRootPath) {
-      try {
-        const check = runnerService.validateFilePath(skill.target, moduleCtx);
-        if (check.valid) {
-          allowedSkills.push(skill.name);
-          logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — within module scope "${moduleRootPath}"`);
-        } else {
-          throw new ModuleBoundaryViolationError({
-            moduleId: moduleId || "",
-            attemptedPath: skill.target,
-            reason: check.reason || `Path "${skill.target}" is outside module scope "${moduleRootPath}".`,
-          });
-        }
-      } catch (err) {
-        if (err instanceof ModuleBoundaryViolationError) {
-          const violationArtifact = {
-            type: "MODULE_BOUNDARY_VIOLATION",
-            moduleId: err.moduleId,
-            attemptedPath: err.attemptedPath,
-            reason: err.reason,
-            skill: skill.name,
-            changeId: change.id,
-            timestamp: new Date().toISOString(),
-          };
-          logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" DENIED — MODULE_BOUNDARY_VIOLATION: ${err.reason}`);
-          logs.push(`[agent] Violation artifact: ${JSON.stringify(violationArtifact)}`);
-          logs.push(`[agent] Execution halted — module boundary violation is terminal`);
-          console.error(`[agent-boundary-violation] change=${change.id} module=${err.moduleId} path="${err.attemptedPath}": ${err.reason}`);
+    try {
+      const result = await skillRegistry.invoke(skill.name, moduleCtx, {
+        target: skill.target,
+        workspaceId: change.id,
+      });
+      executedSkills.push(skill.name);
+      logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" EXECUTED — ${result.success ? "success" : "failure"}`);
+      logs.push(...result.logs);
+    } catch (err) {
+      if (err instanceof CapabilityDeniedError) {
+        const denialArtifact = {
+          type: "CAPABILITY_DENIED",
+          skill: skill.name,
+          requiredCapability: err.capability,
+          moduleId: moduleId || "",
+          tenantId: moduleCtx.tenantContext.tenantId,
+          changeId: change.id,
+          timestamp: new Date().toISOString(),
+        };
+        logs.push(`[agent] Skill "${skill.name}" DENIED — CAPABILITY_DENIED: ${err.message}`);
+        logs.push(`[agent] Denial artifact: ${JSON.stringify(denialArtifact)}`);
+        logs.push(`[agent] Execution halted — capability denial is terminal`);
+        console.error(`[agent-capability-denied] change=${change.id} skill=${skill.name} cap="${err.capability}" module=${moduleId} tenant=${moduleCtx.tenantContext.tenantId}`);
 
-          run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
-          await storage.updateChangeStatus(change.id, "ValidationFailed");
-
-          return run;
-        }
-        throw err;
+        run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+        return run;
       }
-    } else {
-      allowedSkills.push(skill.name);
-      logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — no module scope enforced`);
+
+      if (err instanceof ModuleBoundaryViolationError) {
+        const violationArtifact = {
+          type: "MODULE_BOUNDARY_VIOLATION",
+          moduleId: err.moduleId,
+          attemptedPath: err.attemptedPath,
+          reason: err.reason,
+          skill: skill.name,
+          changeId: change.id,
+          timestamp: new Date().toISOString(),
+        };
+        logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" DENIED — MODULE_BOUNDARY_VIOLATION: ${err.reason}`);
+        logs.push(`[agent] Violation artifact: ${JSON.stringify(violationArtifact)}`);
+        logs.push(`[agent] Execution halted — module boundary violation is terminal`);
+        console.error(`[agent-boundary-violation] change=${change.id} module=${err.moduleId} path="${err.attemptedPath}": ${err.reason}`);
+
+        run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+        await storage.updateChangeStatus(change.id, "ValidationFailed");
+
+        return run;
+      }
+      throw err;
     }
   }
 
-  logs.push(`[agent] All skills approved: ${allowedSkills.join(", ")}`);
-  logs.push(`[skill:editFile] Modifying ${editTarget}`);
-  logs.push(`[skill:runLint] Running linter on ${lintTarget}...`);
-  logs.push(`[skill:runLint] All checks passed`);
+  logs.push(`[agent] All skills executed: ${executedSkills.join(", ")}`);
   logs.push(`[agent] Validation passed — marking change as Ready`);
 
-  run = (await storage.updateAgentRun(run.id, "Passed", JSON.stringify(allowedSkills), JSON.stringify(logs)))!;
+  run = (await storage.updateAgentRun(run.id, "Passed", JSON.stringify(executedSkills), JSON.stringify(logs)))!;
 
   if (change.status === "WorkspaceRunning") {
     await storage.updateChangeStatus(change.id, "Ready");

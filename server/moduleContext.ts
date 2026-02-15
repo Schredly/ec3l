@@ -1,10 +1,11 @@
 import type { TenantContext } from "./tenant";
+import type { Capability } from "./capabilities";
 
 export type ModuleExecutionContext = {
   tenantContext: TenantContext;
   moduleId: string;
   moduleRootPath: string;
-  capabilities?: string[];
+  capabilities: Capability[];
 };
 
 export class ModuleContextError extends Error {

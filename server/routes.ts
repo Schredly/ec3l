@@ -6,6 +6,8 @@ import { tenantResolution } from "./middleware/tenant";
 import type { SystemContext } from "./tenant";
 import type { ModuleExecutionContext } from "./moduleContext";
 import { ModuleBoundaryViolationError } from "./moduleContext";
+import { CapabilityDeniedError } from "./capabilities";
+import { defaultCapabilities } from "./capabilities";
 import * as projectService from "./services/projectService";
 import * as changeService from "./services/changeService";
 import { ChangeServiceError } from "./services/changeService";
@@ -130,6 +132,7 @@ export async function registerRoutes(
       tenantContext: req.tenantContext,
       moduleId: change.moduleId ?? "",
       moduleRootPath: mod?.rootPath ?? "",
+      capabilities: defaultCapabilities(),
     };
 
     const updated = await workspaceService.startWorkspace(req.tenantContext, change, moduleCtx);
@@ -198,12 +201,20 @@ export async function registerRoutes(
       tenantContext: req.tenantContext,
       moduleId: change.moduleId ?? "",
       moduleRootPath: mod?.rootPath ?? "",
+      capabilities: defaultCapabilities(),
     };
 
     try {
       const run = await agentRunService.createAgentRun(req.tenantContext, parsed.data, change, moduleCtx);
       res.status(201).json(run);
     } catch (err) {
+      if (err instanceof CapabilityDeniedError) {
+        return res.status(403).json({
+          message: "Agent run aborted — capability denied.",
+          failureReason: "CAPABILITY_DENIED",
+          capability: err.capability,
+        });
+      }
       if (err instanceof ModuleBoundaryViolationError) {
         return res.status(403).json({
           message: "Agent run aborted — module boundary violation.",
