@@ -37,10 +37,17 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
   - environmentService.ts: getEnvironmentsByProject(), getEnvironment()
   - templateService.ts: systemGetTemplates(), systemGetTemplate(), systemGetTemplateModules() — require SystemContext (not tenant-owned data)
 
+## Module Execution Context
+- **ModuleExecutionContext** (server/moduleContext.ts): Explicit context type required for all execution paths. Contains tenantContext, moduleId, moduleRootPath, and optional capabilities.
+- **ModuleContextError** (server/moduleContext.ts): Error class for missing module execution context.
+- **Required by**: All runner execution functions (startWorkspace, runCommand, getDiff, getLogs, validateFilePath), enforceModuleBoundary, agentRunService.createAgentRun, workspaceService.startWorkspace.
+- **Constructed in**: Route handlers (start-workspace, agent-run) build ModuleExecutionContext from tenant context and module metadata, then pass it downstream.
+- **Compile-time enforcement**: Calling execution functions without ModuleExecutionContext fails at compile time.
+
 ## Module Boundary Enforcement
-- **enforceModuleBoundary()** (server/runner.ts): Validates that requested paths stay within module rootPath. Denies absolute paths, ".." traversal, and out-of-scope resolution.
+- **enforceModuleBoundary()** (server/runner.ts): Accepts ModuleExecutionContext, validates that requested paths stay within module rootPath. Denies absolute paths, ".." traversal, and out-of-scope resolution.
 - **RunnerInstruction.targetPath**: Optional field for explicit path boundary checking in runCommand.
-- **validateFilePath()**: Legacy path validation on SimulatedRunnerService, still used for command-level path extraction fallback.
+- **validateFilePath()**: Path validation on SimulatedRunnerService, accepts ModuleExecutionContext, used for command-level path extraction fallback.
 
 ## Key Pages
 - `/` - Dashboard with stats and recent activity
