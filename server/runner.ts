@@ -40,7 +40,7 @@ export function enforceModuleBoundary(moduleCtx: ModuleExecutionContext, request
   const normalizedRoot = path.posix.normalize(moduleRootPath).replace(/^\/+/, "").replace(/\/+$/, "");
   const normalizedReq = normalized.replace(/^\/+/, "").replace(/\/+$/, "");
 
-  const resolved = path.posix.resolve(normalizedRoot, normalizedReq);
+  const resolved = path.posix.resolve(normalizedReq);
   const resolvedRoot = path.posix.resolve(normalizedRoot);
 
   if (!resolved.startsWith(resolvedRoot + "/") && resolved !== resolvedRoot) {

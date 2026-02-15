@@ -45,9 +45,12 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **Compile-time enforcement**: Calling execution functions without ModuleExecutionContext fails at compile time.
 
 ## Module Boundary Enforcement
-- **enforceModuleBoundary()** (server/runner.ts): Accepts ModuleExecutionContext, validates that requested paths stay within module rootPath. Denies absolute paths, ".." traversal, and out-of-scope resolution.
-- **RunnerInstruction.targetPath**: Optional field for explicit path boundary checking in runCommand.
-- **validateFilePath()**: Path validation on SimulatedRunnerService, accepts ModuleExecutionContext, used for command-level path extraction fallback.
+- **ModuleBoundaryViolationError** (server/moduleContext.ts): Typed error with moduleId, attemptedPath, reason. Thrown on all boundary violations — never downgraded to warning.
+- **enforceModuleBoundary()** (server/runner.ts): Accepts ModuleExecutionContext, validates that requested paths stay within module rootPath. Denies absolute paths, ".." traversal, and out-of-scope resolution. Throws ModuleBoundaryViolationError (fail-closed).
+- **runCommand()**: Calls enforceModuleBoundary and lets violations propagate (no catch/soft-return).
+- **validateFilePath()**: Delegates to enforceModuleBoundary, returns {valid, reason} for non-throwing checks.
+- **Orchestration boundary** (agentRunService.createAgentRun): Catches ModuleBoundaryViolationError, marks AgentRun as Failed, marks Change as ValidationFailed, captures structured violation artifact in logs.
+- **Terminal state**: ValidationFailed changes cannot be promoted (checkin, merge), retried (agent-run), or restarted (start-workspace). All return 403 with failureReason "MODULE_BOUNDARY_VIOLATION". A new Change is required.
 
 ## Key Pages
 - `/` - Dashboard with stats and recent activity
