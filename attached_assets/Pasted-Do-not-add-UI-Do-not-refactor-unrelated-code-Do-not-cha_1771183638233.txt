@@ -1,0 +1,64 @@
+Do not add UI.
+Do not refactor unrelated code.
+Do not change existing template installation logic.
+
+Objective:
+Introduce tenant-scoped override layers that safely customize installed template modules without forking.
+
+Instructions:
+
+1) Add Tenant Override Models
+   Introduce a new tenant-scoped override concept:
+
+   - ModuleOverride
+     - id
+     - tenantId
+     - installedModuleId
+     - overrideType (workflow | form | rule | config)
+     - targetRef (identifier of overridden element)
+     - patch (json)
+     - createdAt
+     - createdBy
+     - version
+     - status (draft | active | retired)
+
+2) Enforce Override Scope Rules
+   - Overrides:
+       - MUST reference an InstalledModule
+       - MUST belong to the same tenant as the InstalledModule
+       - MUST NOT reference Template or TemplateModule directly
+   - Overrides are additive / patch-based only
+   - Overrides cannot delete template behavior (only modify or extend)
+
+3) Resolution Logic (Read-Time Composition)
+   Update module resolution so that:
+   - Runtime execution loads:
+       TemplateModule baseline
+       → InstalledModule config
+       → Active ModuleOverrides (ordered by version)
+   - Composition happens at execution time
+   - No override mutates stored template state
+
+4) Change Lifecycle Integration
+   - Creating or modifying a ModuleOverride:
+       - creates a Change record
+       - follows existing validation + approval flow
+   - Activating an override requires:
+       - successful validation
+       - status transition to "active"
+   - Retiring an override leaves history intact
+
+5) Safety & Enforcement
+   - Only tenant-scoped execution contexts may create overrides
+   - SystemContext may inspect but not create tenant overrides
+   - Overrides must respect capability profiles
+   - All enforcement remains fail-closed
+
+Constraints:
+- No template upgrades yet
+- No override diff/merge UI
+- No environment promotion yet
+- No RBAC expansion yet
+
+Goal:
+Tenants can safely apply micro-changes to installed template modules using versioned, auditable patch layers without forks or privilege leakage.

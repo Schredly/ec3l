@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema } from "@shared/schema";
+import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema, insertModuleOverrideSchema } from "@shared/schema";
 import { tenantResolution } from "./middleware/tenant";
 import { buildModuleExecutionContext } from "./moduleContext";
 import { ModuleBoundaryViolationError } from "./moduleContext";
@@ -18,6 +18,8 @@ import * as environmentService from "./services/environmentService";
 import * as templateService from "./services/templateService";
 import * as installService from "./services/installService";
 import { InstallServiceError } from "./services/installService";
+import * as overrideService from "./services/overrideService";
+import { OverrideServiceError } from "./services/overrideService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -288,6 +290,97 @@ export async function registerRoutes(
       req.tenantContext.tenantId,
     );
     res.json(apps);
+  });
+
+  // Module Overrides — tenant-scoped
+  app.get("/api/overrides", async (req, res) => {
+    const overrides = await overrideService.getOverridesByTenant(req.tenantContext);
+    res.json(overrides);
+  });
+
+  app.get("/api/overrides/:id", async (req, res) => {
+    try {
+      const override = await overrideService.getOverride(req.tenantContext, req.params.id);
+      if (!override) return res.status(404).json({ message: "Override not found" });
+      res.json(override);
+    } catch (err) {
+      if (err instanceof OverrideServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/overrides", async (req, res) => {
+    const parsed = insertModuleOverrideSchema.safeParse({
+      ...req.body,
+      tenantId: req.tenantContext.tenantId,
+    });
+    if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
+
+    try {
+      const override = await overrideService.createOverride(req.tenantContext, parsed.data);
+      res.status(201).json(override);
+    } catch (err) {
+      if (err instanceof OverrideServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/overrides/:id/activate", async (req, res) => {
+    try {
+      const override = await overrideService.activateOverride(req.tenantContext, req.params.id);
+      res.json(override);
+    } catch (err) {
+      if (err instanceof OverrideServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/overrides/:id/retire", async (req, res) => {
+    try {
+      const override = await overrideService.retireOverride(req.tenantContext, req.params.id);
+      res.json(override);
+    } catch (err) {
+      if (err instanceof OverrideServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/installed-modules/:id/overrides", async (req, res) => {
+    try {
+      const overrides = await overrideService.getOverridesByInstalledModule(
+        req.tenantContext,
+        req.params.id,
+      );
+      res.json(overrides);
+    } catch (err) {
+      if (err instanceof OverrideServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/installed-modules/:id/resolve", async (req, res) => {
+    try {
+      const resolved = await overrideService.resolveModuleConfig(
+        req.tenantContext,
+        req.params.id,
+      );
+      res.json(resolved);
+    } catch (err) {
+      if (err instanceof OverrideServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
   });
 
   return httpServer;

@@ -13,6 +13,7 @@ import {
   installedApps,
   installedModules,
   installedAppEvents,
+  moduleOverrides,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -37,6 +38,8 @@ import {
   type InsertInstalledModule,
   type InstalledAppEvent,
   type InsertInstalledAppEvent,
+  type ModuleOverride,
+  type InsertModuleOverride,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -78,6 +81,7 @@ export interface IStorage {
   getTemplate(id: string): Promise<Template | undefined>;
   createTemplate(data: InsertTemplate): Promise<Template>;
 
+  getTemplateModule(id: string): Promise<TemplateModule | undefined>;
   getTemplateModules(templateId: string): Promise<TemplateModule[]>;
   createTemplateModule(data: InsertTemplateModule): Promise<TemplateModule>;
 
@@ -87,12 +91,21 @@ export interface IStorage {
   createInstalledApp(data: InsertInstalledApp): Promise<InstalledApp>;
   updateInstalledAppStatus(id: string, status: InstalledApp["status"]): Promise<InstalledApp | undefined>;
 
+  getInstalledModule(id: string): Promise<InstalledModule | undefined>;
   getInstalledModules(installedAppId: string): Promise<InstalledModule[]>;
   createInstalledModule(data: InsertInstalledModule): Promise<InstalledModule>;
   deleteInstalledModulesByApp(installedAppId: string): Promise<void>;
 
   getInstalledAppEvents(installedAppId: string): Promise<InstalledAppEvent[]>;
   createInstalledAppEvent(data: InsertInstalledAppEvent): Promise<InstalledAppEvent>;
+
+  getModuleOverride(id: string): Promise<ModuleOverride | undefined>;
+  getModuleOverridesByInstalledModule(installedModuleId: string): Promise<ModuleOverride[]>;
+  getActiveModuleOverrides(installedModuleId: string): Promise<ModuleOverride[]>;
+  getModuleOverridesByTenant(tenantId: string): Promise<ModuleOverride[]>;
+  createModuleOverride(data: InsertModuleOverride): Promise<ModuleOverride>;
+  updateModuleOverrideStatus(id: string, status: ModuleOverride["status"]): Promise<ModuleOverride | undefined>;
+  updateModuleOverrideChangeId(id: string, changeId: string): Promise<ModuleOverride | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -250,6 +263,11 @@ export class DatabaseStorage implements IStorage {
     return template;
   }
 
+  async getTemplateModule(id: string): Promise<TemplateModule | undefined> {
+    const [tm] = await db.select().from(templateModules).where(eq(templateModules.id, id));
+    return tm;
+  }
+
   async getTemplateModules(templateId: string): Promise<TemplateModule[]> {
     return db.select().from(templateModules)
       .where(eq(templateModules.templateId, templateId))
@@ -289,6 +307,11 @@ export class DatabaseStorage implements IStorage {
     return app;
   }
 
+  async getInstalledModule(id: string): Promise<InstalledModule | undefined> {
+    const [mod] = await db.select().from(installedModules).where(eq(installedModules.id, id));
+    return mod;
+  }
+
   async getInstalledModules(installedAppId: string): Promise<InstalledModule[]> {
     return db.select().from(installedModules).where(eq(installedModules.installedAppId, installedAppId));
   }
@@ -311,6 +334,47 @@ export class DatabaseStorage implements IStorage {
   async createInstalledAppEvent(data: InsertInstalledAppEvent): Promise<InstalledAppEvent> {
     const [event] = await db.insert(installedAppEvents).values(data).returning();
     return event;
+  }
+
+  async getModuleOverride(id: string): Promise<ModuleOverride | undefined> {
+    const [override] = await db.select().from(moduleOverrides).where(eq(moduleOverrides.id, id));
+    return override;
+  }
+
+  async getModuleOverridesByInstalledModule(installedModuleId: string): Promise<ModuleOverride[]> {
+    return db.select().from(moduleOverrides)
+      .where(eq(moduleOverrides.installedModuleId, installedModuleId))
+      .orderBy(moduleOverrides.version);
+  }
+
+  async getActiveModuleOverrides(installedModuleId: string): Promise<ModuleOverride[]> {
+    return db.select().from(moduleOverrides)
+      .where(and(
+        eq(moduleOverrides.installedModuleId, installedModuleId),
+        eq(moduleOverrides.status, "active"),
+      ))
+      .orderBy(moduleOverrides.version);
+  }
+
+  async getModuleOverridesByTenant(tenantId: string): Promise<ModuleOverride[]> {
+    return db.select().from(moduleOverrides)
+      .where(eq(moduleOverrides.tenantId, tenantId))
+      .orderBy(desc(moduleOverrides.createdAt));
+  }
+
+  async createModuleOverride(data: InsertModuleOverride): Promise<ModuleOverride> {
+    const [override] = await db.insert(moduleOverrides).values(data).returning();
+    return override;
+  }
+
+  async updateModuleOverrideStatus(id: string, status: ModuleOverride["status"]): Promise<ModuleOverride | undefined> {
+    const [override] = await db.update(moduleOverrides).set({ status }).where(eq(moduleOverrides.id, id)).returning();
+    return override;
+  }
+
+  async updateModuleOverrideChangeId(id: string, changeId: string): Promise<ModuleOverride | undefined> {
+    const [override] = await db.update(moduleOverrides).set({ changeId }).where(eq(moduleOverrides.id, id)).returning();
+    return override;
   }
 }
 

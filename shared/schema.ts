@@ -67,6 +67,19 @@ export const installEventTypeEnum = pgEnum("install_event_type", [
   "install_failed",
 ]);
 
+export const overrideTypeEnum = pgEnum("override_type", [
+  "workflow",
+  "form",
+  "rule",
+  "config",
+]);
+
+export const overrideStatusEnum = pgEnum("override_status", [
+  "draft",
+  "active",
+  "retired",
+]);
+
 // Phase 1: Tenant
 export const tenants = pgTable("tenants", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -193,6 +206,21 @@ export const installedAppEvents = pgTable("installed_app_events", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Phase 8: Module Overrides
+export const moduleOverrides = pgTable("module_overrides", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  installedModuleId: varchar("installed_module_id").notNull().references(() => installedModules.id),
+  overrideType: overrideTypeEnum("override_type").notNull(),
+  targetRef: text("target_ref").notNull(),
+  patch: jsonb("patch").notNull(),
+  createdBy: text("created_by").notNull(),
+  version: integer("version").notNull().default(1),
+  status: overrideStatusEnum("status").notNull().default("draft"),
+  changeId: varchar("change_id").references(() => changeRecords.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Insert schemas
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -259,6 +287,13 @@ export const insertInstalledAppEventSchema = createInsertSchema(installedAppEven
   createdAt: true,
 });
 
+export const insertModuleOverrideSchema = createInsertSchema(moduleOverrides).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+  changeId: true,
+});
+
 // Types
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
@@ -295,3 +330,6 @@ export type InstalledModule = typeof installedModules.$inferSelect;
 
 export type InsertInstalledAppEvent = z.infer<typeof insertInstalledAppEventSchema>;
 export type InstalledAppEvent = typeof installedAppEvents.$inferSelect;
+
+export type InsertModuleOverride = z.infer<typeof insertModuleOverrideSchema>;
+export type ModuleOverride = typeof moduleOverrides.$inferSelect;
