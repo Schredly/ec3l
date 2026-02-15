@@ -60,7 +60,7 @@ export interface IRunnerService {
   validateFilePath(filePath: string, moduleCtx: ModuleExecutionContext): { valid: boolean; reason?: string };
 }
 
-export class SimulatedRunnerService implements IRunnerService {
+class SimulatedRunnerService implements IRunnerService {
   validateFilePath(filePath: string, moduleCtx: ModuleExecutionContext): { valid: boolean; reason?: string } {
     try {
       enforceModuleBoundary(moduleCtx, filePath);
@@ -129,4 +129,6 @@ export class SimulatedRunnerService implements IRunnerService {
   }
 }
 
-export const runnerService: IRunnerService = new SimulatedRunnerService();
+export function createRunnerService(): IRunnerService {
+  return new SimulatedRunnerService();
+}

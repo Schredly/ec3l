@@ -1,7 +1,9 @@
 import type { ModuleExecutionContext } from "../moduleContext";
 import type { Capability } from "../capabilities";
 import { assertCapability, CapabilityDeniedError, Capabilities } from "../capabilities";
-import { runnerService } from "../runner";
+import { createRunnerService } from "../runner";
+
+const runnerService = createRunnerService();
 
 export interface SkillInput {
   target?: string;
@@ -100,3 +102,9 @@ skillRegistry.register({
     return { success: result.success, logs: result.logs };
   },
 });
+
+export const controlPlane = {
+  startWorkspace(workspaceId: string, moduleCtx: ModuleExecutionContext) {
+    return runnerService.startWorkspace(workspaceId, moduleCtx);
+  },
+};
