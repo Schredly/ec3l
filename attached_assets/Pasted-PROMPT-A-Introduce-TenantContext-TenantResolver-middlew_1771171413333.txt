@@ -1,0 +1,127 @@
+PROMPT A — Introduce TenantContext + TenantResolver middleware (header-based for now)
+
+Goal: centralize tenant resolution at the platform boundary (MVP version).
+
+Do not change existing behavior unless explicitly instructed. Keep changes minimal.
+
+Implement a centralized TenantResolver and TenantContext for the API layer.
+
+Requirements:
+1) Create server/tenant.ts that defines:
+   - type TenantContext = { tenantId: string; source: "header" | "system" }
+   - class TenantResolutionError extends Error
+   - function resolveTenantContext(req): TenantContext
+     - reads tenantId from header "x-tenant-id"
+     - if missing: throw TenantResolutionError
+2) Add Express middleware in server/index.ts that:
+   - for all /api routes, resolves TenantContext and attaches it to req as req.tenantContext
+   - for non-/api routes, do nothing
+   - if missing tenantId, return 401 with { message: "Missing tenant context" }
+3) Add the TypeScript declaration merge so Request has tenantContext.
+
+Do NOT change any storage queries yet.
+
+
+✅ After this: every API call has tenant context, centralized, enforced.
+
+PROMPT B — Make projects tenant-owned (non-null tenant_id) + seed default tenant
+
+Goal: move from “nullable tenant” to “real tenant ownership” safely.
+
+Do not change existing behavior unless explicitly instructed. Keep changes minimal.
+
+Update schema + seed so that Projects are always tenant-owned.
+
+Requirements:
+1) In shared/schema.ts:
+   - make projects.tenantId NOT NULL (remove nullable)
+2) In server/seed.ts:
+   - ensure a default tenant exists (slug "default")
+   - when creating seed projects, always set tenantId to the default tenant id
+3) In POST /api/projects route:
+   - set tenantId from req.tenantContext.tenantId when creating a project
+   - do not accept tenantId from the client request body
+
+Update migrations accordingly.
+
+
+✅ After this: you’ve actually made tenant ownership real.
+
+PROMPT C — Tenant-aware storage wrapper (no broad refactor yet)
+
+Goal: introduce tenant-scoped storage once, then expand.
+
+Do not change existing behavior unless explicitly instructed. Keep changes minimal.
+
+Add a tenant-aware storage layer without refactoring everything at once.
+
+Requirements:
+1) Create server/tenantStorage.ts that exports a function:
+   - getTenantStorage(tenantId: string) => object with methods:
+     - getProjects()
+     - getProject(id)
+     - createProject(data)
+     - getChangesByProject(projectId)
+   Each method must scope queries by tenantId.
+
+2) Use this in ONLY these routes in server/routes.ts:
+   - GET /api/projects
+   - GET /api/projects/:id
+   - POST /api/projects
+   - GET /api/projects/:id/changes
+
+All other routes can remain unscoped for now.
+Log a warning to console in any unscoped route handler, like:
+  console.warn("[tenant-scope] route not yet tenant-scoped: /api/changes")
+
+Do NOT change UI yet.
+
+
+✅ After this: the highest-risk cross-tenant paths are closed first.
+
+PROMPT D — Make Change creation tenant-safe (project lookup must be tenant scoped)
+
+Goal: prevent “change against another tenant’s project”.
+
+Do not change existing behavior unless explicitly instructed. Keep changes minimal.
+
+Update POST /api/changes to enforce tenant ownership.
+
+Requirements:
+1) In POST /api/changes handler:
+   - when looking up projectId, ensure the project belongs to req.tenantContext.tenantId
+   - if not found, return 404 (do not reveal existence across tenants)
+2) Ensure module resolution/creation also happens only within that tenant’s project.
+
+Do NOT change schema.
+
+
+✅ After this: tenant isolation covers “Changes” too.
+
+PROMPT E — Real module boundary enforcement (MVP enforcement)
+
+Goal: start enforcing Module.rootPath centrally, even before real filesystem execution exists.
+
+Do not change existing behavior unless explicitly instructed. Keep changes minimal.
+
+Implement MVP module boundary enforcement for runner commands.
+
+Requirements:
+1) In server/runner.ts:
+   - add a helper function enforceModuleBoundary(moduleRootPath: string, requestedPath: string): void
+     - normalize paths
+     - deny absolute paths
+     - deny ".." traversal
+     - deny path that resolves outside moduleRootPath
+2) Update RunnerInstruction to include:
+   - targetPath?: string  (path to read/write/operate on)
+3) Update SimulatedRunnerService.runCommand to:
+   - if moduleId is provided and targetPath is provided:
+     - fetch Module from storage to get rootPath
+     - enforce boundary with enforceModuleBoundary
+     - if violation: return { success:false, logs:[security error] }
+
+Note: You may need to pass moduleRootPath directly into runner from control plane to avoid importing storage into runner. Prefer passing moduleRootPath to keep runner isolated.
+
+
+✅ After this: “module checkout” starts becoming real as a safety boundary.
