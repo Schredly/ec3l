@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import path from "path";
+import type { ModuleExecutionContext } from "./moduleContext";
 
 export interface RunnerInstruction {
   workspaceId: string;
@@ -16,7 +17,8 @@ export interface RunnerResult {
   previewUrl?: string;
 }
 
-export function enforceModuleBoundary(moduleRootPath: string, requestedPath: string): void {
+export function enforceModuleBoundary(moduleCtx: ModuleExecutionContext, requestedPath: string): void {
+  const moduleRootPath = moduleCtx.moduleRootPath;
   const normalized = path.posix.normalize(requestedPath);
 
   if (path.posix.isAbsolute(normalized)) {
@@ -39,15 +41,16 @@ export function enforceModuleBoundary(moduleRootPath: string, requestedPath: str
 }
 
 export interface IRunnerService {
-  startWorkspace(workspaceId: string, moduleId?: string): Promise<RunnerResult>;
-  runCommand(instruction: RunnerInstruction): Promise<RunnerResult>;
-  getDiff(workspaceId: string): Promise<RunnerResult>;
-  getLogs(workspaceId: string): Promise<RunnerResult>;
-  validateFilePath(filePath: string, moduleRootPath: string): { valid: boolean; reason?: string };
+  startWorkspace(workspaceId: string, moduleCtx: ModuleExecutionContext): Promise<RunnerResult>;
+  runCommand(instruction: RunnerInstruction, moduleCtx: ModuleExecutionContext): Promise<RunnerResult>;
+  getDiff(workspaceId: string, moduleCtx: ModuleExecutionContext): Promise<RunnerResult>;
+  getLogs(workspaceId: string, moduleCtx: ModuleExecutionContext): Promise<RunnerResult>;
+  validateFilePath(filePath: string, moduleCtx: ModuleExecutionContext): { valid: boolean; reason?: string };
 }
 
 export class SimulatedRunnerService implements IRunnerService {
-  validateFilePath(filePath: string, moduleRootPath: string): { valid: boolean; reason?: string } {
+  validateFilePath(filePath: string, moduleCtx: ModuleExecutionContext): { valid: boolean; reason?: string } {
+    const moduleRootPath = moduleCtx.moduleRootPath;
     const normalizedFile = path.posix.normalize(filePath).replace(/^\/+/, "").replace(/\/+$/, "");
     const normalizedRoot = path.posix.normalize(moduleRootPath).replace(/^\/+/, "").replace(/\/+$/, "");
 
@@ -67,7 +70,7 @@ export class SimulatedRunnerService implements IRunnerService {
     return { valid: true };
   }
 
-  async startWorkspace(workspaceId: string, _moduleId?: string): Promise<RunnerResult> {
+  async startWorkspace(workspaceId: string, _moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
     const containerId = `ws-${randomBytes(6).toString("hex")}`;
     const previewUrl = `https://preview-${containerId}.ec3l.dev`;
     return {
@@ -82,10 +85,10 @@ export class SimulatedRunnerService implements IRunnerService {
     };
   }
 
-  async runCommand(instruction: RunnerInstruction): Promise<RunnerResult> {
+  async runCommand(instruction: RunnerInstruction, moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
     if (instruction.moduleRootPath && instruction.targetPath) {
       try {
-        enforceModuleBoundary(instruction.moduleRootPath, instruction.targetPath);
+        enforceModuleBoundary(moduleCtx, instruction.targetPath);
       } catch (err: any) {
         console.warn(`[runner] Module boundary violation: ${err.message}`);
         return {
@@ -101,7 +104,7 @@ export class SimulatedRunnerService implements IRunnerService {
       const commandParts = instruction.command.split(" ");
       const targetPath = commandParts[commandParts.length - 1];
       if (targetPath && targetPath.includes("/")) {
-        const check = this.validateFilePath(targetPath, instruction.moduleRootPath);
+        const check = this.validateFilePath(targetPath, moduleCtx);
         if (!check.valid) {
           console.warn(`[runner] Module scope violation: ${check.reason}`);
           return {
@@ -126,7 +129,7 @@ export class SimulatedRunnerService implements IRunnerService {
     };
   }
 
-  async getDiff(workspaceId: string): Promise<RunnerResult> {
+  async getDiff(workspaceId: string, _moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
     return {
       success: true,
       logs: [
@@ -136,7 +139,7 @@ export class SimulatedRunnerService implements IRunnerService {
     };
   }
 
-  async getLogs(workspaceId: string): Promise<RunnerResult> {
+  async getLogs(workspaceId: string, _moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
     return {
       success: true,
       logs: [

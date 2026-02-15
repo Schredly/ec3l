@@ -1,4 +1,5 @@
 import type { TenantContext } from "../tenant";
+import type { ModuleExecutionContext } from "../moduleContext";
 import { storage } from "../storage";
 import { runnerService } from "../runner";
 import type { AgentRun, InsertAgentRun, ChangeRecord } from "@shared/schema";
@@ -16,7 +17,8 @@ export async function getAgentRunsByChange(ctx: TenantContext, changeId: string)
 export async function createAgentRun(
   ctx: TenantContext,
   data: InsertAgentRun,
-  change: ChangeRecord
+  change: ChangeRecord,
+  moduleCtx: ModuleExecutionContext
 ): Promise<AgentRun> {
   void ctx;
   let mod = null;
@@ -44,7 +46,7 @@ export async function createAgentRun(
 
   for (const skill of requestedSkills) {
     if (moduleRootPath) {
-      const check = runnerService.validateFilePath(skill.target, moduleRootPath);
+      const check = runnerService.validateFilePath(skill.target, moduleCtx);
       if (check.valid) {
         allowedSkills.push(skill.name);
         logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — within module scope "${moduleRootPath}"`);

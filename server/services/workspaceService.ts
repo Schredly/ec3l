@@ -1,4 +1,5 @@
 import type { TenantContext } from "../tenant";
+import type { ModuleExecutionContext } from "../moduleContext";
 import { storage } from "../storage";
 import { runnerService } from "../runner";
 import type { Workspace, ChangeRecord } from "@shared/schema";
@@ -8,7 +9,7 @@ export async function getWorkspaceByChange(ctx: TenantContext, changeId: string)
   return storage.getWorkspaceByChange(changeId);
 }
 
-export async function startWorkspace(ctx: TenantContext, change: ChangeRecord): Promise<Workspace | undefined> {
+export async function startWorkspace(ctx: TenantContext, change: ChangeRecord, moduleCtx: ModuleExecutionContext): Promise<Workspace | undefined> {
   void ctx;
   const workspace = await storage.createWorkspace({
     changeId: change.id,
@@ -16,7 +17,7 @@ export async function startWorkspace(ctx: TenantContext, change: ChangeRecord): 
     previewUrl: null,
   });
 
-  const result = await runnerService.startWorkspace(workspace.id, change.moduleId ?? undefined);
+  const result = await runnerService.startWorkspace(workspace.id, moduleCtx);
 
   await storage.updateWorkspaceStatus(workspace.id, "Running", result.containerId, result.previewUrl);
   const branchName = `change/${change.id.slice(0, 8)}`;

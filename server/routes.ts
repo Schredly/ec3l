@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema } from "@shared/schema";
 import { tenantResolution } from "./middleware/tenant";
 import type { SystemContext } from "./tenant";
+import type { ModuleExecutionContext } from "./moduleContext";
 import * as projectService from "./services/projectService";
 import * as changeService from "./services/changeService";
 import { ChangeServiceError } from "./services/changeService";
@@ -112,7 +113,18 @@ export async function registerRoutes(
     const change = await changeService.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
-    const updated = await workspaceService.startWorkspace(req.tenantContext, change);
+    let mod = null;
+    if (change.moduleId) {
+      mod = await storage.getModule(change.moduleId);
+    }
+
+    const moduleCtx: ModuleExecutionContext = {
+      tenantContext: req.tenantContext,
+      moduleId: change.moduleId ?? "",
+      moduleRootPath: mod?.rootPath ?? "",
+    };
+
+    const updated = await workspaceService.startWorkspace(req.tenantContext, change, moduleCtx);
     res.status(201).json(updated);
   });
 
@@ -148,7 +160,18 @@ export async function registerRoutes(
     const parsed = insertAgentRunSchema.safeParse({ changeId: change.id, intent: req.body.intent });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
-    const run = await agentRunService.createAgentRun(req.tenantContext, parsed.data, change);
+    let mod = null;
+    if (change.moduleId) {
+      mod = await storage.getModule(change.moduleId);
+    }
+
+    const moduleCtx: ModuleExecutionContext = {
+      tenantContext: req.tenantContext,
+      moduleId: change.moduleId ?? "",
+      moduleRootPath: mod?.rootPath ?? "",
+    };
+
+    const run = await agentRunService.createAgentRun(req.tenantContext, parsed.data, change, moduleCtx);
     res.status(201).json(run);
   });
 
