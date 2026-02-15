@@ -67,6 +67,37 @@ export const installEventTypeEnum = pgEnum("install_event_type", [
   "install_failed",
 ]);
 
+export const wfTriggerTypeEnum = pgEnum("wf_trigger_type", [
+  "record_event",
+  "schedule",
+  "manual",
+]);
+
+export const wfDefinitionStatusEnum = pgEnum("wf_definition_status", [
+  "draft",
+  "active",
+  "retired",
+]);
+
+export const wfStepTypeEnum = pgEnum("wf_step_type", [
+  "assignment",
+  "approval",
+  "notification",
+  "decision",
+]);
+
+export const wfExecutionStatusEnum = pgEnum("wf_execution_status", [
+  "running",
+  "completed",
+  "failed",
+]);
+
+export const wfStepExecutionStatusEnum = pgEnum("wf_step_execution_status", [
+  "pending",
+  "completed",
+  "failed",
+]);
+
 export const overrideTypeEnum = pgEnum("override_type", [
   "workflow",
   "form",
@@ -221,6 +252,47 @@ export const moduleOverrides = pgTable("module_overrides", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Phase 9: Workflow Engine
+export const workflowDefinitions = pgTable("workflow_definitions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: text("name").notNull(),
+  triggerType: wfTriggerTypeEnum("trigger_type").notNull(),
+  triggerConfig: jsonb("trigger_config"),
+  version: integer("version").notNull().default(1),
+  status: wfDefinitionStatusEnum("status").notNull().default("draft"),
+  changeId: varchar("change_id").references(() => changeRecords.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const workflowSteps = pgTable("workflow_steps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workflowDefinitionId: varchar("workflow_definition_id").notNull().references(() => workflowDefinitions.id),
+  stepType: wfStepTypeEnum("step_type").notNull(),
+  config: jsonb("config").notNull(),
+  orderIndex: integer("order_index").notNull().default(0),
+});
+
+export const workflowExecutions = pgTable("workflow_executions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  workflowDefinitionId: varchar("workflow_definition_id").notNull().references(() => workflowDefinitions.id),
+  status: wfExecutionStatusEnum("status").notNull().default("running"),
+  input: jsonb("input"),
+  error: text("error"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const workflowStepExecutions = pgTable("workflow_step_executions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workflowExecutionId: varchar("workflow_execution_id").notNull().references(() => workflowExecutions.id),
+  workflowStepId: varchar("workflow_step_id").notNull().references(() => workflowSteps.id),
+  status: wfStepExecutionStatusEnum("status").notNull().default("pending"),
+  output: jsonb("output"),
+  executedAt: timestamp("executed_at"),
+});
+
 // Insert schemas
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -294,6 +366,32 @@ export const insertModuleOverrideSchema = createInsertSchema(moduleOverrides).om
   changeId: true,
 });
 
+export const insertWorkflowDefinitionSchema = createInsertSchema(workflowDefinitions).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+  changeId: true,
+});
+
+export const insertWorkflowStepSchema = createInsertSchema(workflowSteps).omit({
+  id: true,
+});
+
+export const insertWorkflowExecutionSchema = createInsertSchema(workflowExecutions).omit({
+  id: true,
+  startedAt: true,
+  completedAt: true,
+  status: true,
+  error: true,
+});
+
+export const insertWorkflowStepExecutionSchema = createInsertSchema(workflowStepExecutions).omit({
+  id: true,
+  executedAt: true,
+  status: true,
+  output: true,
+});
+
 // Types
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
@@ -333,3 +431,15 @@ export type InstalledAppEvent = typeof installedAppEvents.$inferSelect;
 
 export type InsertModuleOverride = z.infer<typeof insertModuleOverrideSchema>;
 export type ModuleOverride = typeof moduleOverrides.$inferSelect;
+
+export type InsertWorkflowDefinition = z.infer<typeof insertWorkflowDefinitionSchema>;
+export type WorkflowDefinition = typeof workflowDefinitions.$inferSelect;
+
+export type InsertWorkflowStep = z.infer<typeof insertWorkflowStepSchema>;
+export type WorkflowStep = typeof workflowSteps.$inferSelect;
+
+export type InsertWorkflowExecution = z.infer<typeof insertWorkflowExecutionSchema>;
+export type WorkflowExecution = typeof workflowExecutions.$inferSelect;
+
+export type InsertWorkflowStepExecution = z.infer<typeof insertWorkflowStepExecutionSchema>;
+export type WorkflowStepExecution = typeof workflowStepExecutions.$inferSelect;

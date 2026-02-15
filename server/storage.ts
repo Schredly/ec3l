@@ -1,4 +1,4 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, asc } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants,
@@ -14,6 +14,10 @@ import {
   installedModules,
   installedAppEvents,
   moduleOverrides,
+  workflowDefinitions,
+  workflowSteps,
+  workflowExecutions,
+  workflowStepExecutions,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -40,6 +44,14 @@ import {
   type InsertInstalledAppEvent,
   type ModuleOverride,
   type InsertModuleOverride,
+  type WorkflowDefinition,
+  type InsertWorkflowDefinition,
+  type WorkflowStep,
+  type InsertWorkflowStep,
+  type WorkflowExecution,
+  type InsertWorkflowExecution,
+  type WorkflowStepExecution,
+  type InsertWorkflowStepExecution,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -106,6 +118,29 @@ export interface IStorage {
   createModuleOverride(data: InsertModuleOverride): Promise<ModuleOverride>;
   updateModuleOverrideStatus(id: string, status: ModuleOverride["status"]): Promise<ModuleOverride | undefined>;
   updateModuleOverrideChangeId(id: string, changeId: string): Promise<ModuleOverride | undefined>;
+
+  getWorkflowDefinition(id: string): Promise<WorkflowDefinition | undefined>;
+  getWorkflowDefinitionsByTenant(tenantId: string): Promise<WorkflowDefinition[]>;
+  getActiveWorkflowDefinitionsByTenant(tenantId: string): Promise<WorkflowDefinition[]>;
+  createWorkflowDefinition(data: InsertWorkflowDefinition): Promise<WorkflowDefinition>;
+  updateWorkflowDefinitionStatus(id: string, status: WorkflowDefinition["status"]): Promise<WorkflowDefinition | undefined>;
+  updateWorkflowDefinitionChangeId(id: string, changeId: string): Promise<WorkflowDefinition | undefined>;
+
+  getWorkflowStep(id: string): Promise<WorkflowStep | undefined>;
+  getWorkflowStepsByDefinition(workflowDefinitionId: string): Promise<WorkflowStep[]>;
+  createWorkflowStep(data: InsertWorkflowStep): Promise<WorkflowStep>;
+
+  getWorkflowExecution(id: string): Promise<WorkflowExecution | undefined>;
+  getWorkflowExecutionsByTenant(tenantId: string): Promise<WorkflowExecution[]>;
+  getWorkflowExecutionsByDefinition(workflowDefinitionId: string): Promise<WorkflowExecution[]>;
+  createWorkflowExecution(data: InsertWorkflowExecution): Promise<WorkflowExecution>;
+  updateWorkflowExecutionStatus(id: string, status: WorkflowExecution["status"], error?: string): Promise<WorkflowExecution | undefined>;
+  completeWorkflowExecution(id: string): Promise<WorkflowExecution | undefined>;
+
+  getWorkflowStepExecution(id: string): Promise<WorkflowStepExecution | undefined>;
+  getWorkflowStepExecutionsByExecution(workflowExecutionId: string): Promise<WorkflowStepExecution[]>;
+  createWorkflowStepExecution(data: InsertWorkflowStepExecution): Promise<WorkflowStepExecution>;
+  updateWorkflowStepExecution(id: string, status: WorkflowStepExecution["status"], output?: unknown): Promise<WorkflowStepExecution | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -375,6 +410,117 @@ export class DatabaseStorage implements IStorage {
   async updateModuleOverrideChangeId(id: string, changeId: string): Promise<ModuleOverride | undefined> {
     const [override] = await db.update(moduleOverrides).set({ changeId }).where(eq(moduleOverrides.id, id)).returning();
     return override;
+  }
+
+  async getWorkflowDefinition(id: string): Promise<WorkflowDefinition | undefined> {
+    const [wf] = await db.select().from(workflowDefinitions).where(eq(workflowDefinitions.id, id));
+    return wf;
+  }
+
+  async getWorkflowDefinitionsByTenant(tenantId: string): Promise<WorkflowDefinition[]> {
+    return db.select().from(workflowDefinitions)
+      .where(eq(workflowDefinitions.tenantId, tenantId))
+      .orderBy(desc(workflowDefinitions.createdAt));
+  }
+
+  async getActiveWorkflowDefinitionsByTenant(tenantId: string): Promise<WorkflowDefinition[]> {
+    return db.select().from(workflowDefinitions)
+      .where(and(
+        eq(workflowDefinitions.tenantId, tenantId),
+        eq(workflowDefinitions.status, "active"),
+      ))
+      .orderBy(desc(workflowDefinitions.createdAt));
+  }
+
+  async createWorkflowDefinition(data: InsertWorkflowDefinition): Promise<WorkflowDefinition> {
+    const [wf] = await db.insert(workflowDefinitions).values(data).returning();
+    return wf;
+  }
+
+  async updateWorkflowDefinitionStatus(id: string, status: WorkflowDefinition["status"]): Promise<WorkflowDefinition | undefined> {
+    const [wf] = await db.update(workflowDefinitions).set({ status }).where(eq(workflowDefinitions.id, id)).returning();
+    return wf;
+  }
+
+  async updateWorkflowDefinitionChangeId(id: string, changeId: string): Promise<WorkflowDefinition | undefined> {
+    const [wf] = await db.update(workflowDefinitions).set({ changeId }).where(eq(workflowDefinitions.id, id)).returning();
+    return wf;
+  }
+
+  async getWorkflowStep(id: string): Promise<WorkflowStep | undefined> {
+    const [step] = await db.select().from(workflowSteps).where(eq(workflowSteps.id, id));
+    return step;
+  }
+
+  async getWorkflowStepsByDefinition(workflowDefinitionId: string): Promise<WorkflowStep[]> {
+    return db.select().from(workflowSteps)
+      .where(eq(workflowSteps.workflowDefinitionId, workflowDefinitionId))
+      .orderBy(asc(workflowSteps.orderIndex));
+  }
+
+  async createWorkflowStep(data: InsertWorkflowStep): Promise<WorkflowStep> {
+    const [step] = await db.insert(workflowSteps).values(data).returning();
+    return step;
+  }
+
+  async getWorkflowExecution(id: string): Promise<WorkflowExecution | undefined> {
+    const [exec] = await db.select().from(workflowExecutions).where(eq(workflowExecutions.id, id));
+    return exec;
+  }
+
+  async getWorkflowExecutionsByTenant(tenantId: string): Promise<WorkflowExecution[]> {
+    return db.select().from(workflowExecutions)
+      .where(eq(workflowExecutions.tenantId, tenantId))
+      .orderBy(desc(workflowExecutions.startedAt));
+  }
+
+  async getWorkflowExecutionsByDefinition(workflowDefinitionId: string): Promise<WorkflowExecution[]> {
+    return db.select().from(workflowExecutions)
+      .where(eq(workflowExecutions.workflowDefinitionId, workflowDefinitionId))
+      .orderBy(desc(workflowExecutions.startedAt));
+  }
+
+  async createWorkflowExecution(data: InsertWorkflowExecution): Promise<WorkflowExecution> {
+    const [exec] = await db.insert(workflowExecutions).values(data).returning();
+    return exec;
+  }
+
+  async updateWorkflowExecutionStatus(id: string, status: WorkflowExecution["status"], error?: string): Promise<WorkflowExecution | undefined> {
+    const updates: Partial<WorkflowExecution> = { status };
+    if (error !== undefined) updates.error = error;
+    if (status === "failed" || status === "completed") updates.completedAt = new Date();
+    const [exec] = await db.update(workflowExecutions).set(updates).where(eq(workflowExecutions.id, id)).returning();
+    return exec;
+  }
+
+  async completeWorkflowExecution(id: string): Promise<WorkflowExecution | undefined> {
+    const [exec] = await db.update(workflowExecutions)
+      .set({ status: "completed", completedAt: new Date() })
+      .where(eq(workflowExecutions.id, id))
+      .returning();
+    return exec;
+  }
+
+  async getWorkflowStepExecution(id: string): Promise<WorkflowStepExecution | undefined> {
+    const [stepExec] = await db.select().from(workflowStepExecutions).where(eq(workflowStepExecutions.id, id));
+    return stepExec;
+  }
+
+  async getWorkflowStepExecutionsByExecution(workflowExecutionId: string): Promise<WorkflowStepExecution[]> {
+    return db.select().from(workflowStepExecutions)
+      .where(eq(workflowStepExecutions.workflowExecutionId, workflowExecutionId));
+  }
+
+  async createWorkflowStepExecution(data: InsertWorkflowStepExecution): Promise<WorkflowStepExecution> {
+    const [stepExec] = await db.insert(workflowStepExecutions).values(data).returning();
+    return stepExec;
+  }
+
+  async updateWorkflowStepExecution(id: string, status: WorkflowStepExecution["status"], output?: unknown): Promise<WorkflowStepExecution | undefined> {
+    const updates: Partial<WorkflowStepExecution> = { status, executedAt: new Date() };
+    if (output !== undefined) updates.output = output;
+    const [stepExec] = await db.update(workflowStepExecutions).set(updates).where(eq(workflowStepExecutions.id, id)).returning();
+    return stepExec;
   }
 }
 

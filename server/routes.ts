@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema, insertModuleOverrideSchema } from "@shared/schema";
+import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema, insertModuleOverrideSchema, insertWorkflowDefinitionSchema, insertWorkflowStepSchema } from "@shared/schema";
 import { tenantResolution } from "./middleware/tenant";
 import { buildModuleExecutionContext } from "./moduleContext";
 import { ModuleBoundaryViolationError } from "./moduleContext";
@@ -20,6 +20,8 @@ import * as installService from "./services/installService";
 import { InstallServiceError } from "./services/installService";
 import * as overrideService from "./services/overrideService";
 import { OverrideServiceError, OverridePatchValidationError } from "./services/overrideService";
+import * as workflowService from "./services/workflowService";
+import { WorkflowServiceError } from "./services/workflowService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -383,6 +385,180 @@ export async function registerRoutes(
       res.json(resolved);
     } catch (err) {
       if (err instanceof OverrideServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-definitions", async (req, res) => {
+    try {
+      const defs = await workflowService.getWorkflowDefinitions(req.tenantContext);
+      res.json(defs);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-definitions/:id", async (req, res) => {
+    try {
+      const def = await workflowService.getWorkflowDefinition(req.tenantContext, req.params.id);
+      if (!def) return res.status(404).json({ message: "Workflow definition not found" });
+      res.json(def);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-definitions", async (req, res) => {
+    try {
+      const { projectId, moduleId, ...data } = req.body;
+      if (!projectId) {
+        return res.status(400).json({ message: "projectId is required" });
+      }
+      const parsed = insertWorkflowDefinitionSchema.omit({ tenantId: true }).parse(data);
+      const def = await workflowService.createWorkflowDefinition(
+        req.tenantContext,
+        parsed,
+        projectId,
+        moduleId,
+      );
+      res.status(201).json(def);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-definitions/:id/activate", async (req, res) => {
+    try {
+      const def = await workflowService.activateWorkflowDefinition(req.tenantContext, req.params.id);
+      res.json(def);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-definitions/:id/retire", async (req, res) => {
+    try {
+      const def = await workflowService.retireWorkflowDefinition(req.tenantContext, req.params.id);
+      res.json(def);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-definitions/:id/steps", async (req, res) => {
+    try {
+      const steps = await workflowService.getWorkflowSteps(req.tenantContext, req.params.id);
+      res.json(steps);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-definitions/:id/steps", async (req, res) => {
+    try {
+      const parsed = insertWorkflowStepSchema.omit({ workflowDefinitionId: true }).parse(req.body);
+      const step = await workflowService.addWorkflowStep(
+        req.tenantContext,
+        req.params.id,
+        parsed,
+      );
+      res.status(201).json(step);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/workflow-definitions/:id/execute", async (req, res) => {
+    try {
+      const { moduleId, input } = req.body;
+      if (!moduleId) {
+        return res.status(400).json({ message: "moduleId is required" });
+      }
+
+      const mod = await storage.getModule(moduleId);
+      if (!mod) {
+        return res.status(404).json({ message: "Module not found" });
+      }
+
+      const moduleCtx = buildModuleExecutionContext({
+        tenantContext: req.tenantContext,
+        moduleId: mod.id,
+        moduleRootPath: mod.rootPath,
+        capabilityProfile: mod.capabilityProfile as any,
+      });
+
+      const execution = await workflowService.executeWorkflow(
+        req.tenantContext,
+        moduleCtx,
+        req.params.id,
+        input || {},
+      );
+      res.status(201).json(execution);
+    } catch (err) {
+      if (err instanceof CapabilityDeniedError) {
+        return res.status(403).json({ message: err.message, capability: err.capability });
+      }
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-executions", async (req, res) => {
+    try {
+      const execs = await workflowService.getWorkflowExecutions(req.tenantContext);
+      res.json(execs);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-executions/:id", async (req, res) => {
+    try {
+      const exec = await workflowService.getWorkflowExecution(req.tenantContext, req.params.id);
+      if (!exec) return res.status(404).json({ message: "Workflow execution not found" });
+      res.json(exec);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/workflow-executions/:id/steps", async (req, res) => {
+    try {
+      const steps = await workflowService.getWorkflowExecutionSteps(req.tenantContext, req.params.id);
+      res.json(steps);
+    } catch (err) {
+      if (err instanceof WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;

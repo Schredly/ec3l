@@ -1,0 +1,100 @@
+Do not add UI.
+Do not refactor unrelated systems.
+Do not introduce external integrations.
+
+Objective:
+Introduce a minimal, tenant-scoped workflow engine that executes metadata-defined workflows safely and audibly.
+
+Instructions:
+
+1) Add Workflow Metadata Models
+   Introduce workflow definition models:
+
+   - WorkflowDefinition
+     - id
+     - tenantId
+     - name
+     - triggerType (record_event | schedule | manual)
+     - triggerConfig (json)
+     - version
+     - status (draft | active | retired)
+     - createdAt
+
+   - WorkflowStep
+     - id
+     - workflowDefinitionId
+     - stepType (assignment | approval | notification | decision)
+     - config (json)
+     - orderIndex
+
+2) Add Workflow Execution Models
+   Introduce runtime execution tracking:
+
+   - WorkflowExecution
+     - id
+     - tenantId
+     - workflowDefinitionId
+     - status (running | completed | failed)
+     - startedAt
+     - completedAt
+
+   - WorkflowStepExecution
+     - id
+     - workflowExecutionId
+     - workflowStepId
+     - status (pending | completed | failed)
+     - output (json)
+     - executedAt
+
+3) Execution Engine (Runner Only)
+   Implement runner-side execution:
+
+   - executeWorkflow(ctx, workflowDefinitionId, input)
+   - Must require ModuleExecutionContext
+   - Steps execute sequentially by orderIndex
+   - Each step emits a WorkflowStepExecution record
+   - Failures:
+       - stop execution
+       - mark workflow failed
+       - record error artifact
+
+4) Supported Step Types (v1)
+   Implement minimal handlers:
+
+   - assignment:
+       - resolves assignee via config (user | group | rule stub)
+       - records assignment result
+   - approval:
+       - creates approval task
+       - pauses execution until approved/rejected
+   - notification:
+       - emits notification event (no delivery integration yet)
+   - decision:
+       - evaluates condition and controls next step
+
+5) Change & Override Integration
+   - WorkflowDefinition creation/modification:
+       - creates Change record
+       - follows validation + approval
+   - Tenant overrides may:
+       - patch WorkflowDefinition config
+       - patch WorkflowStep config
+   - Overrides do NOT mutate stored workflow definitions
+
+6) Safety & Invariants
+   - Only tenant execution contexts may execute workflows
+   - SystemContext may inspect but not execute tenant workflows
+   - Workflow execution must:
+       - be tenant-scoped
+       - be auditable
+       - fail closed
+   - No direct database mutation from step handlers
+
+Constraints:
+- No UI builders yet
+- No async fan-out yet
+- No external connectors yet
+- No cross-tenant execution
+
+Goal:
+A minimal, safe workflow execution spine that supports assignment, approval, and notification, integrates with change management, and is overrideable without forks.
