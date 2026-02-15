@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db";
-import { tenants, projects, modules, changeRecords, workspaces, agentRuns, environments } from "@shared/schema";
+import { tenants, projects, modules, changeRecords, workspaces, agentRuns, environments, templates, templateModules } from "@shared/schema";
 import { log } from "./index";
 
 async function ensureDefaultTenant() {
@@ -17,6 +17,7 @@ async function ensureDefaultTenant() {
 
 export async function seedDatabase() {
   await ensureDefaultTenant();
+  await seedTemplates();
 
   const existingProjects = await db.select().from(projects);
   if (existingProjects.length > 0) {
@@ -193,4 +194,58 @@ async function seedEnvironmentsForExistingProjects() {
     await db.insert(environments).values({ projectId: p.id, name: "prod", isDefault: false });
   }
   log("Environments seeded for existing projects");
+}
+
+async function seedTemplates() {
+  const existing = await db.select().from(templates);
+  if (existing.length > 0) return;
+
+  log("Seeding templates...");
+
+  const [hrTemplate] = await db.insert(templates).values({
+    name: "HR Onboarding",
+    domain: "HR",
+    version: "1.0.0",
+    description: "Employee onboarding workflow with document management and approval chains.",
+    isGlobal: true,
+  }).returning();
+
+  await db.insert(templateModules).values([
+    { templateId: hrTemplate.id, moduleName: "employee-data", moduleType: "schema" as const, defaultCapabilityProfile: "CODE_MODULE_DEFAULT" as const, orderIndex: 0 },
+    { templateId: hrTemplate.id, moduleName: "onboarding-flow", moduleType: "workflow" as const, defaultCapabilityProfile: "WORKFLOW_MODULE_DEFAULT" as const, orderIndex: 1 },
+    { templateId: hrTemplate.id, moduleName: "doc-manager", moduleType: "code" as const, defaultCapabilityProfile: "CODE_MODULE_DEFAULT" as const, orderIndex: 2 },
+    { templateId: hrTemplate.id, moduleName: "onboarding-ui", moduleType: "ui" as const, defaultCapabilityProfile: "READ_ONLY" as const, orderIndex: 3 },
+  ]);
+
+  const [itsmTemplate] = await db.insert(templates).values({
+    name: "IT Service Management",
+    domain: "ITSM",
+    version: "1.0.0",
+    description: "Ticket management with SLA tracking, escalation workflows, and knowledge base.",
+    isGlobal: true,
+  }).returning();
+
+  await db.insert(templateModules).values([
+    { templateId: itsmTemplate.id, moduleName: "ticket-schema", moduleType: "schema" as const, defaultCapabilityProfile: "CODE_MODULE_DEFAULT" as const, orderIndex: 0 },
+    { templateId: itsmTemplate.id, moduleName: "sla-engine", moduleType: "code" as const, defaultCapabilityProfile: "CODE_MODULE_DEFAULT" as const, orderIndex: 1 },
+    { templateId: itsmTemplate.id, moduleName: "escalation-flow", moduleType: "workflow" as const, defaultCapabilityProfile: "WORKFLOW_MODULE_DEFAULT" as const, orderIndex: 2 },
+    { templateId: itsmTemplate.id, moduleName: "ticket-ui", moduleType: "ui" as const, defaultCapabilityProfile: "READ_ONLY" as const, orderIndex: 3 },
+    { templateId: itsmTemplate.id, moduleName: "notification-hook", moduleType: "integration" as const, defaultCapabilityProfile: "READ_ONLY" as const, orderIndex: 4 },
+  ]);
+
+  const [facilitiesTemplate] = await db.insert(templates).values({
+    name: "Facilities Request",
+    domain: "Facilities",
+    version: "1.0.0",
+    description: "Workspace and facilities request management with approval workflows.",
+    isGlobal: true,
+  }).returning();
+
+  await db.insert(templateModules).values([
+    { templateId: facilitiesTemplate.id, moduleName: "request-data", moduleType: "schema" as const, defaultCapabilityProfile: "CODE_MODULE_DEFAULT" as const, orderIndex: 0 },
+    { templateId: facilitiesTemplate.id, moduleName: "approval-flow", moduleType: "workflow" as const, defaultCapabilityProfile: "WORKFLOW_MODULE_DEFAULT" as const, orderIndex: 1 },
+    { templateId: facilitiesTemplate.id, moduleName: "request-ui", moduleType: "ui" as const, defaultCapabilityProfile: "READ_ONLY" as const, orderIndex: 2 },
+  ]);
+
+  log("Templates seeded successfully");
 }

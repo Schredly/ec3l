@@ -1,0 +1,82 @@
+Do not add UI features.
+Do not refactor unrelated code.
+Do not change existing execution, security, or capability behavior.
+
+Objective:
+Introduce global Templates as installable module graphs that can be safely installed into a tenant without forking.
+
+Instructions:
+
+1) Add Template Models
+   Create or update schema to include:
+
+   - Template
+     - id
+     - name
+     - version
+     - description
+     - domain (e.g. HR, ITSM, Facilities, Custom)
+     - createdAt
+     - isGlobal (boolean, always true for now)
+
+   - TemplateModule
+     - templateId
+     - moduleType (code | schema | workflow | ui | integration)
+     - moduleName
+     - defaultCapabilityProfile
+     - orderIndex (for install sequencing)
+     - metadata (json, optional)
+
+2) Add Installed App Models
+   Introduce tenant-scoped installation records:
+
+   - InstalledApp
+     - id
+     - tenantId
+     - templateId
+     - templateVersion
+     - installedAt
+     - status (installed | upgrading | failed)
+
+   - InstalledModule
+     - id
+     - installedAppId
+     - moduleId
+     - templateModuleId
+     - capabilityProfile
+     - isOverride (boolean, default false)
+
+3) Implement Template Installation Service
+   Create a system-level service (requires SystemContext):
+
+   - installTemplateIntoTenant(systemCtx, tenantId, templateId)
+
+   Behavior:
+   - Create InstalledApp record
+   - For each TemplateModule:
+       - Create a new Module instance bound to the tenant
+       - Assign capability profile from TemplateModule
+       - Record InstalledModule mapping
+   - Installation must be:
+       - transactional
+       - idempotent (safe to retry)
+   - On failure:
+       - mark InstalledApp as failed
+       - emit audit artifact
+
+4) Enforce Context & Safety
+   - Only SystemContext may install templates
+   - Tenant/module code must NOT invoke install logic
+   - All created modules must:
+       - belong to the tenant
+       - participate in existing Change + ModuleExecutionContext rules
+       - respect capability profiles
+
+5) No Overrides Yet
+   - Do NOT implement tenant overrides
+   - Do NOT allow modifying Template modules
+   - Do NOT add UI
+   - This step defines mechanics only
+
+Goal:
+Templates behave as global, versioned packages that install cleanly into a tenant as isolated module graphs, without forks or privilege leakage.

@@ -18,8 +18,10 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **Environments**: Per-project environments (dev, test, prod) with isDefault flag
 - **Workspaces**: Simulated isolated environments linked to changes
 - **AgentRuns**: Agent execution records with intent, skills used, and logs
-- **Templates**: Domain templates (HR, Finance, Legal, Facilities, Custom) -- read-only structural groundwork
-- **TemplateModules**: Join table linking templates to modules
+- **Templates**: Domain templates (HR, ITSM, Facilities) with isGlobal flag — read-only blueprints for creating tenant projects
+- **TemplateModules**: Blueprint definitions per template (moduleName, moduleType, defaultCapabilityProfile, orderIndex, metadata) — no FK to actual modules; installation creates real modules from these blueprints
+- **InstalledApps**: Tracks template installations per tenant (tenantId, templateId, templateVersion, status: installed/upgrading/failed)
+- **InstalledModules**: Links installed apps to actual created modules (installedAppId, moduleId, templateModuleId, capabilityProfile, isOverride)
 
 ## Multi-Tenancy Architecture
 - **Tenant Resolution** (server/tenant.ts): Defines TenantContext type, SystemContext type, TenantResolutionError, and resolveTenantContext() function that reads x-tenant-id header.
@@ -36,6 +38,7 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
   - moduleService.ts: getModules(), getModulesByProject()
   - environmentService.ts: getEnvironmentsByProject(), getEnvironment()
   - templateService.ts: systemGetTemplates(), systemGetTemplate(), systemGetTemplateModules() — require SystemContext (not tenant-owned data)
+  - installService.ts: installTemplateIntoTenant(), getInstalledApps() — require SystemContext; transactional, idempotent template installation
 
 ## Module Execution Context
 - **ModuleExecutionContext** (server/moduleContext.ts): Explicit context type required for all execution paths. Contains tenantContext, moduleId, moduleRootPath, capabilityProfile, and derived capabilities.
@@ -111,6 +114,8 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - `GET /api/templates` - All templates (read-only)
 - `GET /api/templates/:id` - Get template
 - `GET /api/templates/:id/modules` - Get template modules
+- `POST /api/templates/:id/install` - Install template into tenant (creates project, modules, environments)
+- `GET /api/installed-apps` - List tenant's installed apps
 
 ## User Preferences
 - Dark mode by default

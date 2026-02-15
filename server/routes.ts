@@ -16,6 +16,8 @@ import * as agentRunService from "./services/agentRunService";
 import * as moduleService from "./services/moduleService";
 import * as environmentService from "./services/environmentService";
 import * as templateService from "./services/templateService";
+import * as installService from "./services/installService";
+import { InstallServiceError } from "./services/installService";
 
 const systemCtx = createSystemContext("read-only template access");
 
@@ -264,6 +266,27 @@ export async function registerRoutes(
   app.get("/api/templates/:id/modules", async (req, res) => {
     const tms = await templateService.systemGetTemplateModules(systemCtx, req.params.id);
     res.json(tms);
+  });
+
+  app.post("/api/templates/:id/install", async (req, res) => {
+    const installCtx = createSystemContext("template installation");
+    const tenantId = req.tenantContext.tenantId;
+
+    try {
+      const installed = await installService.installTemplateIntoTenant(installCtx, tenantId, req.params.id);
+      res.status(201).json(installed);
+    } catch (err) {
+      if (err instanceof InstallServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/installed-apps", async (req, res) => {
+    const installCtx = createSystemContext("list installed apps");
+    const apps = await installService.getInstalledApps(installCtx, req.tenantContext.tenantId);
+    res.json(apps);
   });
 
   return httpServer;

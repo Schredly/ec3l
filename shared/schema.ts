@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, pgEnum, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, pgEnum, boolean, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -52,6 +52,13 @@ export const templateDomainEnum = pgEnum("template_domain", [
   "Legal",
   "Facilities",
   "Custom",
+  "ITSM",
+]);
+
+export const installedAppStatusEnum = pgEnum("installed_app_status", [
+  "installed",
+  "upgrading",
+  "failed",
 ]);
 
 // Phase 1: Tenant
@@ -134,13 +141,37 @@ export const templates = pgTable("templates", {
   domain: templateDomainEnum("domain").notNull(),
   version: text("version").notNull().default("1.0.0"),
   description: text("description"),
+  isGlobal: boolean("is_global").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const templateModules = pgTable("template_modules", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   templateId: varchar("template_id").notNull().references(() => templates.id),
+  moduleType: moduleTypeEnum("module_type").notNull().default("code"),
+  moduleName: text("module_name").notNull(),
+  defaultCapabilityProfile: capabilityProfileEnum("default_capability_profile").notNull().default("CODE_MODULE_DEFAULT"),
+  orderIndex: integer("order_index").notNull().default(0),
+  metadata: jsonb("metadata"),
+});
+
+// Phase 6: Installed Apps
+export const installedApps = pgTable("installed_apps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  templateId: varchar("template_id").notNull().references(() => templates.id),
+  templateVersion: text("template_version").notNull(),
+  status: installedAppStatusEnum("status").notNull().default("installed"),
+  installedAt: timestamp("installed_at").defaultNow().notNull(),
+});
+
+export const installedModules = pgTable("installed_modules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  installedAppId: varchar("installed_app_id").notNull().references(() => installedApps.id),
   moduleId: varchar("module_id").notNull().references(() => modules.id),
+  templateModuleId: varchar("template_module_id").notNull().references(() => templateModules.id),
+  capabilityProfile: capabilityProfileEnum("capability_profile").notNull().default("CODE_MODULE_DEFAULT"),
+  isOverride: boolean("is_override").notNull().default(false),
 });
 
 // Insert schemas
@@ -194,6 +225,16 @@ export const insertTemplateModuleSchema = createInsertSchema(templateModules).om
   id: true,
 });
 
+export const insertInstalledAppSchema = createInsertSchema(installedApps).omit({
+  id: true,
+  installedAt: true,
+  status: true,
+});
+
+export const insertInstalledModuleSchema = createInsertSchema(installedModules).omit({
+  id: true,
+});
+
 // Types
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
@@ -221,3 +262,9 @@ export type Template = typeof templates.$inferSelect;
 
 export type InsertTemplateModule = z.infer<typeof insertTemplateModuleSchema>;
 export type TemplateModule = typeof templateModules.$inferSelect;
+
+export type InsertInstalledApp = z.infer<typeof insertInstalledAppSchema>;
+export type InstalledApp = typeof installedApps.$inferSelect;
+
+export type InsertInstalledModule = z.infer<typeof insertInstalledModuleSchema>;
+export type InstalledModule = typeof installedModules.$inferSelect;

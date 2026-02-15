@@ -10,6 +10,8 @@ import {
   environments,
   templates,
   templateModules,
+  installedApps,
+  installedModules,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -28,6 +30,10 @@ import {
   type InsertTemplate,
   type TemplateModule,
   type InsertTemplateModule,
+  type InstalledApp,
+  type InsertInstalledApp,
+  type InstalledModule,
+  type InsertInstalledModule,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -71,6 +77,15 @@ export interface IStorage {
 
   getTemplateModules(templateId: string): Promise<TemplateModule[]>;
   createTemplateModule(data: InsertTemplateModule): Promise<TemplateModule>;
+
+  getInstalledApps(tenantId: string): Promise<InstalledApp[]>;
+  getInstalledApp(id: string): Promise<InstalledApp | undefined>;
+  getInstalledAppByTenantAndTemplate(tenantId: string, templateId: string): Promise<InstalledApp | undefined>;
+  createInstalledApp(data: InsertInstalledApp): Promise<InstalledApp>;
+  updateInstalledAppStatus(id: string, status: InstalledApp["status"]): Promise<InstalledApp | undefined>;
+
+  getInstalledModules(installedAppId: string): Promise<InstalledModule[]>;
+  createInstalledModule(data: InsertInstalledModule): Promise<InstalledModule>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -229,12 +244,51 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTemplateModules(templateId: string): Promise<TemplateModule[]> {
-    return db.select().from(templateModules).where(eq(templateModules.templateId, templateId));
+    return db.select().from(templateModules)
+      .where(eq(templateModules.templateId, templateId))
+      .orderBy(templateModules.orderIndex);
   }
 
   async createTemplateModule(data: InsertTemplateModule): Promise<TemplateModule> {
     const [tm] = await db.insert(templateModules).values(data).returning();
     return tm;
+  }
+
+  async getInstalledApps(tenantId: string): Promise<InstalledApp[]> {
+    return db.select().from(installedApps)
+      .where(eq(installedApps.tenantId, tenantId))
+      .orderBy(desc(installedApps.installedAt));
+  }
+
+  async getInstalledApp(id: string): Promise<InstalledApp | undefined> {
+    const [app] = await db.select().from(installedApps).where(eq(installedApps.id, id));
+    return app;
+  }
+
+  async getInstalledAppByTenantAndTemplate(tenantId: string, templateId: string): Promise<InstalledApp | undefined> {
+    const [app] = await db.select().from(installedApps).where(
+      and(eq(installedApps.tenantId, tenantId), eq(installedApps.templateId, templateId))
+    );
+    return app;
+  }
+
+  async createInstalledApp(data: InsertInstalledApp): Promise<InstalledApp> {
+    const [app] = await db.insert(installedApps).values(data).returning();
+    return app;
+  }
+
+  async updateInstalledAppStatus(id: string, status: InstalledApp["status"]): Promise<InstalledApp | undefined> {
+    const [app] = await db.update(installedApps).set({ status }).where(eq(installedApps.id, id)).returning();
+    return app;
+  }
+
+  async getInstalledModules(installedAppId: string): Promise<InstalledModule[]> {
+    return db.select().from(installedModules).where(eq(installedModules.installedAppId, installedAppId));
+  }
+
+  async createInstalledModule(data: InsertInstalledModule): Promise<InstalledModule> {
+    const [mod] = await db.insert(installedModules).values(data).returning();
+    return mod;
   }
 }
 
