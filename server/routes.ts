@@ -19,7 +19,7 @@ import * as templateService from "./services/templateService";
 import * as installService from "./services/installService";
 import { InstallServiceError } from "./services/installService";
 import * as overrideService from "./services/overrideService";
-import { OverrideServiceError } from "./services/overrideService";
+import { OverrideServiceError, OverridePatchValidationError } from "./services/overrideService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -322,6 +322,9 @@ export async function registerRoutes(
       const override = await overrideService.createOverride(req.tenantContext, parsed.data);
       res.status(201).json(override);
     } catch (err) {
+      if (err instanceof OverridePatchValidationError) {
+        return res.status(err.statusCode).json({ message: err.message, violations: err.violations });
+      }
       if (err instanceof OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
@@ -334,6 +337,9 @@ export async function registerRoutes(
       const override = await overrideService.activateOverride(req.tenantContext, req.params.id);
       res.json(override);
     } catch (err) {
+      if (err instanceof OverridePatchValidationError) {
+        return res.status(err.statusCode).json({ message: err.message, violations: err.violations });
+      }
       if (err instanceof OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }

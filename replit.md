@@ -23,6 +23,17 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **InstalledApps**: Tracks template installations per tenant (tenantId, templateId, templateVersion, status: installed/upgrading/failed). UNIQUE constraint on (tenantId, templateId) prevents duplicates. Default status is "upgrading" — only set to "installed" after all modules created successfully.
 - **InstalledModules**: Links installed apps to actual created modules (installedAppId, moduleId, templateModuleId, capabilityProfile, isOverride)
 - **InstalledAppEvents**: Audit trail for installation lifecycle (install_started, install_completed, install_failed) with installedAppId, templateId, tenantId, timestamp, errorDetails
+- **ModuleOverrides**: Tenant-scoped overrides for installed template modules (overrideType: workflow/form/rule/config, status: draft/active/retired, JSONB patch, version for ordering, linked changeId)
+
+## Override Composition (server/services/overrideService.ts)
+- **Deterministic Ordering**: Active overrides loaded `WHERE status = 'active' ORDER BY version ASC`. Composition applies patches sequentially by version.
+- **Controlled Deep Merge**: Nested objects are recursively merged (not replaced via Object.assign). Only `overrideType = "config"` allows full object replacement (FULL_REPLACEMENT_TYPES set).
+- **Destructive Override Prevention**: Patches validated against template baseline metadata at both create and activate time:
+  - Cannot null a required baseline property
+  - Cannot replace a baseline object with a non-object value (unless overrideType is "config")
+  - New fields are allowed (additive overrides)
+- **Fail-Closed Activation**: If patch validation fails during activation, the linked Change is marked `ValidationFailed` and override stays in `draft`. OverridePatchValidationError carries `violations[]` array surfaced in API response.
+- **Resolution** (GET /api/installed-modules/:id/resolve): Read-time composition of baseline (TemplateModule metadata) + installed config + active overrides into single view with `composedPatch`.
 
 ## Multi-Tenancy Architecture
 - **Tenant Resolution** (server/tenant.ts): Defines TenantContext type, SystemContext type, TenantResolutionError, and resolveTenantContext() function that reads x-tenant-id header.

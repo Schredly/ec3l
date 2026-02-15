@@ -15,6 +15,124 @@ export class OverrideServiceError extends Error {
   }
 }
 
+export class OverridePatchValidationError extends OverrideServiceError {
+  public readonly violations: string[];
+  constructor(violations: string[]) {
+    super(`Override patch validation failed: ${violations.join("; ")}`, 400);
+    this.name = "OverridePatchValidationError";
+    this.violations = violations;
+  }
+}
+
+const FULL_REPLACEMENT_TYPES: ReadonlySet<string> = new Set(["config"]);
+
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return val !== null && typeof val === "object" && !Array.isArray(val);
+}
+
+function controlledDeepMerge(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+  allowFullReplacement: boolean,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...target };
+  for (const key of Object.keys(source)) {
+    const srcVal = source[key];
+    const tgtVal = result[key];
+    if (isPlainObject(srcVal) && isPlainObject(tgtVal) && !allowFullReplacement) {
+      result[key] = controlledDeepMerge(tgtVal, srcVal, false);
+    } else {
+      result[key] = srcVal;
+    }
+  }
+  return result;
+}
+
+function validatePatchAgainstBaseline(
+  patch: Record<string, unknown>,
+  baselineMetadata: Record<string, unknown>,
+  overrideType: string,
+): string[] {
+  const violations: string[] = [];
+
+  if (!isPlainObject(patch)) {
+    violations.push("Patch must be a plain object");
+    return violations;
+  }
+
+  validatePatchKeys(patch, baselineMetadata, overrideType, "", violations);
+
+  checkForRemovedRequiredKeys(patch, baselineMetadata, overrideType, "", violations);
+
+  return violations;
+}
+
+function validatePatchKeys(
+  patch: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+  overrideType: string,
+  prefix: string,
+  violations: string[],
+): void {
+  for (const key of Object.keys(patch)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const patchVal = patch[key];
+    const baselineVal = baseline[key];
+
+    if (baselineVal === undefined) {
+      continue;
+    }
+
+    if (isPlainObject(baselineVal) && !isPlainObject(patchVal) && !FULL_REPLACEMENT_TYPES.has(overrideType)) {
+      violations.push(
+        `Key "${path}" is an object in baseline — cannot replace with non-object value (overrideType "${overrideType}" does not allow full replacement)`,
+      );
+    }
+
+    if (isPlainObject(baselineVal) && isPlainObject(patchVal) && !FULL_REPLACEMENT_TYPES.has(overrideType)) {
+      validatePatchKeys(patchVal, baselineVal, overrideType, path, violations);
+    }
+  }
+}
+
+function checkForRemovedRequiredKeys(
+  patch: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+  overrideType: string,
+  prefix: string,
+  violations: string[],
+): void {
+  if (FULL_REPLACEMENT_TYPES.has(overrideType)) return;
+
+  for (const key of Object.keys(patch)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const patchVal = patch[key];
+    const baselineVal = baseline[key];
+
+    if (patchVal === null && baselineVal !== undefined && baselineVal !== null) {
+      violations.push(
+        `Key "${path}" sets a required baseline property to null — destructive override not allowed`,
+      );
+    }
+
+    if (isPlainObject(patchVal) && isPlainObject(baselineVal)) {
+      checkForRemovedRequiredKeys(patchVal, baselineVal, overrideType, path, violations);
+    }
+  }
+}
+
+async function getBaselineMetadata(installedModuleId: string): Promise<Record<string, unknown>> {
+  const installedModule = await storage.getInstalledModule(installedModuleId);
+  if (!installedModule) return {};
+
+  const templateModule = await storage.getTemplateModule(installedModule.templateModuleId);
+  if (!templateModule) return {};
+
+  const metadata = templateModule.metadata;
+  if (isPlainObject(metadata)) return metadata as Record<string, unknown>;
+  return {};
+}
+
 async function validateOverrideScope(
   tenantId: string,
   installedModuleId: string,
@@ -48,6 +166,17 @@ export async function createOverride(
 
   if (data.tenantId !== ctx.tenantId) {
     throw new OverrideServiceError("Override tenantId must match request tenant context", 403);
+  }
+
+  const patch = data.patch as Record<string, unknown> | null;
+  if (patch && isPlainObject(patch)) {
+    const baseline = await getBaselineMetadata(data.installedModuleId);
+    if (Object.keys(baseline).length > 0) {
+      const violations = validatePatchAgainstBaseline(patch, baseline, data.overrideType);
+      if (violations.length > 0) {
+        throw new OverridePatchValidationError(violations);
+      }
+    }
   }
 
   const installedModule = await storage.getInstalledModule(data.installedModuleId);
@@ -134,6 +263,20 @@ export async function activateOverride(
     }
   }
 
+  const patch = override.patch as Record<string, unknown> | null;
+  if (patch && isPlainObject(patch)) {
+    const baseline = await getBaselineMetadata(override.installedModuleId);
+    if (Object.keys(baseline).length > 0) {
+      const violations = validatePatchAgainstBaseline(patch, baseline, override.overrideType);
+      if (violations.length > 0) {
+        if (override.changeId) {
+          await storage.updateChangeStatus(override.changeId, "ValidationFailed");
+        }
+        throw new OverridePatchValidationError(violations);
+      }
+    }
+  }
+
   const updated = await storage.updateModuleOverrideStatus(overrideId, "active");
   return updated!;
 }
@@ -189,11 +332,16 @@ export async function resolveModuleConfig(
 
   const activeOverrides = await storage.getActiveModuleOverrides(installedModuleId);
 
-  const composedPatch: Record<string, unknown> = {};
+  const baselineMetadata = isPlainObject(templateModule.metadata)
+    ? (templateModule.metadata as Record<string, unknown>)
+    : {};
+
+  let composedPatch: Record<string, unknown> = {};
   for (const override of activeOverrides) {
     const patch = override.patch as Record<string, unknown> | null;
-    if (patch && typeof patch === "object") {
-      Object.assign(composedPatch, patch);
+    if (patch && isPlainObject(patch)) {
+      const allowFull = FULL_REPLACEMENT_TYPES.has(override.overrideType);
+      composedPatch = controlledDeepMerge(composedPatch, patch, allowFull);
     }
   }
 
