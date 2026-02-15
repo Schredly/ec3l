@@ -3,15 +3,20 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema } from "@shared/schema";
 import { runnerService } from "./runner";
+import { tenantResolution } from "./middleware/tenant";
+import { tenantScoped } from "./helpers/tenant-scoped";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
 
-  // Projects
-  app.get("/api/projects", async (_req, res) => {
-    const projects = await storage.getProjects();
+  app.use("/api", tenantResolution);
+
+  // Projects — tenant-scoped listing (Prompt 12/13)
+  app.get("/api/projects", async (req, res) => {
+    const scoped = tenantScoped(req.tenantId);
+    const projects = await scoped.getProjects();
     res.json(projects);
   });
 
@@ -24,7 +29,13 @@ export async function registerRoutes(
   app.post("/api/projects", async (req, res) => {
     const parsed = insertProjectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
-    const project = await storage.createProject(parsed.data);
+
+    const data = { ...parsed.data };
+    if (req.tenantId) {
+      data.tenantId = req.tenantId;
+    }
+
+    const project = await storage.createProject(data);
 
     await storage.createModule({ projectId: project.id, name: "default", type: "code", rootPath: "src" });
     await storage.createEnvironment({ projectId: project.id, name: "dev", isDefault: true });
@@ -165,7 +176,7 @@ export async function registerRoutes(
     res.json(updated);
   });
 
-  // Agent run — control plane creates record, simulates agent execution
+  // Agent run — with module-scoped permissions (Prompt 15)
   app.post("/api/changes/:id/agent-run", async (req, res) => {
     const change = await storage.getChange(req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
@@ -173,19 +184,60 @@ export async function registerRoutes(
     const parsed = insertAgentRunSchema.safeParse({ changeId: change.id, intent: req.body.intent });
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
+    let mod = null;
+    if (change.moduleId) {
+      mod = await storage.getModule(change.moduleId);
+    }
+
     let run = await storage.createAgentRun(parsed.data);
 
-    const skills = ["editFile", "runLint"];
-    const logs = [
+    const moduleRootPath = mod?.rootPath || null;
+    const editTarget = change.modulePath || moduleRootPath || "src/index.ts";
+    const lintTarget = moduleRootPath || "src";
+
+    const requestedSkills = [
+      { name: "editFile", target: editTarget },
+      { name: "runLint", target: lintTarget },
+    ];
+    const allowedSkills: string[] = [];
+    const deniedSkills: string[] = [];
+    const logs: string[] = [
       `[agent] Received intent: "${run.intent}"`,
-      `[agent] Selecting skills: ${skills.join(", ")}`,
-      `[skill:editFile] Modifying ${change.modulePath || "src/index.ts"}`,
-      `[skill:runLint] Running linter...`,
-      `[skill:runLint] All checks passed`,
-      `[agent] Validation passed - marking change as Ready`,
+      `[agent] Change: ${change.id}, Module: ${mod ? `${mod.id} (${mod.name})` : "none"}`,
+      `[agent] Module scope: ${moduleRootPath || "unrestricted"}`,
     ];
 
-    run = (await storage.updateAgentRun(run.id, "Passed", JSON.stringify(skills), JSON.stringify(logs)))!;
+    for (const skill of requestedSkills) {
+      if (moduleRootPath) {
+        const check = runnerService.validateFilePath(skill.target, moduleRootPath);
+        if (check.valid) {
+          allowedSkills.push(skill.name);
+          logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — within module scope "${moduleRootPath}"`);
+        } else {
+          deniedSkills.push(skill.name);
+          logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" DENIED — ${check.reason}`);
+          console.warn(`[agent-permissions] Denied skill="${skill.name}" target="${skill.target}" change=${change.id} module=${mod?.id}: ${check.reason}`);
+        }
+      } else {
+        allowedSkills.push(skill.name);
+        logs.push(`[agent] Skill "${skill.name}" target="${skill.target}" ALLOWED — no module scope enforced`);
+      }
+    }
+
+    if (deniedSkills.length > 0) {
+      logs.push(`[agent] ${deniedSkills.length} skill(s) denied due to module scope restrictions`);
+      logs.push(`[agent] Validation failed — scope violations detected`);
+      run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+      return res.status(201).json(run);
+    }
+
+    logs.push(`[agent] All skills approved: ${allowedSkills.join(", ")}`);
+    logs.push(`[skill:editFile] Modifying ${editTarget}`);
+    logs.push(`[skill:runLint] Running linter on ${lintTarget}...`);
+    logs.push(`[skill:runLint] All checks passed`);
+    logs.push(`[agent] Validation passed — marking change as Ready`);
+
+    run = (await storage.updateAgentRun(run.id, "Passed", JSON.stringify(allowedSkills), JSON.stringify(logs)))!;
 
     if (change.status === "WorkspaceRunning") {
       await storage.updateChangeStatus(change.id, "Ready");

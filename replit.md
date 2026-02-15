@@ -21,6 +21,11 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - **Templates**: Domain templates (HR, Finance, Legal, Facilities, Custom) — read-only structural groundwork
 - **TemplateModules**: Join table linking templates to modules
 
+## Middleware & Security
+- **Tenant Resolution** (server/middleware/tenant.ts): Resolves tenantId from x-tenant-id header, attaches to req context. Warns on unscoped access in production.
+- **Tenant-Scoped DB Helper** (server/helpers/tenant-scoped.ts): TenantScopedQueries class filters queries by tenantId. Used in GET /api/projects.
+- **Module Guardrails**: Runner validates file paths against module rootPath with path traversal protection. Agent runs validate each skill target against module scope.
+
 ## Key Pages
 - `/` - Dashboard with stats and recent activity
 - `/projects` - Project list with create dialog
@@ -41,7 +46,7 @@ ec3l.ai is an agentic ChangeOps platform for managing code changes through GitHu
 - `POST /api/changes/:id/start-workspace` - Start workspace (delegates to runner service)
 - `POST /api/changes/:id/checkin` - Check in change (→ Ready)
 - `POST /api/changes/:id/merge` - Merge change
-- `POST /api/changes/:id/agent-run` - Start agent run
+- `POST /api/changes/:id/agent-run` - Start agent run (module-scoped permissions enforced)
 - `GET /api/changes/:id/workspace` - Get workspace for change
 - `GET /api/changes/:id/agent-runs` - Get agent runs for change
 - `GET /api/agent-runs` - All agent runs
