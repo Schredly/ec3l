@@ -115,6 +115,19 @@ export const wfIntentStatusEnum = pgEnum("wf_intent_status", [
   "duplicate",
 ]);
 
+export const agentProposalTypeEnum = pgEnum("agent_proposal_type", [
+  "form_patch",
+  "workflow_change",
+  "approval_comment",
+]);
+
+export const agentProposalStatusEnum = pgEnum("agent_proposal_status", [
+  "draft",
+  "submitted",
+  "accepted",
+  "rejected",
+]);
+
 export const overrideTypeEnum = pgEnum("override_type", [
   "workflow",
   "form",
@@ -433,6 +446,20 @@ export const recordLocks = pgTable("record_locks", {
   unique("uq_record_locks_tenant_type_record").on(table.tenantId, table.recordTypeId, table.recordId),
 ]);
 
+// Agent Proposals — propose-only agent outputs linked to Change drafts
+export const agentProposals = pgTable("agent_proposals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  changeId: varchar("change_id").notNull().references(() => changeRecords.id),
+  agentId: varchar("agent_id").notNull(),
+  proposalType: agentProposalTypeEnum("proposal_type").notNull(),
+  targetRef: text("target_ref").notNull(),
+  payload: jsonb("payload").notNull(),
+  summary: text("summary"),
+  status: agentProposalStatusEnum("status").notNull().default("draft"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const choiceLists = pgTable("choice_lists", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
@@ -678,6 +705,12 @@ export const insertRecordLockSchema = createInsertSchema(recordLocks).omit({
   createdAt: true,
 });
 
+export const insertAgentProposalSchema = createInsertSchema(agentProposals).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+});
+
 export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
   id: true,
   createdAt: true,
@@ -774,6 +807,9 @@ export type WorkflowTrigger = typeof workflowTriggers.$inferSelect;
 
 export type InsertWorkflowExecutionIntent = z.infer<typeof insertWorkflowExecutionIntentSchema>;
 export type WorkflowExecutionIntent = typeof workflowExecutionIntents.$inferSelect;
+
+export type InsertAgentProposal = z.infer<typeof insertAgentProposalSchema>;
+export type AgentProposal = typeof agentProposals.$inferSelect;
 
 export type InsertRecordLock = z.infer<typeof insertRecordLockSchema>;
 export type RecordLock = typeof recordLocks.$inferSelect;

@@ -70,6 +70,17 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **Record Locks**: `record_locks` table tracks locked records by tenantId + recordTypeId + recordId (unique constraint). Lock enforcement via `checkRecordLock()` in formService rejects edits on locked records with 403. API: GET /api/record-locks (list locks), GET /api/record-locks/check?recordTypeId=X&recordId=Y (check lock status).
 - **Tenant Isolation**: All metadata is tenant-scoped; install requires valid tenant context; foreign key constraints prevent cross-tenant access.
 
+## Agent Proposal System (server/services/agentProposalService.ts, server/services/agentGuardService.ts)
+- **Purpose**: Enable agent assistance for HR Lite (and other modules) in a propose-only, governed manner. Agents can draft proposals but cannot execute, activate, or mutate directly.
+- **Agent Proposals Table**: `agent_proposals` with fields: id, tenantId, changeId, agentId, proposalType (form_patch | workflow_change | approval_comment), targetRef, payload (jsonb), summary, status (draft | submitted | accepted | rejected), createdAt.
+- **Proposal Types**: `form_patch` (validated against formPatchOperationsSchema), `workflow_change` (suggested step modifications), `approval_comment` (draft comments/summaries).
+- **Lifecycle**: Agent creates proposal (status=draft) → Human submits (status=submitted) → Human with change.approve reviews (status=accepted|rejected). Each proposal auto-creates a Draft ChangeRecord if no changeId provided.
+- **Agent Guard** (`assertNotAgent`): Explicit denial of agent actors from: workflow execution, workflow resume/approval, override activation, change approval (Ready/Merged), trigger firing, proposal submission, proposal review. Uses `x-agent-id` header for agent identity resolution via `resolveActorFromContext()`.
+- **Actor Resolution**: `resolveActorFromContext(ctx)` checks `x-agent-id` header first (returns agent actor), then `x-user-id` (returns user actor). TenantContext extended with optional `agentId` field.
+- **Audit Trail**: Agent proposals create AgentRun records linked to the Change, recording proposalId, agentId, proposalType, and targetRef. RBAC audit logs capture agent authorization attempts with actorType=agent.
+- **API Routes**: GET /api/agent-proposals (list by tenant, optional ?changeId filter), GET /api/agent-proposals/:id, POST /api/agent-proposals (create, agent-only), POST /api/agent-proposals/:id/submit (human-only), POST /api/agent-proposals/:id/review (human-only, requires change.approve).
+- **Key Files**: server/services/agentProposalService.ts (proposal CRUD + validation), server/services/agentGuardService.ts (assertNotAgent guard), server/tenant.ts (agentId in TenantContext), server/services/rbacService.ts (resolveActorFromContext).
+
 ## External Dependencies
 - **GitHub**: For project connectivity and code repository management.
 - **PostgreSQL**: The primary database for persistent storage.

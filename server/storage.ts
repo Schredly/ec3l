@@ -100,6 +100,9 @@ import {
   recordLocks,
   type RecordLock,
   type InsertRecordLock,
+  agentProposals,
+  type AgentProposal,
+  type InsertAgentProposal,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -211,6 +214,12 @@ export interface IStorage {
   getRecordLock(tenantId: string, recordTypeId: string, recordId: string): Promise<RecordLock | undefined>;
   getRecordLocksByTenant(tenantId: string): Promise<RecordLock[]>;
   createRecordLock(data: InsertRecordLock): Promise<RecordLock>;
+
+  getAgentProposal(id: string): Promise<AgentProposal | undefined>;
+  getAgentProposalsByChange(changeId: string): Promise<AgentProposal[]>;
+  getAgentProposalsByTenant(tenantId: string): Promise<AgentProposal[]>;
+  createAgentProposal(data: InsertAgentProposal): Promise<AgentProposal>;
+  updateAgentProposalStatus(id: string, status: AgentProposal["status"]): Promise<AgentProposal | undefined>;
 
   getRecordType(id: string): Promise<RecordType | undefined>;
   getRecordTypesByTenant(tenantId: string): Promise<RecordType[]>;
@@ -783,6 +792,36 @@ export class DatabaseStorage implements IStorage {
   async createRecordLock(data: InsertRecordLock): Promise<RecordLock> {
     const [lock] = await db.insert(recordLocks).values(data).returning();
     return lock;
+  }
+
+  async getAgentProposal(id: string): Promise<AgentProposal | undefined> {
+    const [item] = await db.select().from(agentProposals).where(eq(agentProposals.id, id));
+    return item;
+  }
+
+  async getAgentProposalsByChange(changeId: string): Promise<AgentProposal[]> {
+    return db.select().from(agentProposals)
+      .where(eq(agentProposals.changeId, changeId))
+      .orderBy(desc(agentProposals.createdAt));
+  }
+
+  async getAgentProposalsByTenant(tenantId: string): Promise<AgentProposal[]> {
+    return db.select().from(agentProposals)
+      .where(eq(agentProposals.tenantId, tenantId))
+      .orderBy(desc(agentProposals.createdAt));
+  }
+
+  async createAgentProposal(data: InsertAgentProposal): Promise<AgentProposal> {
+    const [item] = await db.insert(agentProposals).values(data).returning();
+    return item;
+  }
+
+  async updateAgentProposalStatus(id: string, status: AgentProposal["status"]): Promise<AgentProposal | undefined> {
+    const [item] = await db.update(agentProposals)
+      .set({ status })
+      .where(eq(agentProposals.id, id))
+      .returning();
+    return item;
   }
 
   async getRecordType(id: string): Promise<RecordType | undefined> {

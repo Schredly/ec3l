@@ -228,6 +228,16 @@ export function actorFromContext(ctx: TenantContext): ActorIdentity {
   return { actorType: "user", actorId: ctx.userId };
 }
 
+export function resolveActorFromContext(ctx: TenantContext): ActorIdentity {
+  if (ctx.agentId) {
+    return { actorType: "agent", actorId: ctx.agentId };
+  }
+  if (ctx.userId) {
+    return { actorType: "user", actorId: ctx.userId };
+  }
+  throw new RbacDeniedError("unknown", undefined, undefined);
+}
+
 export function agentActor(agentId: string): ActorIdentity {
   return { actorType: "agent", actorId: agentId };
 }

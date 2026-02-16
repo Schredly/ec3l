@@ -31,9 +31,12 @@ import * as formService from "./services/formService";
 import { installHrLite, HrLiteInstallError } from "./services/hrLiteInstaller";
 import { FormServiceError } from "./services/formService";
 import * as rbacService from "./services/rbacService";
-import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles, actorFromContext, systemActor } from "./services/rbacService";
+import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles, actorFromContext, resolveActorFromContext, systemActor } from "./services/rbacService";
 import { insertRbacRoleSchema, insertRbacPolicySchema } from "@shared/schema";
 import type { ActorIdentity } from "@shared/schema";
+import { assertNotAgent, AgentGuardError } from "./services/agentGuardService";
+import * as agentProposalService from "./services/agentProposalService";
+import { AgentProposalError } from "./services/agentProposalService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -116,13 +119,18 @@ export async function registerRoutes(
     const { status } = req.body;
     if (!status) return res.status(400).json({ message: "status is required" });
     try {
+      const actor = resolveActorFromContext(req.tenantContext);
       if (status === "Ready" || status === "Merged") {
-        await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+        assertNotAgent(actor, "approve changes");
+        await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
       }
       const updated = await changeService.updateChangeStatus(req.tenantContext, req.params.id, status);
       if (!updated) return res.status(404).json({ message: "Change not found" });
       res.json(updated);
     } catch (err) {
+      if (err instanceof AgentGuardError) {
+        return res.status(403).json({ message: err.message, action: err.action });
+      }
       if (err instanceof RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
@@ -387,10 +395,15 @@ export async function registerRoutes(
 
   app.post("/api/overrides/:id/activate", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.OVERRIDE_ACTIVATE, "override", req.params.id);
+      const actor = resolveActorFromContext(req.tenantContext);
+      assertNotAgent(actor, "activate overrides");
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.OVERRIDE_ACTIVATE, "override", req.params.id);
       const override = await overrideService.activateOverride(req.tenantContext, req.params.id);
       res.json(override);
     } catch (err) {
+      if (err instanceof AgentGuardError) {
+        return res.status(403).json({ message: err.message, action: err.action });
+      }
       if (err instanceof RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
@@ -548,7 +561,9 @@ export async function registerRoutes(
 
   app.post("/api/workflow-definitions/:id/execute", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.WORKFLOW_EXECUTE, "workflow", req.params.id);
+      const actor = resolveActorFromContext(req.tenantContext);
+      assertNotAgent(actor, "execute workflows");
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.WORKFLOW_EXECUTE, "workflow", req.params.id);
       const { moduleId, input } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -574,6 +589,9 @@ export async function registerRoutes(
       );
       res.status(201).json(execution);
     } catch (err) {
+      if (err instanceof AgentGuardError) {
+        return res.status(403).json({ message: err.message, action: err.action });
+      }
       if (err instanceof RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
@@ -614,7 +632,9 @@ export async function registerRoutes(
 
   app.post("/api/workflow-executions/:id/resume", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.WORKFLOW_APPROVE, "workflow", req.params.id);
+      const actor = resolveActorFromContext(req.tenantContext);
+      assertNotAgent(actor, "approve or resume workflow executions");
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.WORKFLOW_APPROVE, "workflow", req.params.id);
       const { moduleId, stepExecutionId, outcome } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -647,6 +667,9 @@ export async function registerRoutes(
       );
       res.json(execution);
     } catch (err) {
+      if (err instanceof AgentGuardError) {
+        return res.status(403).json({ message: err.message, action: err.action });
+      }
       if (err instanceof RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
@@ -736,6 +759,8 @@ export async function registerRoutes(
 
   app.post("/api/workflow-triggers/:id/fire", async (req, res) => {
     try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      assertNotAgent(actor, "fire workflow triggers");
       const intent = await triggerService.fireManualTrigger(
         req.tenantContext,
         req.params.id,
@@ -743,6 +768,9 @@ export async function registerRoutes(
       );
       res.status(201).json(intent);
     } catch (err) {
+      if (err instanceof AgentGuardError) {
+        return res.status(403).json({ message: err.message, action: err.action });
+      }
       if (err instanceof TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
@@ -1380,6 +1408,121 @@ export async function registerRoutes(
       recordId as string,
     );
     res.json({ locked });
+  });
+
+  // --- Agent Proposal Routes ---
+
+  app.get("/api/agent-proposals", async (req, res) => {
+    try {
+      const { changeId } = req.query;
+      if (changeId) {
+        const proposals = await agentProposalService.getProposalsByChange(
+          req.tenantContext,
+          changeId as string,
+        );
+        return res.json(proposals);
+      }
+      const proposals = await agentProposalService.getProposalsByTenant(req.tenantContext);
+      res.json(proposals);
+    } catch (err) {
+      if (err instanceof AgentProposalError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/agent-proposals/:id", async (req, res) => {
+    try {
+      const proposal = await agentProposalService.getProposal(
+        req.tenantContext,
+        req.params.id,
+      );
+      if (!proposal) return res.status(404).json({ message: "Proposal not found" });
+      if (proposal.tenantId !== req.tenantContext.tenantId) {
+        return res.status(404).json({ message: "Proposal not found" });
+      }
+      res.json(proposal);
+    } catch (err) {
+      if (err instanceof AgentProposalError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/agent-proposals", async (req, res) => {
+    try {
+      const { agentId, proposalType, targetRef, payload, summary, changeId, projectId } = req.body;
+      if (!agentId) return res.status(400).json({ message: "agentId is required" });
+      if (!proposalType) return res.status(400).json({ message: "proposalType is required" });
+      if (!targetRef) return res.status(400).json({ message: "targetRef is required" });
+      if (!payload) return res.status(400).json({ message: "payload is required" });
+
+      const proposal = await agentProposalService.createProposal(
+        req.tenantContext,
+        { agentId, proposalType, targetRef, payload, summary, changeId, projectId },
+      );
+      res.status(201).json(proposal);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
+      if (err instanceof AgentProposalError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/agent-proposals/:id/submit", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      assertNotAgent(actor, "submit proposals for activation");
+      const proposal = await agentProposalService.submitProposal(
+        req.tenantContext,
+        req.params.id,
+        actor,
+      );
+      res.json(proposal);
+    } catch (err) {
+      if (err instanceof AgentGuardError) {
+        return res.status(403).json({ message: err.message, action: err.action });
+      }
+      if (err instanceof AgentProposalError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/agent-proposals/:id/review", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      assertNotAgent(actor, "review proposals");
+      const { decision } = req.body;
+      if (!decision || !["accepted", "rejected"].includes(decision)) {
+        return res.status(400).json({ message: "decision must be 'accepted' or 'rejected'" });
+      }
+      const proposal = await agentProposalService.reviewProposal(
+        req.tenantContext,
+        req.params.id,
+        decision,
+        actor,
+      );
+      res.json(proposal);
+    } catch (err) {
+      if (err instanceof AgentGuardError) {
+        return res.status(403).json({ message: err.message, action: err.action });
+      }
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
+      if (err instanceof AgentProposalError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
   });
 
   startScheduler();
