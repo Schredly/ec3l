@@ -48,6 +48,9 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **SystemContext**: A specialized context for system-level operations, ensuring elevated privileges are explicitly managed and distinct from tenant contexts.
 - **Agent Capability Model**: A canonical vocabulary of capabilities (e.g., `FS_READ`, `CMD_RUN`) is defined. A skill registry enforces required capabilities before skill execution, adopting a "fail-closed" approach where any missing capability results in denial.
 - **Module Boundary Enforcement**: Strict enforcement ensures that all file operations remain within a module's defined root path, preventing unauthorized access or modifications outside the module's scope. Violations result in a `ModuleBoundaryViolationError` and fail the associated change.
+- **Form Required Invariant**: FieldDefinition.isRequired is absolute — behavior rules and overrides cannot set it to false. Enforced at rule creation, override activation, and post-compilation.
+- **Form Override Validation**: Form overrides (overrideType "form") are validated at activation: referenced fields must exist, placements must reference valid fields, behavior rules must target valid fields, and required invariant must hold.
+- **Compiled Form Contract**: Compiled forms include per-field `effective` flags (required, readOnly, visible) computed from behavior rules. No UI logic is needed to derive semantics. Post-compilation invariant enforcement ensures required fields remain required regardless of override patches.
 
 ## Workflow Engine (server/services/workflowEngine.ts & workflowService.ts)
 - **ModuleExecutionContext enforcement**: Requires CMD_RUN capability via assertModuleCapability before execution.
