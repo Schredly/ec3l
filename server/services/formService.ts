@@ -45,6 +45,35 @@ export class FormOverrideValidationError extends FormServiceError {
   }
 }
 
+// --- Record Lock Enforcement ---
+
+export async function checkRecordLock(
+  ctx: TenantContext,
+  recordTypeId: string,
+  recordId: string,
+): Promise<void> {
+  const lock = await storage.getRecordLock(ctx.tenantId, recordTypeId, recordId);
+  if (lock) {
+    throw new FormServiceError(
+      `Record is locked and cannot be edited. Locked by: ${lock.lockedBy}. Reason: ${lock.reason || "No reason provided"}`,
+      403,
+    );
+  }
+}
+
+export async function isRecordLocked(
+  ctx: TenantContext,
+  recordTypeId: string,
+  recordId: string,
+): Promise<boolean> {
+  const lock = await storage.getRecordLock(ctx.tenantId, recordTypeId, recordId);
+  return !!lock;
+}
+
+export async function getRecordLocksByTenant(ctx: TenantContext) {
+  return storage.getRecordLocksByTenant(ctx.tenantId);
+}
+
 // --- RecordType ---
 
 export async function getRecordTypesByTenant(ctx: TenantContext): Promise<RecordType[]> {

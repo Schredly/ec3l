@@ -2,6 +2,7 @@ import type { ModuleExecutionContext } from "../moduleContext";
 import { assertModuleCapability, Capabilities } from "../capabilities";
 import { storage } from "../storage";
 import type { WorkflowStep, WorkflowExecution, WorkflowStepExecution } from "@shared/schema";
+import { checkRecordLock } from "./formService";
 
 export class WorkflowExecutionError extends Error {
   public readonly statusCode: number;
@@ -178,12 +179,43 @@ const recordMutationHandler: StepHandler = {
   },
 };
 
+const recordLockHandler: StepHandler = {
+  async execute(config, input, _moduleCtx) {
+    const targetRecordType = config.targetRecordType as string;
+    const recordIdField = (config.recordIdField as string) || "employeeId";
+    const reason = (config.reason as string) || "Locked by workflow";
+    const lockedBy = (config.lockedBy as string) || "workflow";
+
+    if (!targetRecordType) {
+      throw new Error("record_lock step requires targetRecordType in config");
+    }
+
+    const recordId = input[recordIdField] as string | undefined;
+
+    if (!recordId) {
+      throw new Error(`record_lock step: missing record ID from input field '${recordIdField}'`);
+    }
+
+    return {
+      stepType: "record_lock",
+      targetRecordType,
+      recordId,
+      recordIdField,
+      lockedBy,
+      reason,
+      lockedAt: new Date().toISOString(),
+      inputRef: input,
+    };
+  },
+};
+
 const stepHandlers: Record<string, StepHandler> = {
   assignment: assignmentHandler,
   approval: approvalHandler,
   notification: notificationHandler,
   decision: decisionHandler,
   record_mutation: recordMutationHandler,
+  record_lock: recordLockHandler,
 };
 
 export function validateDecisionSteps(steps: WorkflowStep[]): string[] {
@@ -394,6 +426,44 @@ async function runStepsFromIndex(
 
       if (output) {
         currentInput = { ...currentInput, [`step_${step.orderIndex}`]: output };
+      }
+
+      if (step.stepType === "record_lock" && output && output.recordId) {
+        const config = (step.config as StepConfig) || {};
+        const targetRecordType = config.targetRecordType as string;
+        const rt = await storage.getRecordTypeByTenantAndName(
+          moduleCtx.tenantContext.tenantId,
+          targetRecordType,
+        );
+        if (rt) {
+          const existingLock = await storage.getRecordLock(
+            moduleCtx.tenantContext.tenantId,
+            rt.id,
+            output.recordId as string,
+          );
+          if (!existingLock) {
+            await storage.createRecordLock({
+              tenantId: moduleCtx.tenantContext.tenantId,
+              recordTypeId: rt.id,
+              recordId: output.recordId as string,
+              lockedBy: (output.lockedBy as string) || "workflow",
+              workflowExecutionId: execution.id,
+              reason: (output.reason as string) || "Locked by workflow",
+            });
+          }
+        }
+      }
+
+      if (step.stepType === "record_mutation" && output && output.recordId) {
+        const config = (step.config as StepConfig) || {};
+        const targetRecordType = config.targetRecordType as string;
+        const rt = await storage.getRecordTypeByTenantAndName(
+          moduleCtx.tenantContext.tenantId,
+          targetRecordType,
+        );
+        if (rt) {
+          await checkRecordLock(moduleCtx.tenantContext, rt.id, output.recordId as string);
+        }
       }
 
       if (step.stepType === "decision" && output && typeof output.targetStepIndex === "number") {

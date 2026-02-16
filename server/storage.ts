@@ -97,6 +97,9 @@ import {
   rbacAuditLogs,
   type RbacAuditLog,
   type InsertRbacAuditLog,
+  recordLocks,
+  type RecordLock,
+  type InsertRecordLock,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -204,6 +207,10 @@ export interface IStorage {
   createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent>;
   updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined>;
   updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined>;
+
+  getRecordLock(tenantId: string, recordTypeId: string, recordId: string): Promise<RecordLock | undefined>;
+  getRecordLocksByTenant(tenantId: string): Promise<RecordLock[]>;
+  createRecordLock(data: InsertRecordLock): Promise<RecordLock>;
 
   getRecordType(id: string): Promise<RecordType | undefined>;
   getRecordTypesByTenant(tenantId: string): Promise<RecordType[]>;
@@ -755,6 +762,27 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(workflowExecutionIntents.id, id), eq(workflowExecutionIntents.status, "pending")))
       .returning();
     return intent;
+  }
+
+  async getRecordLock(tenantId: string, recordTypeId: string, recordId: string): Promise<RecordLock | undefined> {
+    const [lock] = await db.select().from(recordLocks)
+      .where(and(
+        eq(recordLocks.tenantId, tenantId),
+        eq(recordLocks.recordTypeId, recordTypeId),
+        eq(recordLocks.recordId, recordId),
+      ));
+    return lock;
+  }
+
+  async getRecordLocksByTenant(tenantId: string): Promise<RecordLock[]> {
+    return db.select().from(recordLocks)
+      .where(eq(recordLocks.tenantId, tenantId))
+      .orderBy(desc(recordLocks.createdAt));
+  }
+
+  async createRecordLock(data: InsertRecordLock): Promise<RecordLock> {
+    const [lock] = await db.insert(recordLocks).values(data).returning();
+    return lock;
   }
 
   async getRecordType(id: string): Promise<RecordType | undefined> {

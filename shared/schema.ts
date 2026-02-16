@@ -86,6 +86,7 @@ export const wfStepTypeEnum = pgEnum("wf_step_type", [
   "notification",
   "decision",
   "record_mutation",
+  "record_lock",
 ]);
 
 export const wfExecutionStatusEnum = pgEnum("wf_execution_status", [
@@ -418,6 +419,20 @@ export const recordTypes = pgTable("record_types", {
   unique("uq_record_types_tenant_name").on(table.tenantId, table.name),
 ]);
 
+// Record Locks — metadata-level lock for records marked readOnly by workflow steps
+export const recordLocks = pgTable("record_locks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  recordTypeId: varchar("record_type_id").notNull().references(() => recordTypes.id),
+  recordId: varchar("record_id").notNull(),
+  lockedBy: text("locked_by").notNull(),
+  workflowExecutionId: varchar("workflow_execution_id"),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_record_locks_tenant_type_record").on(table.tenantId, table.recordTypeId, table.recordId),
+]);
+
 export const choiceLists = pgTable("choice_lists", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
@@ -658,6 +673,11 @@ export const insertWorkflowExecutionIntentSchema = createInsertSchema(workflowEx
   dispatchedAt: true,
 });
 
+export const insertRecordLockSchema = createInsertSchema(recordLocks).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
   id: true,
   createdAt: true,
@@ -754,6 +774,9 @@ export type WorkflowTrigger = typeof workflowTriggers.$inferSelect;
 
 export type InsertWorkflowExecutionIntent = z.infer<typeof insertWorkflowExecutionIntentSchema>;
 export type WorkflowExecutionIntent = typeof workflowExecutionIntents.$inferSelect;
+
+export type InsertRecordLock = z.infer<typeof insertRecordLockSchema>;
+export type RecordLock = typeof recordLocks.$inferSelect;
 
 export type InsertRecordType = z.infer<typeof insertRecordTypeSchema>;
 export type RecordType = typeof recordTypes.$inferSelect;

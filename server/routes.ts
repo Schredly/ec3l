@@ -1364,6 +1364,24 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/record-locks", async (req, res) => {
+    const locks = await formService.getRecordLocksByTenant(req.tenantContext);
+    res.json(locks);
+  });
+
+  app.get("/api/record-locks/check", async (req, res) => {
+    const { recordTypeId, recordId } = req.query;
+    if (!recordTypeId || !recordId) {
+      return res.status(400).json({ message: "recordTypeId and recordId are required" });
+    }
+    const locked = await formService.isRecordLocked(
+      req.tenantContext,
+      recordTypeId as string,
+      recordId as string,
+    );
+    res.json({ locked });
+  });
+
   startScheduler();
 
   return httpServer;

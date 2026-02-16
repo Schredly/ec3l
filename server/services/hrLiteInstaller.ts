@@ -72,6 +72,7 @@ export interface HrLiteInstallResult {
   };
   workflows: {
     hireEmployee: HrLiteWorkflowResult;
+    terminateEmployee: HrLiteWorkflowResult;
   };
 }
 
@@ -417,7 +418,7 @@ async function installHrLiteRbac(
 }
 
 interface WorkflowStepSpec {
-  stepType: "assignment" | "approval" | "notification" | "decision" | "record_mutation";
+  stepType: "assignment" | "approval" | "notification" | "decision" | "record_mutation" | "record_lock";
   config: Record<string, unknown>;
   orderIndex: number;
 }
@@ -563,6 +564,93 @@ async function installHireEmployeeWorkflow(
   const trigger = await ensureWorkflowTrigger(ctx, wf.id, "record_event", {
     recordType: jobChangeRt.name,
     fieldConditions: { changeType: "hire" },
+  });
+
+  return {
+    id: wf.id,
+    name: wf.name,
+    status: "active",
+    stepCount: steps.length,
+    triggerId: trigger.id,
+  };
+}
+
+async function installTerminateEmployeeWorkflow(
+  ctx: TenantContext,
+  employeeRt: RecordType,
+  jobChangeRt: RecordType,
+): Promise<HrLiteWorkflowResult> {
+  const wf = await ensureWorkflowDefinition(
+    ctx,
+    "terminate_employee",
+    "record_event",
+    {
+      recordType: jobChangeRt.name,
+      fieldConditions: { changeType: "termination" },
+    },
+  );
+
+  const steps = await ensureWorkflowSteps(wf.id, [
+    {
+      stepType: "approval",
+      orderIndex: 0,
+      config: {
+        label: "HR Admin Approval",
+        approver: "role:HR Admin",
+        requiredPermission: "workflow.approve",
+        requiredRole: "HR Admin",
+      },
+    },
+    {
+      stepType: "approval",
+      orderIndex: 1,
+      config: {
+        label: "Manager Approval",
+        approver: "role:Manager",
+        requiredPermission: "workflow.approve",
+        requiredRole: "Manager",
+      },
+    },
+    {
+      stepType: "record_mutation",
+      orderIndex: 2,
+      config: {
+        label: "Update Employee Status to Terminated",
+        targetRecordType: employeeRt.name,
+        recordIdField: "employeeId",
+        mutations: { status: "terminated" },
+      },
+    },
+    {
+      stepType: "record_lock",
+      orderIndex: 3,
+      config: {
+        label: "Lock Employee Record",
+        targetRecordType: employeeRt.name,
+        recordIdField: "employeeId",
+        lockedBy: "terminate_employee workflow",
+        reason: "Employee terminated — record is read-only",
+      },
+    },
+    {
+      stepType: "record_mutation",
+      orderIndex: 4,
+      config: {
+        label: "Update Job Change Status to Applied",
+        targetRecordType: jobChangeRt.name,
+        recordIdField: "jobChangeId",
+        mutations: { status: "applied" },
+      },
+    },
+  ]);
+
+  if (wf.status !== "active") {
+    await storage.updateWorkflowDefinitionStatus(wf.id, "active");
+  }
+
+  const trigger = await ensureWorkflowTrigger(ctx, wf.id, "record_event", {
+    recordType: jobChangeRt.name,
+    fieldConditions: { changeType: "termination" },
   });
 
   return {
@@ -877,6 +965,7 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
   });
 
   const hireWorkflow = await installHireEmployeeWorkflow(ctx, employeeRt, jobChangeRt);
+  const terminateWorkflow = await installTerminateEmployeeWorkflow(ctx, employeeRt, jobChangeRt);
 
   return {
     module,
@@ -894,6 +983,7 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
     rbac,
     workflows: {
       hireEmployee: hireWorkflow,
+      terminateEmployee: terminateWorkflow,
     },
   };
 }
