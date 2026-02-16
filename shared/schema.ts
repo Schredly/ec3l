@@ -693,3 +693,59 @@ export type FormFieldPlacement = typeof formFieldPlacements.$inferSelect;
 
 export type InsertFormBehaviorRule = z.infer<typeof insertFormBehaviorRuleSchema>;
 export type FormBehaviorRule = typeof formBehaviorRules.$inferSelect;
+
+// --- Form Patch Operations (explicit, typed) ---
+
+export const formPatchOperationTypes = [
+  "moveField",
+  "changeSection",
+  "toggleRequired",
+  "toggleReadOnly",
+  "toggleVisible",
+] as const;
+
+export type FormPatchOperationType = typeof formPatchOperationTypes[number];
+
+export const moveFieldPayloadSchema = z.object({
+  targetFieldId: z.string(),
+  sectionId: z.string(),
+  orderIndex: z.number().int().min(0),
+});
+
+export const changeSectionPayloadSchema = z.object({
+  targetFieldId: z.string(),
+  fromSectionId: z.string(),
+  toSectionId: z.string(),
+  orderIndex: z.number().int().min(0),
+});
+
+export const toggleRequiredPayloadSchema = z.object({
+  targetFieldId: z.string(),
+  value: z.boolean(),
+});
+
+export const toggleReadOnlyPayloadSchema = z.object({
+  targetFieldId: z.string(),
+  value: z.boolean(),
+});
+
+export const toggleVisiblePayloadSchema = z.object({
+  targetFieldId: z.string(),
+  value: z.boolean(),
+});
+
+export const formPatchOperationSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("moveField"), payload: moveFieldPayloadSchema }),
+  z.object({ type: z.literal("changeSection"), payload: changeSectionPayloadSchema }),
+  z.object({ type: z.literal("toggleRequired"), payload: toggleRequiredPayloadSchema }),
+  z.object({ type: z.literal("toggleReadOnly"), payload: toggleReadOnlyPayloadSchema }),
+  z.object({ type: z.literal("toggleVisible"), payload: toggleVisiblePayloadSchema }),
+]);
+
+export type FormPatchOperation = z.infer<typeof formPatchOperationSchema>;
+
+export const formPatchOperationsSchema = z.object({
+  operations: z.array(formPatchOperationSchema).min(1, "At least one operation is required"),
+});
+
+export type FormPatchOperations = z.infer<typeof formPatchOperationsSchema>;

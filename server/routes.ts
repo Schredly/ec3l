@@ -1050,12 +1050,19 @@ export async function registerRoutes(
   // --- Form Studio: Save Override ---
   app.post("/api/forms/:recordTypeName/:formName/overrides", async (req, res) => {
     try {
-      const { changeSummary, patch, projectId } = req.body;
-      if (!patch || typeof patch !== "object") {
-        return res.status(400).json({ message: "patch is required and must be a JSON object" });
-      }
+      const { changeSummary, operations, projectId } = req.body;
       if (!changeSummary || typeof changeSummary !== "string") {
         return res.status(400).json({ message: "changeSummary is required" });
+      }
+      if (!operations || !Array.isArray(operations)) {
+        return res.status(400).json({ message: "operations is required and must be an array of typed patch operations" });
+      }
+
+      let parsedOps;
+      try {
+        parsedOps = formService.parseAndValidateOperations({ operations });
+      } catch (parseErr: unknown) {
+        return res.status(400).json({ message: "Invalid patch operations", errors: parseErr instanceof Error ? parseErr.message : String(parseErr) });
       }
 
       const result = await formService.createFormOverrideDraft(
@@ -1063,7 +1070,7 @@ export async function registerRoutes(
         req.params.recordTypeName,
         req.params.formName,
         changeSummary,
-        patch,
+        parsedOps,
         projectId,
       );
       res.status(201).json(result);

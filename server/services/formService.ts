@@ -21,6 +21,10 @@ import type {
   Template,
   InstalledApp,
   InstalledModule,
+  FormPatchOperation,
+} from "@shared/schema";
+import {
+  formPatchOperationsSchema,
 } from "@shared/schema";
 
 export class FormServiceError extends Error {
@@ -562,6 +566,175 @@ function enforceRequiredInvariant(
   }
 }
 
+// --- Form Patch Operations: Validation & Conversion ---
+
+async function validateFieldBelongsToTenant(
+  tenantId: string,
+  fieldId: string,
+  prefix: string,
+  violations: string[],
+): Promise<FieldDefinition | null> {
+  const fd = await storage.getFieldDefinition(fieldId);
+  if (!fd) {
+    violations.push(`${prefix}: targetFieldId "${fieldId}" does not exist`);
+    return null;
+  }
+  const rt = await storage.getRecordType(fd.recordTypeId);
+  if (!rt || rt.tenantId !== tenantId) {
+    violations.push(`${prefix}: targetFieldId "${fieldId}" does not belong to this tenant`);
+    return null;
+  }
+  return fd;
+}
+
+async function validateSectionBelongsToTenant(
+  tenantId: string,
+  sectionId: string,
+  label: string,
+  prefix: string,
+  violations: string[],
+): Promise<boolean> {
+  const section = await storage.getFormSection(sectionId);
+  if (!section) {
+    violations.push(`${prefix}: ${label} "${sectionId}" does not exist`);
+    return false;
+  }
+  const fd = await storage.getFormDefinition(section.formDefinitionId);
+  if (!fd || fd.tenantId !== tenantId) {
+    violations.push(`${prefix}: ${label} "${sectionId}" does not belong to this tenant`);
+    return false;
+  }
+  return true;
+}
+
+export async function validateFormPatchOperations(
+  tenantId: string,
+  operations: FormPatchOperation[],
+): Promise<string[]> {
+  const violations: string[] = [];
+
+  for (let i = 0; i < operations.length; i++) {
+    const op = operations[i];
+    const prefix = `Operation[${i}] (${op.type})`;
+
+    switch (op.type) {
+      case "moveField": {
+        await validateFieldBelongsToTenant(tenantId, op.payload.targetFieldId, prefix, violations);
+        await validateSectionBelongsToTenant(tenantId, op.payload.sectionId, "sectionId", prefix, violations);
+        break;
+      }
+      case "changeSection": {
+        await validateFieldBelongsToTenant(tenantId, op.payload.targetFieldId, prefix, violations);
+        await validateSectionBelongsToTenant(tenantId, op.payload.fromSectionId, "fromSectionId", prefix, violations);
+        await validateSectionBelongsToTenant(tenantId, op.payload.toSectionId, "toSectionId", prefix, violations);
+        if (op.payload.fromSectionId === op.payload.toSectionId) {
+          violations.push(`${prefix}: fromSectionId and toSectionId are the same — use moveField instead`);
+        }
+        break;
+      }
+      case "toggleRequired": {
+        const fd = await validateFieldBelongsToTenant(tenantId, op.payload.targetFieldId, prefix, violations);
+        if (fd && op.payload.value === false && fd.isRequired) {
+          violations.push(
+            `${prefix}: cannot set required=false on field "${fd.name}" — FieldDefinition.isRequired is absolute and cannot be overridden to false`,
+          );
+        }
+        break;
+      }
+      case "toggleReadOnly": {
+        await validateFieldBelongsToTenant(tenantId, op.payload.targetFieldId, prefix, violations);
+        break;
+      }
+      case "toggleVisible": {
+        await validateFieldBelongsToTenant(tenantId, op.payload.targetFieldId, prefix, violations);
+        break;
+      }
+    }
+  }
+
+  return violations;
+}
+
+export function operationsToPatch(operations: FormPatchOperation[]): Record<string, unknown> {
+  const sectionPlacements = new Map<string, Array<{ fieldDefinitionId: string; orderIndex: number }>>();
+  const fieldEffectives = new Map<string, Record<string, boolean>>();
+
+  for (const op of operations) {
+    switch (op.type) {
+      case "moveField": {
+        const { targetFieldId, sectionId, orderIndex } = op.payload;
+        if (!sectionPlacements.has(sectionId)) {
+          sectionPlacements.set(sectionId, []);
+        }
+        const placements = sectionPlacements.get(sectionId)!;
+        const existing = placements.findIndex(p => p.fieldDefinitionId === targetFieldId);
+        if (existing !== -1) {
+          placements[existing].orderIndex = orderIndex;
+        } else {
+          placements.push({ fieldDefinitionId: targetFieldId, orderIndex });
+        }
+        break;
+      }
+      case "changeSection": {
+        const { targetFieldId, fromSectionId, toSectionId, orderIndex } = op.payload;
+        if (sectionPlacements.has(fromSectionId)) {
+          const from = sectionPlacements.get(fromSectionId)!;
+          const idx = from.findIndex(p => p.fieldDefinitionId === targetFieldId);
+          if (idx !== -1) from.splice(idx, 1);
+        }
+        if (!sectionPlacements.has(toSectionId)) {
+          sectionPlacements.set(toSectionId, []);
+        }
+        sectionPlacements.get(toSectionId)!.push({ fieldDefinitionId: targetFieldId, orderIndex });
+        break;
+      }
+      case "toggleRequired": {
+        const eff = fieldEffectives.get(op.payload.targetFieldId) || {};
+        eff.required = op.payload.value;
+        fieldEffectives.set(op.payload.targetFieldId, eff);
+        break;
+      }
+      case "toggleReadOnly": {
+        const eff = fieldEffectives.get(op.payload.targetFieldId) || {};
+        eff.readOnly = op.payload.value;
+        fieldEffectives.set(op.payload.targetFieldId, eff);
+        break;
+      }
+      case "toggleVisible": {
+        const eff = fieldEffectives.get(op.payload.targetFieldId) || {};
+        eff.visible = op.payload.value;
+        fieldEffectives.set(op.payload.targetFieldId, eff);
+        break;
+      }
+    }
+  }
+
+  const patch: Record<string, unknown> = {};
+
+  if (sectionPlacements.size > 0) {
+    const sections: Array<{ id: string; placements: Array<{ fieldDefinitionId: string; orderIndex: number }> }> = [];
+    Array.from(sectionPlacements.entries()).forEach(([sectionId, placements]) => {
+      sections.push({ id: sectionId, placements });
+    });
+    patch.sections = sections;
+  }
+
+  if (fieldEffectives.size > 0) {
+    const fields: Record<string, { effective: Record<string, boolean> }> = {};
+    Array.from(fieldEffectives.entries()).forEach(([fieldId, eff]) => {
+      fields[fieldId] = { effective: eff };
+    });
+    patch.fields = fields;
+  }
+
+  return patch;
+}
+
+export function parseAndValidateOperations(raw: unknown): FormPatchOperation[] {
+  const parsed = formPatchOperationsSchema.parse(raw);
+  return parsed.operations;
+}
+
 // --- Form Studio Infrastructure ---
 
 const FORM_STUDIO_TEMPLATE_NAME = "__form_studio_system";
@@ -632,7 +805,7 @@ export async function createFormOverrideDraft(
   recordTypeName: string,
   formName: string,
   changeSummary: string,
-  patch: Record<string, unknown>,
+  operations: FormPatchOperation[],
   projectId?: string,
 ): Promise<{ overrideId: string; changeId: string }> {
   const recordType = await storage.getRecordTypeByTenantAndName(ctx.tenantId, recordTypeName);
@@ -641,10 +814,13 @@ export async function createFormOverrideDraft(
   const formDef = await storage.getFormDefinitionByTenantRecordAndName(ctx.tenantId, recordType.id, formName);
   if (!formDef) throw new FormServiceError(`Form "${formName}" not found for record type "${recordTypeName}"`, 404);
 
-  const violations = await validateFormOverridePatch(ctx.tenantId, patch);
+  const violations = await validateFormPatchOperations(ctx.tenantId, operations);
   if (violations.length > 0) {
     throw new FormOverrideValidationError(violations);
   }
+
+  const convertedPatch = operationsToPatch(operations);
+  const patch = { ...convertedPatch, _operations: operations };
 
   let resolvedProjectId = projectId;
   if (!resolvedProjectId) {
@@ -684,7 +860,7 @@ export async function generateVibePatch(
   recordTypeName: string,
   formName: string,
   description: string,
-): Promise<{ patch: Record<string, unknown>; description: string }> {
+): Promise<{ operations: FormPatchOperation[]; description: string }> {
   const compiled = await compileForm(ctx, recordTypeName, formName);
 
   const fieldNames = Object.values(compiled.fields).map(f => ({
@@ -708,30 +884,22 @@ export async function generateVibePatch(
     })),
   }));
 
-  const patch: Record<string, unknown> = {};
-
+  const operations: FormPatchOperation[] = [];
   const desc = description.toLowerCase();
 
   for (const field of fieldNames) {
     if (desc.includes(field.name.toLowerCase()) || desc.includes(field.label.toLowerCase())) {
-      const fieldPatch: Record<string, unknown> = {};
-
       if (desc.includes("required") && !field.isRequired) {
-        fieldPatch.effective = { ...(field.effective || {}), required: true };
+        operations.push({ type: "toggleRequired", payload: { targetFieldId: field.id, value: true } });
       }
       if (desc.includes("readonly") || desc.includes("read only") || desc.includes("read-only")) {
-        fieldPatch.effective = { ...(fieldPatch.effective || field.effective || {}), readOnly: true };
+        operations.push({ type: "toggleReadOnly", payload: { targetFieldId: field.id, value: true } });
       }
       if (desc.includes("hidden") || desc.includes("hide") || desc.includes("invisible")) {
-        fieldPatch.effective = { ...(fieldPatch.effective || field.effective || {}), visible: false };
+        operations.push({ type: "toggleVisible", payload: { targetFieldId: field.id, value: false } });
       }
       if (desc.includes("visible") || desc.includes("show")) {
-        fieldPatch.effective = { ...(fieldPatch.effective || field.effective || {}), visible: true };
-      }
-
-      if (Object.keys(fieldPatch).length > 0) {
-        if (!patch.fields) patch.fields = {};
-        (patch.fields as Record<string, unknown>)[field.id] = fieldPatch;
+        operations.push({ type: "toggleVisible", payload: { targetFieldId: field.id, value: true } });
       }
     }
   }
@@ -742,14 +910,10 @@ export async function generateVibePatch(
         const fieldDef = fieldNames.find(f => f.id === field.fieldId);
         if (fieldDef && (desc.includes(fieldDef.name.toLowerCase()) || desc.includes(fieldDef.label.toLowerCase()))) {
           if (desc.includes("up") || desc.includes("before") || desc.includes("first")) {
-            const newPlacements = section.fields.map(f => ({
-              ...f,
-              orderIndex: f.fieldId === field.fieldId ? Math.max(0, f.orderIndex - 1) : f.orderIndex,
-            }));
-            if (!patch.sections) patch.sections = [];
-            (patch.sections as unknown[]).push({
-              id: section.id,
-              placements: newPlacements,
+            const newOrderIndex = Math.max(0, field.orderIndex - 1);
+            operations.push({
+              type: "moveField",
+              payload: { targetFieldId: field.fieldId, sectionId: section.id, orderIndex: newOrderIndex },
             });
           }
         }
@@ -758,7 +922,9 @@ export async function generateVibePatch(
   }
 
   return {
-    patch: Object.keys(patch).length > 0 ? patch : { _note: "Could not interpret the description into a patch. Try being more specific about which field and what change." },
-    description: `Interpreted from: "${description}"`,
+    operations,
+    description: operations.length > 0
+      ? `Interpreted from: "${description}"`
+      : `Could not interpret the description into operations. Try being more specific about which field and what change.`,
   };
 }

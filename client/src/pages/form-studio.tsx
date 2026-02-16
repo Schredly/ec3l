@@ -94,72 +94,9 @@ function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
 
-function computePatch(original: CompiledForm, working: CompiledForm) {
-  const patch: {
-    sections?: Array<{ id: string; placements: Array<{ fieldDefinitionId: string; orderIndex: number }> }>;
-    fields?: Record<string, { effective: Partial<FieldEffective> }>;
-  } = {};
-
-  const sectionsPatched: typeof patch.sections = [];
-  for (const wSection of working.sections) {
-    const oSection = original.sections.find((s) => s.id === wSection.id);
-    if (!oSection) continue;
-
-    const oPlacementIds = oSection.placements.map((p) => p.fieldDefinitionId);
-    const wPlacementIds = wSection.placements.map((p) => p.fieldDefinitionId);
-
-    const orderChanged = oPlacementIds.join(",") !== wPlacementIds.join(",");
-    const hasNewFields = wPlacementIds.some((id) => !oPlacementIds.includes(id));
-
-    if (orderChanged || hasNewFields) {
-      sectionsPatched.push({
-        id: wSection.id,
-        placements: wSection.placements.map((p, idx) => ({
-          fieldDefinitionId: p.fieldDefinitionId,
-          orderIndex: idx,
-        })),
-      });
-    }
-  }
-
-  for (const oSection of original.sections) {
-    const wSection = working.sections.find((s) => s.id === oSection.id);
-    if (!wSection) continue;
-    const lostFields = oSection.placements.filter(
-      (p) => !wSection.placements.some((wp) => wp.fieldDefinitionId === p.fieldDefinitionId)
-    );
-    if (lostFields.length > 0 && !sectionsPatched.some((s) => s.id === oSection.id)) {
-      sectionsPatched.push({
-        id: oSection.id,
-        placements: wSection.placements.map((p, idx) => ({
-          fieldDefinitionId: p.fieldDefinitionId,
-          orderIndex: idx,
-        })),
-      });
-    }
-  }
-
-  if (sectionsPatched.length > 0) {
-    patch.sections = sectionsPatched;
-  }
-
-  const fieldsPatched: Record<string, { effective: Partial<FieldEffective> }> = {};
-  for (const [fieldId, wField] of Object.entries(working.fields)) {
-    const oField = original.fields[fieldId];
-    if (!oField) continue;
-    const changes: Partial<FieldEffective> = {};
-    if (wField.effective.required !== oField.effective.required) changes.required = wField.effective.required;
-    if (wField.effective.readOnly !== oField.effective.readOnly) changes.readOnly = wField.effective.readOnly;
-    if (wField.effective.visible !== oField.effective.visible) changes.visible = wField.effective.visible;
-    if (Object.keys(changes).length > 0) {
-      fieldsPatched[fieldId] = { effective: changes };
-    }
-  }
-  if (Object.keys(fieldsPatched).length > 0) {
-    patch.fields = fieldsPatched;
-  }
-
-  return patch;
+interface FormPatchOp {
+  type: "moveField" | "changeSection" | "toggleRequired" | "toggleReadOnly" | "toggleVisible";
+  payload: Record<string, unknown>;
 }
 
 export default function FormStudio() {
@@ -171,6 +108,7 @@ export default function FormStudio() {
   const [workingCopy, setWorkingCopy] = useState<CompiledForm | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
 
+  const [pendingOperations, setPendingOperations] = useState<FormPatchOp[]>([]);
   const [changeSummary, setChangeSummary] = useState("");
   const [saveResult, setSaveResult] = useState<{ overrideId: string; changeId: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -211,6 +149,7 @@ export default function FormStudio() {
       setWorkingCopy(deepClone(compiledForm));
       setSelectedFieldId(null);
       setSaveResult(null);
+      setPendingOperations([]);
     }
   }, [compiledForm]);
 
@@ -226,6 +165,7 @@ export default function FormStudio() {
     setWorkingCopy(null);
     setSelectedFieldId(null);
     setSaveResult(null);
+    setPendingOperations([]);
   }, [selectedRecordType]);
 
   const selectedField = useMemo(() => {
@@ -257,13 +197,23 @@ export default function FormStudio() {
         }
       }
       setWorkingCopy(updated);
+
+      const opTypeMap: Record<keyof FieldEffective, FormPatchOp["type"]> = {
+        required: "toggleRequired",
+        readOnly: "toggleReadOnly",
+        visible: "toggleVisible",
+      };
+      setPendingOperations((prev) => [
+        ...prev,
+        { type: opTypeMap[key], payload: { targetFieldId: fieldId, value } },
+      ]);
     },
     [workingCopy]
   );
 
   const moveField = useCallback(
     (direction: "up" | "down") => {
-      if (!workingCopy || !selectedFieldPlacement) return;
+      if (!workingCopy || !selectedFieldPlacement || !selectedFieldId) return;
       const updated = deepClone(workingCopy);
       const section = updated.sections.find((s) => s.id === selectedFieldPlacement.section.id);
       if (!section) return;
@@ -275,8 +225,20 @@ export default function FormStudio() {
       section.placements[newIdx] = temp;
       section.placements.forEach((p, i) => (p.orderIndex = i));
       setWorkingCopy(updated);
+
+      setPendingOperations((prev) => [
+        ...prev,
+        {
+          type: "moveField",
+          payload: {
+            targetFieldId: selectedFieldId,
+            sectionId: selectedFieldPlacement.section.id,
+            orderIndex: newIdx,
+          },
+        },
+      ]);
     },
-    [workingCopy, selectedFieldPlacement]
+    [workingCopy, selectedFieldPlacement, selectedFieldId]
   );
 
   const moveToSection = useCallback(
@@ -292,13 +254,29 @@ export default function FormStudio() {
       sourceSection.placements.forEach((p, i) => (p.orderIndex = i));
       targetSection.placements.forEach((p, i) => (p.orderIndex = i));
       setWorkingCopy(updated);
+
+      setPendingOperations((prev) => [
+        ...prev,
+        {
+          type: "changeSection",
+          payload: {
+            targetFieldId: selectedFieldId,
+            fromSectionId: selectedFieldPlacement.section.id,
+            toSectionId: targetSectionId,
+            orderIndex: targetSection.placements.length - 1,
+          },
+        },
+      ]);
     },
     [workingCopy, selectedFieldId, selectedFieldPlacement]
   );
 
   const handleSaveOverride = useCallback(async () => {
-    if (!workingCopy || !originalForm || !selectedRecordType || !selectedFormName) return;
-    const patch = computePatch(originalForm, workingCopy);
+    if (!selectedRecordType || !selectedFormName) return;
+    if (pendingOperations.length === 0) {
+      toast({ title: "No changes", description: "Make some edits before saving.", variant: "destructive" });
+      return;
+    }
     if (!changeSummary.trim()) {
       toast({ title: "Change summary required", description: "Please enter a description of your changes.", variant: "destructive" });
       return;
@@ -307,10 +285,11 @@ export default function FormStudio() {
     try {
       const res = await apiRequest("POST", `/api/forms/${selectedRecordType}/${selectedFormName}/overrides`, {
         changeSummary: changeSummary.trim(),
-        patch,
+        operations: pendingOperations,
       });
       const data = await res.json();
       setSaveResult({ overrideId: data.overrideId || data.id, changeId: data.changeId });
+      setPendingOperations([]);
       toast({ title: "Override saved", description: `Override ${data.overrideId || data.id} created successfully.` });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save override";
@@ -318,7 +297,7 @@ export default function FormStudio() {
     } finally {
       setIsSaving(false);
     }
-  }, [workingCopy, originalForm, selectedRecordType, selectedFormName, changeSummary, toast]);
+  }, [selectedRecordType, selectedFormName, pendingOperations, changeSummary, toast]);
 
   const handleActivateOverride = useCallback(async () => {
     if (!saveResult) return;
@@ -345,8 +324,8 @@ export default function FormStudio() {
         description: vibeDescription.trim(),
       });
       const data = await res.json();
-      setVibePatchResult(data.patch || data);
-      toast({ title: "Vibe patch generated", description: "Review the generated patch below." });
+      setVibePatchResult(data);
+      toast({ title: "Vibe patch generated", description: `${data.operations?.length || 0} operation(s) generated. Review below.` });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to generate vibe patch";
       toast({ title: "Generation failed", description: message, variant: "destructive" });
@@ -357,33 +336,59 @@ export default function FormStudio() {
 
   const handleVibeApply = useCallback(() => {
     if (!vibePatchResult || !workingCopy) return;
+    const vibeOps = vibePatchResult as unknown as { operations?: FormPatchOp[] };
+    if (!vibeOps.operations || vibeOps.operations.length === 0) {
+      toast({ title: "No operations", description: "Nothing to apply.", variant: "destructive" });
+      return;
+    }
     const updated = deepClone(workingCopy);
-    const vp = vibePatchResult as { fields?: Record<string, { effective?: Partial<FieldEffective> }> };
-    if (vp.fields) {
-      for (const [fieldId, changes] of Object.entries(vp.fields)) {
-        if (updated.fields[fieldId] && changes.effective) {
-          Object.assign(updated.fields[fieldId].effective, changes.effective);
-          for (const section of updated.sections) {
-            for (const placement of section.placements) {
-              if (placement.fieldDefinitionId === fieldId && placement.field) {
-                Object.assign(placement.field.effective, changes.effective);
-              }
+    for (const op of vibeOps.operations) {
+      const p = op.payload as Record<string, unknown>;
+      const fieldId = p.targetFieldId as string;
+      if (op.type === "toggleRequired" || op.type === "toggleReadOnly" || op.type === "toggleVisible") {
+        const key = op.type === "toggleRequired" ? "required" : op.type === "toggleReadOnly" ? "readOnly" : "visible";
+        const val = p.value as boolean;
+        if (updated.fields[fieldId]) {
+          updated.fields[fieldId].effective[key] = val;
+        }
+        for (const section of updated.sections) {
+          for (const placement of section.placements) {
+            if (placement.fieldDefinitionId === fieldId && placement.field) {
+              placement.field.effective[key] = val;
             }
+          }
+        }
+      } else if (op.type === "moveField") {
+        const sectionId = p.sectionId as string;
+        const orderIndex = p.orderIndex as number;
+        const section = updated.sections.find((s) => s.id === sectionId);
+        if (section) {
+          const idx = section.placements.findIndex((pl) => pl.fieldDefinitionId === fieldId);
+          if (idx !== -1 && orderIndex >= 0 && orderIndex < section.placements.length && orderIndex !== idx) {
+            const [moved] = section.placements.splice(idx, 1);
+            section.placements.splice(orderIndex, 0, moved);
+            section.placements.forEach((pl, i) => (pl.orderIndex = i));
           }
         }
       }
     }
     setWorkingCopy(updated);
-    toast({ title: "Patch applied", description: "Vibe patch merged into working copy." });
+    setPendingOperations((prev) => [...prev, ...vibeOps.operations!]);
+    toast({ title: "Patch applied", description: `${vibeOps.operations.length} operation(s) merged into working copy.` });
   }, [vibePatchResult, workingCopy, toast]);
 
   const handleVibeSave = useCallback(async () => {
     if (!vibePatchResult || !selectedRecordType || !selectedFormName) return;
+    const vibeOps = vibePatchResult as unknown as { operations?: FormPatchOp[] };
+    if (!vibeOps.operations || !Array.isArray(vibeOps.operations) || vibeOps.operations.length === 0) {
+      toast({ title: "No operations", description: "The generated patch contains no operations.", variant: "destructive" });
+      return;
+    }
     setIsSavingVibe(true);
     try {
       const res = await apiRequest("POST", `/api/forms/${selectedRecordType}/${selectedFormName}/overrides`, {
         changeSummary: `Vibe patch: ${vibeDescription.trim().slice(0, 100)}`,
-        patch: vibePatchResult,
+        operations: vibeOps.operations,
       });
       const data = await res.json();
       setSaveResult({ overrideId: data.overrideId || data.id, changeId: data.changeId });
