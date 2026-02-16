@@ -1,31 +1,16 @@
 import type { ExecutionRequest, ExecutionResult, RunnerExecution } from "./types";
 import { assertModuleCapability } from "../capabilities";
 import { createRunnerService, enforceModuleBoundary } from "../runner";
+import type { RunnerInstruction } from "../runner";
+import { logBoundaryCrossing, logBoundaryReturn } from "./logging";
 
 const runnerService = createRunnerService();
 
-function logBoundaryCrossing(method: string, request: ExecutionRequest): void {
-  const tenant = request.tenantContext.tenantId;
-  const module = request.moduleExecutionContext.moduleId;
-  const profile = request.moduleExecutionContext.capabilityProfile;
-  const action = request.requestedAction;
-  const caps = request.capabilities.join(", ");
-  console.log(
-    `[control-plane→runner] ${method} | tenant=${tenant} module=${module} profile=${profile} action=${action} capabilities=[${caps}]`,
-  );
-}
+export class LocalRunnerAdapter implements RunnerExecution {
+  readonly adapterName = "LocalRunnerAdapter";
 
-function logBoundaryReturn(method: string, result: ExecutionResult): void {
-  const status = result.success ? "SUCCESS" : "FAILURE";
-  const errorInfo = result.error ? ` error="${result.error}"` : "";
-  console.log(
-    `[runner→control-plane] ${method} | status=${status}${errorInfo} logs=${result.logs.length}`,
-  );
-}
-
-export class LocalRunnerExecution implements RunnerExecution {
   async executeWorkflowStep(request: ExecutionRequest): Promise<ExecutionResult> {
-    logBoundaryCrossing("executeWorkflowStep", request);
+    logBoundaryCrossing(this.adapterName, "executeWorkflowStep", request);
 
     const { moduleExecutionContext, inputPayload } = request;
     const stepType = inputPayload.stepType as string;
@@ -52,7 +37,7 @@ export class LocalRunnerExecution implements RunnerExecution {
         ],
       };
 
-      logBoundaryReturn("executeWorkflowStep", result);
+      logBoundaryReturn(this.adapterName, "executeWorkflowStep", result);
       return result;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -62,13 +47,13 @@ export class LocalRunnerExecution implements RunnerExecution {
         logs: [`[runner] Workflow step execution failed: ${errorMsg}`],
         error: errorMsg,
       };
-      logBoundaryReturn("executeWorkflowStep", result);
+      logBoundaryReturn(this.adapterName, "executeWorkflowStep", result);
       return result;
     }
   }
 
   async executeTask(request: ExecutionRequest): Promise<ExecutionResult> {
-    logBoundaryCrossing("executeTask", request);
+    logBoundaryCrossing(this.adapterName, "executeTask", request);
 
     const { moduleExecutionContext, inputPayload } = request;
     const skillName = inputPayload.skillName as string;
@@ -97,7 +82,7 @@ export class LocalRunnerExecution implements RunnerExecution {
         ],
       };
 
-      logBoundaryReturn("executeTask", result);
+      logBoundaryReturn(this.adapterName, "executeTask", result);
       return result;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -107,13 +92,13 @@ export class LocalRunnerExecution implements RunnerExecution {
         logs: [`[runner] Task execution failed: ${errorMsg}`],
         error: errorMsg,
       };
-      logBoundaryReturn("executeTask", result);
+      logBoundaryReturn(this.adapterName, "executeTask", result);
       return result;
     }
   }
 
   async executeAgentAction(request: ExecutionRequest): Promise<ExecutionResult> {
-    logBoundaryCrossing("executeAgentAction", request);
+    logBoundaryCrossing(this.adapterName, "executeAgentAction", request);
 
     const { moduleExecutionContext, inputPayload } = request;
     const actionType = inputPayload.actionType as string;
@@ -156,7 +141,7 @@ export class LocalRunnerExecution implements RunnerExecution {
             logs: [`[runner] Unknown agent action type: ${actionType}`],
             error: `Unknown agent action type: ${actionType}`,
           };
-          logBoundaryReturn("executeAgentAction", result);
+          logBoundaryReturn(this.adapterName, "executeAgentAction", result);
           return result;
         }
       }
@@ -172,7 +157,7 @@ export class LocalRunnerExecution implements RunnerExecution {
         error: runnerResult.failureReason,
       };
 
-      logBoundaryReturn("executeAgentAction", result);
+      logBoundaryReturn(this.adapterName, "executeAgentAction", result);
       return result;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -182,17 +167,8 @@ export class LocalRunnerExecution implements RunnerExecution {
         logs: [`[runner] Agent action failed: ${errorMsg}`],
         error: errorMsg,
       };
-      logBoundaryReturn("executeAgentAction", result);
+      logBoundaryReturn(this.adapterName, "executeAgentAction", result);
       return result;
     }
   }
-}
-
-let runnerExecution: RunnerExecution | null = null;
-
-export function getRunnerExecution(): RunnerExecution {
-  if (!runnerExecution) {
-    runnerExecution = new LocalRunnerExecution();
-  }
-  return runnerExecution;
 }

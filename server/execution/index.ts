@@ -6,4 +6,7 @@ export type {
 } from "./types";
 
 export { buildExecutionRequest } from "./types";
-export { LocalRunnerExecution, getRunnerExecution } from "./localRunnerExecution";
+export { LocalRunnerAdapter } from "./localRunnerAdapter";
+export { RemoteRunnerAdapter } from "./remoteRunnerAdapter";
+export { getRunnerExecution, getActiveAdapterType } from "./runnerAdapterFactory";
+export type { RunnerAdapterType } from "./runnerAdapterFactory";
