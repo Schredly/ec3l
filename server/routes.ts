@@ -29,11 +29,16 @@ import { dispatchPendingIntents } from "./services/intentDispatcher";
 import { startScheduler } from "./services/schedulerService";
 import * as formService from "./services/formService";
 import { FormServiceError } from "./services/formService";
+import * as rbacService from "./services/rbacService";
+import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles } from "./services/rbacService";
+import { insertRbacRoleSchema, insertRbacPolicySchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  await seedPermissions();
 
   app.get("/api/tenants", async (_req, res) => {
     const tenantList = await storage.getTenants();
@@ -109,10 +114,16 @@ export async function registerRoutes(
     const { status } = req.body;
     if (!status) return res.status(400).json({ message: "status is required" });
     try {
+      if (status === "Ready" || status === "Merged") {
+        await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+      }
       const updated = await changeService.updateChangeStatus(req.tenantContext, req.params.id, status);
       if (!updated) return res.status(404).json({ message: "Change not found" });
       res.json(updated);
     } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
       if (err instanceof ChangeServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
@@ -167,40 +178,56 @@ export async function registerRoutes(
 
   // Check in
   app.post("/api/changes/:id/checkin", async (req, res) => {
-    const change = await changeService.getChange(req.tenantContext, req.params.id);
-    if (!change) return res.status(404).json({ message: "Change not found" });
+    try {
+      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+      const change = await changeService.getChange(req.tenantContext, req.params.id);
+      if (!change) return res.status(404).json({ message: "Change not found" });
 
-    if (change.status === "ValidationFailed") {
-      return res.status(403).json({
-        message: "Cannot promote change — module boundary violation detected. A new Change is required.",
-        failureReason: "MODULE_BOUNDARY_VIOLATION",
-      });
+      if (change.status === "ValidationFailed") {
+        return res.status(403).json({
+          message: "Cannot promote change — module boundary violation detected. A new Change is required.",
+          failureReason: "MODULE_BOUNDARY_VIOLATION",
+        });
+      }
+
+      await changeService.updateChangeStatus(req.tenantContext, change.id, "Ready");
+      const updated = await changeService.getChange(req.tenantContext, change.id);
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
+      throw err;
     }
-
-    await changeService.updateChangeStatus(req.tenantContext, change.id, "Ready");
-    const updated = await changeService.getChange(req.tenantContext, change.id);
-    res.json(updated);
   });
 
   // Merge
   app.post("/api/changes/:id/merge", async (req, res) => {
-    const change = await changeService.getChange(req.tenantContext, req.params.id);
-    if (!change) return res.status(404).json({ message: "Change not found" });
+    try {
+      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+      const change = await changeService.getChange(req.tenantContext, req.params.id);
+      if (!change) return res.status(404).json({ message: "Change not found" });
 
-    if (change.status === "ValidationFailed") {
-      return res.status(403).json({
-        message: "Cannot merge change — module boundary violation detected. A new Change is required.",
-        failureReason: "MODULE_BOUNDARY_VIOLATION",
-      });
-    }
+      if (change.status === "ValidationFailed") {
+        return res.status(403).json({
+          message: "Cannot merge change — module boundary violation detected. A new Change is required.",
+          failureReason: "MODULE_BOUNDARY_VIOLATION",
+        });
+      }
 
-    await changeService.updateChangeStatus(req.tenantContext, change.id, "Merged");
-    const workspace = await workspaceService.getWorkspaceByChange(req.tenantContext, change.id);
-    if (workspace) {
-      await workspaceService.stopWorkspace(req.tenantContext, workspace.id);
+      await changeService.updateChangeStatus(req.tenantContext, change.id, "Merged");
+      const workspace = await workspaceService.getWorkspaceByChange(req.tenantContext, change.id);
+      if (workspace) {
+        await workspaceService.stopWorkspace(req.tenantContext, workspace.id);
+      }
+      const updated = await changeService.getChange(req.tenantContext, change.id);
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
+      throw err;
     }
-    const updated = await changeService.getChange(req.tenantContext, change.id);
-    res.json(updated);
   });
 
   // Agent run — with module-scoped permissions
@@ -358,9 +385,13 @@ export async function registerRoutes(
 
   app.post("/api/overrides/:id/activate", async (req, res) => {
     try {
+      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.OVERRIDE_ACTIVATE, "override", req.params.id);
       const override = await overrideService.activateOverride(req.tenantContext, req.params.id);
       res.json(override);
     } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
       if (err instanceof OverridePatchValidationError) {
         return res.status(err.statusCode).json({ message: err.message, violations: err.violations });
       }
@@ -515,6 +546,7 @@ export async function registerRoutes(
 
   app.post("/api/workflow-definitions/:id/execute", async (req, res) => {
     try {
+      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.WORKFLOW_EXECUTE, "workflow", req.params.id);
       const { moduleId, input } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -540,6 +572,9 @@ export async function registerRoutes(
       );
       res.status(201).json(execution);
     } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
       if (err instanceof CapabilityDeniedError) {
         return res.status(403).json({ message: err.message, capability: err.capability });
       }
@@ -577,6 +612,7 @@ export async function registerRoutes(
 
   app.post("/api/workflow-executions/:id/resume", async (req, res) => {
     try {
+      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.WORKFLOW_APPROVE, "workflow", req.params.id);
       const { moduleId, stepExecutionId, outcome } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -609,6 +645,9 @@ export async function registerRoutes(
       );
       res.json(execution);
     } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
       if (err instanceof CapabilityDeniedError) {
         return res.status(403).json({ message: err.message, capability: err.capability });
       }
@@ -1050,6 +1089,7 @@ export async function registerRoutes(
   // --- Form Studio: Save Override ---
   app.post("/api/forms/:recordTypeName/:formName/overrides", async (req, res) => {
     try {
+      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.FORM_EDIT, "form");
       const { changeSummary, operations, projectId } = req.body;
       if (!changeSummary || typeof changeSummary !== "string") {
         return res.status(400).json({ message: "changeSummary is required" });
@@ -1075,6 +1115,9 @@ export async function registerRoutes(
       );
       res.status(201).json(result);
     } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
       if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
@@ -1099,6 +1142,177 @@ export async function registerRoutes(
       if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
+  });
+
+  // --- RBAC Routes ---
+
+  async function requireRbacAdmin(req: import("express").Request, res: import("express").Response): Promise<boolean> {
+    try {
+      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE);
+      return true;
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        res.status(403).json({ message: "RBAC administration requires admin privileges", permission: err.permission });
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  app.get("/api/rbac/permissions", async (_req, res) => {
+    const perms = await storage.getRbacPermissions();
+    res.json(perms);
+  });
+
+  app.get("/api/rbac/roles", async (req, res) => {
+    const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
+    res.json(roles);
+  });
+
+  app.post("/api/rbac/roles", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    try {
+      const parsed = insertRbacRoleSchema.omit({ tenantId: true }).parse(req.body);
+      const role = await storage.createRbacRole({
+        ...parsed,
+        tenantId: req.tenantContext.tenantId,
+      });
+      res.status(201).json(role);
+    } catch (err) {
+      if (err instanceof Error && err.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid role data", errors: err });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/rbac/roles/:id/disable", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const role = await storage.getRbacRole(req.params.id);
+    if (!role || role.tenantId !== req.tenantContext.tenantId) {
+      return res.status(404).json({ message: "Role not found" });
+    }
+    const updated = await storage.updateRbacRoleStatus(req.params.id, "disabled");
+    res.json(updated);
+  });
+
+  app.post("/api/rbac/roles/:id/enable", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const role = await storage.getRbacRole(req.params.id);
+    if (!role || role.tenantId !== req.tenantContext.tenantId) {
+      return res.status(404).json({ message: "Role not found" });
+    }
+    const updated = await storage.updateRbacRoleStatus(req.params.id, "active");
+    res.json(updated);
+  });
+
+  app.get("/api/rbac/roles/:id/permissions", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const role = await storage.getRbacRole(req.params.id);
+    if (!role || role.tenantId !== req.tenantContext.tenantId) {
+      return res.status(404).json({ message: "Role not found" });
+    }
+    const rolePerms = await storage.getRbacRolePermissions(req.params.id);
+    const allPerms = await storage.getRbacPermissions();
+    const permMap = new Map(allPerms.map(p => [p.id, p]));
+    const result = rolePerms.map(rp => permMap.get(rp.permissionId)).filter(Boolean);
+    res.json(result);
+  });
+
+  app.post("/api/rbac/roles/:id/permissions", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const { permissionId } = req.body;
+    if (!permissionId) return res.status(400).json({ message: "permissionId is required" });
+    const role = await storage.getRbacRole(req.params.id);
+    if (!role || role.tenantId !== req.tenantContext.tenantId) {
+      return res.status(404).json({ message: "Role not found" });
+    }
+    await storage.addRbacRolePermission(req.params.id, permissionId);
+    res.status(201).json({ message: "Permission added" });
+  });
+
+  app.delete("/api/rbac/roles/:id/permissions/:permissionId", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const role = await storage.getRbacRole(req.params.id);
+    if (!role || role.tenantId !== req.tenantContext.tenantId) {
+      return res.status(404).json({ message: "Role not found" });
+    }
+    await storage.removeRbacRolePermission(req.params.id, req.params.permissionId);
+    res.json({ message: "Permission removed" });
+  });
+
+  app.get("/api/rbac/users/:userId/roles", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const roles = await storage.getRbacUserRolesByTenant(req.params.userId, req.tenantContext.tenantId);
+    res.json(roles);
+  });
+
+  app.post("/api/rbac/users/:userId/roles", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const { roleId } = req.body;
+    if (!roleId) return res.status(400).json({ message: "roleId is required" });
+    const role = await storage.getRbacRole(roleId);
+    if (!role || role.tenantId !== req.tenantContext.tenantId) {
+      return res.status(400).json({ message: "Role not found or belongs to a different tenant" });
+    }
+    await storage.addRbacUserRole(req.params.userId, roleId);
+    res.status(201).json({ message: "Role assigned" });
+  });
+
+  app.delete("/api/rbac/users/:userId/roles/:roleId", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const role = await storage.getRbacRole(req.params.roleId);
+    if (!role || role.tenantId !== req.tenantContext.tenantId) {
+      return res.status(404).json({ message: "Role not found" });
+    }
+    await storage.removeRbacUserRole(req.params.userId, req.params.roleId);
+    res.json({ message: "Role removed" });
+  });
+
+  app.get("/api/rbac/policies", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const policies = await storage.getRbacPoliciesByTenant(req.tenantContext.tenantId);
+    res.json(policies);
+  });
+
+  app.post("/api/rbac/policies", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    try {
+      const parsed = insertRbacPolicySchema.omit({ tenantId: true }).parse(req.body);
+      const role = await storage.getRbacRole(parsed.roleId);
+      if (!role || role.tenantId !== req.tenantContext.tenantId) {
+        return res.status(400).json({ message: "Role not found or belongs to a different tenant" });
+      }
+      const policy = await storage.createRbacPolicy({
+        ...parsed,
+        tenantId: req.tenantContext.tenantId,
+      });
+      res.status(201).json(policy);
+    } catch (err) {
+      if (err instanceof Error && err.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid policy data", errors: err });
+      }
+      throw err;
+    }
+  });
+
+  app.delete("/api/rbac/policies/:id", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const policies = await storage.getRbacPoliciesByTenant(req.tenantContext.tenantId);
+    const target = policies.find(p => p.id === req.params.id);
+    if (!target) return res.status(404).json({ message: "Policy not found" });
+    await storage.deleteRbacPolicy(req.params.id);
+    res.json({ message: "Policy deleted" });
+  });
+
+  app.post("/api/rbac/seed-defaults", async (req, res) => {
+    const existingRoles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
+    if (existingRoles.length > 0) {
+      if (!(await requireRbacAdmin(req, res))) return;
+    }
+    await seedDefaultRoles(req.tenantContext.tenantId);
+    const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
+    res.json({ message: "Default roles seeded", roles });
   });
 
   startScheduler();

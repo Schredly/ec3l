@@ -164,6 +164,24 @@ export const formBehaviorRuleStatusEnum = pgEnum("form_behavior_rule_status", [
   "disabled",
 ]);
 
+// RBAC enums
+export const rbacRoleStatusEnum = pgEnum("rbac_role_status", [
+  "active",
+  "disabled",
+]);
+
+export const rbacPolicyEffectEnum = pgEnum("rbac_policy_effect", [
+  "allow",
+  "deny",
+]);
+
+export const rbacResourceTypeEnum = pgEnum("rbac_resource_type", [
+  "form",
+  "workflow",
+  "override",
+  "change",
+]);
+
 // Phase 1: Tenant
 export const tenants = pgTable("tenants", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -457,6 +475,47 @@ export const formBehaviorRules = pgTable("form_behavior_rules", {
   status: formBehaviorRuleStatusEnum("status").notNull().default("active"),
 });
 
+// --- RBAC Tables ---
+
+export const rbacPermissions = pgTable("rbac_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+});
+
+export const rbacRoles = pgTable("rbac_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  status: rbacRoleStatusEnum("status").notNull().default("active"),
+}, (table) => [
+  unique("rbac_roles_tenant_name").on(table.tenantId, table.name),
+]);
+
+export const rbacRolePermissions = pgTable("rbac_role_permissions", {
+  roleId: varchar("role_id").notNull().references(() => rbacRoles.id),
+  permissionId: varchar("permission_id").notNull().references(() => rbacPermissions.id),
+}, (table) => [
+  unique("rbac_role_permission_unique").on(table.roleId, table.permissionId),
+]);
+
+export const rbacUserRoles = pgTable("rbac_user_roles", {
+  userId: varchar("user_id").notNull(),
+  roleId: varchar("role_id").notNull().references(() => rbacRoles.id),
+}, (table) => [
+  unique("rbac_user_role_unique").on(table.userId, table.roleId),
+]);
+
+export const rbacPolicies = pgTable("rbac_policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  roleId: varchar("role_id").notNull().references(() => rbacRoles.id),
+  resourceType: rbacResourceTypeEnum("resource_type").notNull(),
+  resourceId: varchar("resource_id"),
+  effect: rbacPolicyEffectEnum("effect").notNull(),
+});
+
 // Insert schemas
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -693,6 +752,23 @@ export type FormFieldPlacement = typeof formFieldPlacements.$inferSelect;
 
 export type InsertFormBehaviorRule = z.infer<typeof insertFormBehaviorRuleSchema>;
 export type FormBehaviorRule = typeof formBehaviorRules.$inferSelect;
+
+export type RbacPermission = typeof rbacPermissions.$inferSelect;
+export type RbacRole = typeof rbacRoles.$inferSelect;
+export type RbacRolePermission = typeof rbacRolePermissions.$inferSelect;
+export type RbacUserRole = typeof rbacUserRoles.$inferSelect;
+export type RbacPolicy = typeof rbacPolicies.$inferSelect;
+
+export const insertRbacRoleSchema = createInsertSchema(rbacRoles).omit({
+  id: true,
+  status: true,
+});
+export type InsertRbacRole = z.infer<typeof insertRbacRoleSchema>;
+
+export const insertRbacPolicySchema = createInsertSchema(rbacPolicies).omit({
+  id: true,
+});
+export type InsertRbacPolicy = z.infer<typeof insertRbacPolicySchema>;
 
 // --- Form Patch Operations (explicit, typed) ---
 

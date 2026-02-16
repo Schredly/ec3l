@@ -28,6 +28,11 @@ import {
   formSections,
   formFieldPlacements,
   formBehaviorRules,
+  rbacPermissions,
+  rbacRoles,
+  rbacRolePermissions,
+  rbacUserRoles,
+  rbacPolicies,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -82,6 +87,13 @@ import {
   type InsertFormFieldPlacement,
   type FormBehaviorRule,
   type InsertFormBehaviorRule,
+  type RbacPermission,
+  type RbacRole,
+  type InsertRbacRole,
+  type RbacRolePermission,
+  type RbacUserRole,
+  type RbacPolicy,
+  type InsertRbacPolicy,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -228,6 +240,31 @@ export interface IStorage {
   getActiveFormBehaviorRulesByDefinition(formDefinitionId: string): Promise<FormBehaviorRule[]>;
   createFormBehaviorRule(data: InsertFormBehaviorRule): Promise<FormBehaviorRule>;
   updateFormBehaviorRuleStatus(id: string, status: FormBehaviorRule["status"]): Promise<FormBehaviorRule | undefined>;
+
+  // RBAC
+  getRbacPermissions(): Promise<RbacPermission[]>;
+  getRbacPermissionByName(name: string): Promise<RbacPermission | undefined>;
+  createRbacPermission(name: string, description?: string): Promise<RbacPermission>;
+
+  getRbacRole(id: string): Promise<RbacRole | undefined>;
+  getRbacRolesByTenant(tenantId: string): Promise<RbacRole[]>;
+  getRbacRoleByTenantAndName(tenantId: string, name: string): Promise<RbacRole | undefined>;
+  createRbacRole(data: InsertRbacRole): Promise<RbacRole>;
+  updateRbacRoleStatus(id: string, status: RbacRole["status"]): Promise<RbacRole | undefined>;
+
+  getRbacRolePermissions(roleId: string): Promise<RbacRolePermission[]>;
+  addRbacRolePermission(roleId: string, permissionId: string): Promise<void>;
+  removeRbacRolePermission(roleId: string, permissionId: string): Promise<void>;
+
+  getRbacUserRoles(userId: string): Promise<RbacUserRole[]>;
+  getRbacUserRolesByTenant(userId: string, tenantId: string): Promise<RbacRole[]>;
+  addRbacUserRole(userId: string, roleId: string): Promise<void>;
+  removeRbacUserRole(userId: string, roleId: string): Promise<void>;
+
+  getRbacPoliciesByRole(roleId: string): Promise<RbacPolicy[]>;
+  getRbacPoliciesByTenant(tenantId: string): Promise<RbacPolicy[]>;
+  createRbacPolicy(data: InsertRbacPolicy): Promise<RbacPolicy>;
+  deleteRbacPolicy(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -867,6 +904,106 @@ export class DatabaseStorage implements IStorage {
   async updateFormBehaviorRuleStatus(id: string, status: FormBehaviorRule["status"]): Promise<FormBehaviorRule | undefined> {
     const [item] = await db.update(formBehaviorRules).set({ status }).where(eq(formBehaviorRules.id, id)).returning();
     return item;
+  }
+
+  // --- RBAC ---
+
+  async getRbacPermissions(): Promise<RbacPermission[]> {
+    return db.select().from(rbacPermissions);
+  }
+
+  async getRbacPermissionByName(name: string): Promise<RbacPermission | undefined> {
+    const [p] = await db.select().from(rbacPermissions).where(eq(rbacPermissions.name, name));
+    return p;
+  }
+
+  async createRbacPermission(name: string, description?: string): Promise<RbacPermission> {
+    const [p] = await db.insert(rbacPermissions).values({ name, description: description ?? null }).returning();
+    return p;
+  }
+
+  async getRbacRole(id: string): Promise<RbacRole | undefined> {
+    const [r] = await db.select().from(rbacRoles).where(eq(rbacRoles.id, id));
+    return r;
+  }
+
+  async getRbacRolesByTenant(tenantId: string): Promise<RbacRole[]> {
+    return db.select().from(rbacRoles).where(eq(rbacRoles.tenantId, tenantId));
+  }
+
+  async getRbacRoleByTenantAndName(tenantId: string, name: string): Promise<RbacRole | undefined> {
+    const [r] = await db.select().from(rbacRoles).where(
+      and(eq(rbacRoles.tenantId, tenantId), eq(rbacRoles.name, name))
+    );
+    return r;
+  }
+
+  async createRbacRole(data: InsertRbacRole): Promise<RbacRole> {
+    const [r] = await db.insert(rbacRoles).values(data).returning();
+    return r;
+  }
+
+  async updateRbacRoleStatus(id: string, status: RbacRole["status"]): Promise<RbacRole | undefined> {
+    const [r] = await db.update(rbacRoles).set({ status }).where(eq(rbacRoles.id, id)).returning();
+    return r;
+  }
+
+  async getRbacRolePermissions(roleId: string): Promise<RbacRolePermission[]> {
+    return db.select().from(rbacRolePermissions).where(eq(rbacRolePermissions.roleId, roleId));
+  }
+
+  async addRbacRolePermission(roleId: string, permissionId: string): Promise<void> {
+    await db.insert(rbacRolePermissions).values({ roleId, permissionId }).onConflictDoNothing();
+  }
+
+  async removeRbacRolePermission(roleId: string, permissionId: string): Promise<void> {
+    await db.delete(rbacRolePermissions).where(
+      and(eq(rbacRolePermissions.roleId, roleId), eq(rbacRolePermissions.permissionId, permissionId))
+    );
+  }
+
+  async getRbacUserRoles(userId: string): Promise<RbacUserRole[]> {
+    return db.select().from(rbacUserRoles).where(eq(rbacUserRoles.userId, userId));
+  }
+
+  async getRbacUserRolesByTenant(userId: string, tenantId: string): Promise<RbacRole[]> {
+    const assignments = await db.select().from(rbacUserRoles).where(eq(rbacUserRoles.userId, userId));
+    if (assignments.length === 0) return [];
+    const roleIds = assignments.map(a => a.roleId);
+    const roles = await db.select().from(rbacRoles).where(
+      and(
+        eq(rbacRoles.tenantId, tenantId),
+        eq(rbacRoles.status, "active"),
+      )
+    );
+    return roles.filter(r => roleIds.includes(r.id));
+  }
+
+  async addRbacUserRole(userId: string, roleId: string): Promise<void> {
+    await db.insert(rbacUserRoles).values({ userId, roleId }).onConflictDoNothing();
+  }
+
+  async removeRbacUserRole(userId: string, roleId: string): Promise<void> {
+    await db.delete(rbacUserRoles).where(
+      and(eq(rbacUserRoles.userId, userId), eq(rbacUserRoles.roleId, roleId))
+    );
+  }
+
+  async getRbacPoliciesByRole(roleId: string): Promise<RbacPolicy[]> {
+    return db.select().from(rbacPolicies).where(eq(rbacPolicies.roleId, roleId));
+  }
+
+  async getRbacPoliciesByTenant(tenantId: string): Promise<RbacPolicy[]> {
+    return db.select().from(rbacPolicies).where(eq(rbacPolicies.tenantId, tenantId));
+  }
+
+  async createRbacPolicy(data: InsertRbacPolicy): Promise<RbacPolicy> {
+    const [p] = await db.insert(rbacPolicies).values(data).returning();
+    return p;
+  }
+
+  async deleteRbacPolicy(id: string): Promise<void> {
+    await db.delete(rbacPolicies).where(eq(rbacPolicies.id, id));
   }
 }
 

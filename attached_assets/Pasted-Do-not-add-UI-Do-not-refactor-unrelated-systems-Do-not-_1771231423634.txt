@@ -1,0 +1,82 @@
+Do not add UI.
+Do not refactor unrelated systems.
+Do not introduce external identity providers.
+
+Objective:
+Introduce a tenant-scoped RBAC system that governs access to forms, workflows, overrides, and change activation.
+
+Instructions:
+
+1) Add RBAC Core Models
+   Introduce tenant-scoped RBAC metadata:
+
+   - Permission
+     - id
+     - name (e.g., form.view, form.edit, workflow.execute, override.activate, change.approve)
+     - description
+
+   - Role
+     - id
+     - tenantId
+     - name
+     - description
+     - status (active | disabled)
+
+   - RolePermission
+     - roleId
+     - permissionId
+
+   - UserRole
+     - userId
+     - roleId
+
+2) Add Policy Scoping (v1)
+   Introduce resource scoping for permissions:
+
+   - Policy
+     - id
+     - tenantId
+     - roleId
+     - resourceType (form | workflow | override | change)
+     - resourceId (nullable, null = all)
+     - effect (allow | deny)
+
+   Notes:
+   - Deny overrides allow
+   - Null resourceId applies to all resources of that type
+
+3) Centralized Permission Evaluation
+   Implement a single enforcement service:
+   - authorize(ctx, permission, resourceType, resourceId?)
+
+   Behavior:
+   - Requires tenant execution context
+   - Resolves user roles → permissions → policies
+   - Evaluates deny-before-allow
+   - Fails closed if no explicit allow
+
+4) Integrate Enforcement (v1 scope)
+   Enforce RBAC checks at:
+   - Form Studio save (form.edit)
+   - Form override activation (override.activate)
+   - Workflow execution start (workflow.execute)
+   - Approval step action (workflow.approve)
+   - Change approval (change.approve)
+
+   Notes:
+   - Viewing compiled forms may be allowed by default (form.view)
+   - SystemContext bypasses RBAC checks
+
+5) Safety & Invariants
+   - RBAC is tenant-scoped
+   - Cross-tenant role assignment is prohibited
+   - RBAC evaluation must not be bypassable
+   - No inline permission checks outside the authorize() service
+
+Constraints:
+- No UI for role management yet
+- Seed a minimal default role set if needed (Admin, Editor, Viewer)
+- Do not change existing isolation or capability enforcement
+
+Goal:
+A minimal, deterministic RBAC system that safely governs who can modify forms, activate overrides, execute workflows, and approve changes.

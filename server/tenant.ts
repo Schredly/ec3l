@@ -2,6 +2,7 @@ import type { Request } from "express";
 
 export type TenantContext = {
   tenantId: string;
+  userId?: string;
   source: "header" | "system";
 };
 
@@ -17,5 +18,6 @@ export function resolveTenantContext(req: Request): TenantContext {
   if (!tenantId) {
     throw new TenantResolutionError();
   }
-  return { tenantId, source: "header" };
+  const userId = req.headers["x-user-id"] as string | undefined;
+  return { tenantId, userId, source: "header" };
 }
