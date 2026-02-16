@@ -28,7 +28,7 @@ import { insertWorkflowTriggerSchema, insertRecordTypeSchema, insertFieldDefinit
 import { dispatchPendingIntents } from "./services/intentDispatcher";
 import { startScheduler } from "./services/schedulerService";
 import * as formService from "./services/formService";
-import { installHrLite, AGENT_CONSTRAINTS, HrLiteInstallError } from "./services/hrLiteInstaller";
+import { installHrLite, HrLiteInstallError } from "./services/hrLiteInstaller";
 import { FormServiceError } from "./services/formService";
 import * as rbacService from "./services/rbacService";
 import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles, actorFromContext, systemActor } from "./services/rbacService";
@@ -1331,18 +1331,23 @@ export async function registerRoutes(
       const result = await installHrLite(req.tenantContext);
       res.json({
         message: "HR Lite installed successfully",
+        module: result.module,
         recordTypes: {
-          employee: result.recordTypes.employee.id,
-          jobChange: result.recordTypes.jobChange.id,
+          employee: {
+            id: result.recordTypes.employee.id,
+            name: result.recordTypes.employee.name,
+            fieldCount: result.fields.employee.length,
+          },
+          jobChange: {
+            id: result.recordTypes.jobChange.id,
+            name: result.recordTypes.jobChange.name,
+            fieldCount: result.fields.jobChange.length,
+          },
         },
-        forms: {
-          employeeDefault: result.forms.employeeDefault.id,
-          jobChangeDefault: result.forms.jobChangeDefault.id,
-        },
-        rbac: result.rbac,
-        workflows: {
-          hireEmployee: result.workflows.hireEmployee.id,
-          terminateEmployee: result.workflows.terminateEmployee.id,
+        choiceLists: {
+          employeeStatus: result.choiceLists.employeeStatus.id,
+          changeType: result.choiceLists.changeType.id,
+          jobChangeStatus: result.choiceLists.jobChangeStatus.id,
         },
       });
     } catch (err) {
@@ -1351,10 +1356,6 @@ export async function registerRoutes(
       }
       throw err;
     }
-  });
-
-  app.get("/api/hr-lite/agent-constraints", async (_req, res) => {
-    res.json(AGENT_CONSTRAINTS);
   });
 
   startScheduler();

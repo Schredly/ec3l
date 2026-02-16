@@ -59,13 +59,11 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **API Routes**: GET/POST /api/rbac/permissions, GET/POST /api/rbac/roles, POST /api/rbac/roles/:id/disable, POST /api/rbac/roles/:id/enable, GET/POST /api/rbac/roles/:id/permissions, DELETE /api/rbac/roles/:id/permissions/:permissionId, GET/POST /api/rbac/users/:userId/roles, DELETE /api/rbac/users/:userId/roles/:roleId, GET/POST /api/rbac/policies, DELETE /api/rbac/policies/:id, POST /api/rbac/seed-defaults, GET /api/rbac/audit-logs.
 
 ## HR Lite Module (server/services/hrLiteInstaller.ts)
-- **Installation**: POST /api/hr-lite/install — idempotent installer creates all metadata for a tenant.
+- **Module**: `hr_lite` (type: application, version: 1.0.0) — tenant-installable, versioned application module.
+- **Installation**: POST /api/hr-lite/install — idempotent installer creates the module and all metadata for a tenant. Uses existing metadata systems (RecordTypes, FieldDefinitions, ChoiceLists) with no direct database tables.
 - **RecordTypes**: `employee` (10 fields: employeeId, firstName, lastName, email, title, department, managerId, status, startDate, location) and `job_change` (8 fields: employeeId, changeType, effectiveDate, proposedTitle, proposedDepartment, proposedManagerId, reason, status).
 - **ChoiceLists**: employee_status (candidate, active, leave, terminated), job_change_type (hire, promotion, transfer, termination), job_change_status (draft, pendingApproval, approved, rejected, applied).
-- **FormDefinitions**: `employee_default` (3 sections: Identity, Role & Org, Employment Details) and `job_change_default` (3 sections: Change Details, Proposed Updates, Approval Status).
-- **RBAC Roles**: HR Admin (full access), Manager (form.view + workflow.approve), Employee (form.view only).
-- **Workflows**: `hire_employee` (record_event trigger on job_change create with changeType=hire; decision→dual approval→record mutations→status update) and `terminate_employee` (record_event trigger on job_change create with changeType=termination; dual approval→status update→record lock).
-- **Agent Constraints**: GET /api/hr-lite/agent-constraints — propose-only model. Agents can propose form patches, suggest workflow changes, draft approval comments. Cannot directly mutate records, activate overrides, execute workflows, or assign roles. All proposals require human approval.
+- **Tenant Isolation**: All metadata is tenant-scoped; install requires valid tenant context; foreign key constraints prevent cross-tenant access.
 
 ## External Dependencies
 - **GitHub**: For project connectivity and code repository management.

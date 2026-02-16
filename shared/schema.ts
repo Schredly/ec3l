@@ -32,6 +32,7 @@ export const moduleTypeEnum = pgEnum("module_type", [
   "workflow",
   "ui",
   "integration",
+  "application",
 ]);
 
 export const capabilityProfileEnum = pgEnum("capability_profile", [
