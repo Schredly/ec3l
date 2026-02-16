@@ -16,5 +16,3 @@ export type {
   CILifecycleState,
   CISource,
 } from './types';
-
-export { isCILifecycleState, isCISource } from './types';

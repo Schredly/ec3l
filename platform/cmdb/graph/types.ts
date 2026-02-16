@@ -253,31 +253,3 @@ export interface CMDBGraph {
    */
   readonly edges: ReadonlyArray<CIEdge>;
 }
-
-// ============================================================================
-// Type Guards (optional utilities for type narrowing)
-// ============================================================================
-
-/**
- * Type guard to check if a value is a valid CILifecycleState.
- */
-export function isCILifecycleState(value: unknown): value is CILifecycleState {
-  return (
-    value === 'planned' ||
-    value === 'active' ||
-    value === 'deprecated' ||
-    value === 'retired'
-  );
-}
-
-/**
- * Type guard to check if a value is a valid CISource.
- */
-export function isCISource(value: unknown): value is CISource {
-  return (
-    value === 'manual' ||
-    value === 'discovery' ||
-    value === 'integration' ||
-    value === 'agent'
-  );
-}
