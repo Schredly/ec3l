@@ -8,7 +8,13 @@ import {
   CheckCircle,
   GitPullRequestArrow,
   ShieldAlert,
+  Check,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { setTenantId } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import type { Tenant } from "@shared/schema";
 
 const adminNavItems = [
   { title: "Tenants", key: "tenants", icon: Building2 },
@@ -38,6 +44,104 @@ function AdminLoading() {
       <p className="text-sm">Checking access...</p>
     </div>
   );
+}
+
+function TenantsPanel() {
+  const currentTenantId = localStorage.getItem("tenantId") || "";
+
+  const { data: tenants, isLoading } = useQuery<Tenant[]>({
+    queryKey: ["/api/admin/tenants"],
+  });
+
+  const handleSelectTenant = (tenantId: string) => {
+    setTenantId(tenantId);
+    queryClient.invalidateQueries();
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-testid="tenants-loading">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!tenants || tenants.length === 0) {
+    return (
+      <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid="tenants-empty">
+        <p className="text-sm">No tenants found.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border rounded-md overflow-hidden" data-testid="tenants-table">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Tenant ID</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Name</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Status</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Created</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Context</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tenants.map((tenant) => {
+            const isSelected = tenant.id === currentTenantId;
+            return (
+              <tr
+                key={tenant.id}
+                onClick={() => handleSelectTenant(tenant.id)}
+                className={`border-b last:border-b-0 cursor-pointer hover-elevate ${isSelected ? "bg-sidebar-accent" : ""}`}
+                data-testid={`tenant-row-${tenant.id}`}
+                data-active={isSelected}
+              >
+                <td className="px-4 py-2 font-mono text-xs text-muted-foreground" data-testid={`tenant-id-${tenant.id}`}>
+                  {tenant.id}
+                </td>
+                <td className="px-4 py-2 font-medium" data-testid={`tenant-name-${tenant.id}`}>
+                  {tenant.name}
+                </td>
+                <td className="px-4 py-2">
+                  <Badge variant="secondary" className="text-xs" data-testid={`tenant-status-${tenant.id}`}>
+                    {(tenant as any).status || tenant.plan || "active"}
+                  </Badge>
+                </td>
+                <td className="px-4 py-2 text-xs text-muted-foreground" data-testid={`tenant-created-${tenant.id}`}>
+                  {new Date(tenant.createdAt).toLocaleDateString()}
+                </td>
+                <td className="px-4 py-2">
+                  {isSelected && (
+                    <div className="flex items-center gap-1 text-xs text-primary" data-testid={`tenant-active-${tenant.id}`}>
+                      <Check className="w-3 h-3" />
+                      <span>Active</span>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PlaceholderPanel({ title }: { title: string }) {
+  return (
+    <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid={`admin-panel-${title.toLowerCase()}`}>
+      <p className="text-sm">{title} management will appear here.</p>
+    </div>
+  );
+}
+
+function AdminContent({ activeKey }: { activeKey: string }) {
+  if (activeKey === "tenants") return <TenantsPanel />;
+  const item = adminNavItems.find((i) => i.key === activeKey);
+  return <PlaceholderPanel title={item?.title || activeKey} />;
 }
 
 export default function AdminConsole() {
@@ -90,9 +194,7 @@ export default function AdminConsole() {
           <activeItem.icon className="w-5 h-5 text-muted-foreground" />
           <h1 className="text-lg font-semibold">{activeItem.title}</h1>
         </div>
-        <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid={`admin-panel-${activeItem.key}`}>
-          <p className="text-sm">{activeItem.title} management will appear here.</p>
-        </div>
+        <AdminContent activeKey={activeKey} />
       </div>
     </div>
   );

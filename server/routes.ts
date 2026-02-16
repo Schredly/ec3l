@@ -1525,6 +1525,23 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/tenants", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const tenantList = await storage.getTenants();
+      res.json(tenantList.map(t => ({
+        ...t,
+        status: t.plan || "active",
+      })));
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/admin/check-access", async (req, res) => {
     try {
       const actor = resolveActorFromContext(req.tenantContext);
