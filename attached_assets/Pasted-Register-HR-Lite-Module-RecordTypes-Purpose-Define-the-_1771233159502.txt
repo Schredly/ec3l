@@ -1,0 +1,267 @@
+Register HR Lite Module + RecordTypes
+
+Purpose:
+Define the HR Lite app and its core data models using metadata (not hardcoded logic).
+
+Replit Prompt — Step 8A-1
+Do not add UI.
+Do not add workflows yet.
+Do not bypass existing metadata systems.
+
+Objective:
+Register a new internal application module called "HR Lite" with two RecordTypes: employee and job_change.
+
+Instructions:
+
+1) Create a new module:
+   - name: hr_lite
+   - type: application
+   - tenant-installable
+   - versioned
+
+2) Register RecordType: employee
+   Fields:
+   - employeeId (string, required, immutable)
+   - firstName (string, required)
+   - lastName (string, required)
+   - email (string, required, unique)
+   - title (string)
+   - department (string)
+   - managerId (reference → employee)
+   - status (enum: candidate | active | leave | terminated, required)
+   - startDate (date)
+   - location (string)
+
+3) Register RecordType: job_change
+   Fields:
+   - employeeId (reference → employee, required)
+   - changeType (enum: hire | promotion | transfer | termination, required)
+   - effectiveDate (date, required)
+   - proposedTitle (string)
+   - proposedDepartment (string)
+   - proposedManagerId (reference → employee)
+   - reason (text)
+   - status (enum: draft | pendingApproval | approved | rejected | applied, required)
+
+4) Ensure:
+   - tenant isolation enforced
+   - RecordTypes are metadata-driven
+   - no direct database access is added
+
+Goal:
+HR Lite exists as a tenant-installable module with two core RecordTypes.
+
+
+✅ Stop here. Verify RecordTypes exist before proceeding.
+
+🔹 Step 8A-2: Define Baseline Forms (Employee + Job Change)
+
+Purpose:
+Create vibable forms that admins will later customize.
+
+Replit Prompt — Step 8A-2
+Do not add workflows.
+Do not add overrides yet.
+Use existing form metadata system only.
+
+Objective:
+Create baseline forms for the HR Lite RecordTypes.
+
+Instructions:
+
+1) Create Employee Form
+   Form name: employee_default
+
+   Sections:
+   - Identity
+     - employeeId (readOnly)
+     - firstName
+     - lastName
+     - email
+   - Role & Org
+     - title
+     - department
+     - managerId
+   - Employment Details
+     - status
+     - startDate
+     - location
+
+   Rules:
+   - Required fields enforced via schema
+   - No conditional logic yet
+
+2) Create Job Change Form
+   Form name: job_change_default
+
+   Sections:
+   - Change Details
+     - employeeId
+     - changeType
+     - effectiveDate
+   - Proposed Updates
+     - proposedTitle
+     - proposedDepartment
+     - proposedManagerId
+   - Approval Status
+     - status (readOnly)
+     - reason
+
+3) Register forms as part of hr_lite module
+4) Ensure forms are compatible with Form Studio editing
+
+Goal:
+HR Lite has baseline, vibable forms built entirely via metadata.
+
+
+✅ Stop. Confirm forms render in Form Studio.
+
+🔹 Step 8A-3: Seed RBAC Roles for HR Lite
+
+Purpose:
+Make permissions real before workflows exist.
+
+Replit Prompt — Step 8A-3
+Do not add UI.
+Do not modify RBAC core logic.
+
+Objective:
+Seed tenant-scoped RBAC roles and permissions for HR Lite.
+
+Instructions:
+
+1) Create roles (tenant-scoped):
+   - HR Admin
+   - Manager
+   - Employee
+
+2) Assign permissions:
+   HR Admin:
+   - form.view
+   - form.edit
+   - workflow.execute
+   - workflow.approve
+   - override.activate
+   - change.approve
+
+   Manager:
+   - form.view
+   - workflow.approve (job_change only, scoped)
+
+   Employee:
+   - form.view (employee self only)
+
+3) Ensure:
+   - policies enforce resource scoping
+   - deny-by-default remains intact
+   - no UI is added for role management
+
+Goal:
+HR Lite actions are permission-governed before workflows are introduced.
+
+
+✅ Pause. Verify authorization checks succeed/fail correctly.
+
+🔹 Step 8A-4: Hire Workflow
+
+Purpose:
+Prove workflows + approvals + record mutation.
+
+Replit Prompt — Step 8A-4
+Do not hardcode logic.
+Use workflow metadata engine only.
+
+Objective:
+Create a Hire workflow for HR Lite.
+
+Instructions:
+
+1) Create Workflow: hire_employee
+   Trigger:
+   - job_change where changeType = hire
+
+2) Steps:
+   1. Validate required fields
+   2. Approval Step:
+      - role: HR Admin
+   3. Approval Step:
+      - role: Manager
+   4. Update Employee:
+      - status = active
+      - title = proposedTitle
+      - department = proposedDepartment
+      - managerId = proposedManagerId
+   5. Update job_change status = applied
+
+3) Enforce RBAC:
+   - workflow.execute required to start
+   - workflow.approve required for approvals
+
+Goal:
+Hiring an employee works end-to-end with approvals and RBAC enforcement.
+
+🔹 Step 8A-5: Termination Workflow
+
+Purpose:
+Prove irreversible lifecycle changes and record locking.
+
+Replit Prompt — Step 8A-5
+Do not duplicate workflow logic.
+Reuse metadata primitives.
+
+Objective:
+Create a Termination workflow for HR Lite.
+
+Instructions:
+
+1) Create Workflow: terminate_employee
+   Trigger:
+   - job_change where changeType = termination
+
+2) Steps:
+   1. Approval Step:
+      - role: HR Admin
+   2. Approval Step:
+      - role: Manager
+   3. Update Employee:
+      - status = terminated
+   4. Lock Employee record (readOnly)
+   5. Update job_change status = applied
+
+3) Ensure:
+   - Locked records cannot be edited
+   - Lock enforcement is metadata-driven
+
+Goal:
+Termination is controlled, auditable, and irreversible.
+
+🔹 Step 8A-6: Agent Assist (Propose-Only)
+
+Purpose:
+Validate safe agent interaction with a real app.
+
+Replit Prompt — Step 8A-6
+Do not allow agents to mutate records.
+Do not bypass Change or RBAC.
+
+Objective:
+Allow agents to assist HR Lite without direct execution.
+
+Instructions:
+
+1) Enable agent skills to:
+   - propose form patches
+   - suggest workflow changes
+   - draft approval comments
+
+2) Ensure:
+   - agent actions generate proposals only
+   - all proposals require human approval
+   - RBAC applies to activation
+
+3) Explicitly prevent:
+   - agent override activation
+   - direct record mutation
+
+Goal:
+Agents can assist HR Lite safely without authority escalation.

@@ -28,6 +28,7 @@ import { insertWorkflowTriggerSchema, insertRecordTypeSchema, insertFieldDefinit
 import { dispatchPendingIntents } from "./services/intentDispatcher";
 import { startScheduler } from "./services/schedulerService";
 import * as formService from "./services/formService";
+import { installHrLite, AGENT_CONSTRAINTS, HrLiteInstallError } from "./services/hrLiteInstaller";
 import { FormServiceError } from "./services/formService";
 import * as rbacService from "./services/rbacService";
 import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles, actorFromContext, systemActor } from "./services/rbacService";
@@ -1321,6 +1322,39 @@ export async function registerRoutes(
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
     const logs = await storage.getRbacAuditLogs(req.tenantContext.tenantId, limit);
     res.json(logs);
+  });
+
+  // --- HR Lite ---
+
+  app.post("/api/hr-lite/install", async (req, res) => {
+    try {
+      const result = await installHrLite(req.tenantContext);
+      res.json({
+        message: "HR Lite installed successfully",
+        recordTypes: {
+          employee: result.recordTypes.employee.id,
+          jobChange: result.recordTypes.jobChange.id,
+        },
+        forms: {
+          employeeDefault: result.forms.employeeDefault.id,
+          jobChangeDefault: result.forms.jobChangeDefault.id,
+        },
+        rbac: result.rbac,
+        workflows: {
+          hireEmployee: result.workflows.hireEmployee.id,
+          terminateEmployee: result.workflows.terminateEmployee.id,
+        },
+      });
+    } catch (err) {
+      if (err instanceof HrLiteInstallError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/hr-lite/agent-constraints", async (_req, res) => {
+    res.json(AGENT_CONSTRAINTS);
   });
 
   startScheduler();
