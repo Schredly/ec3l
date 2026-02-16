@@ -18,6 +18,9 @@ import type {
   FormBehaviorRule,
   InsertFormBehaviorRule,
   ModuleOverride,
+  Template,
+  InstalledApp,
+  InstalledModule,
 } from "@shared/schema";
 
 export class FormServiceError extends Error {
@@ -557,4 +560,205 @@ function enforceRequiredInvariant(
       }
     }
   }
+}
+
+// --- Form Studio Infrastructure ---
+
+const FORM_STUDIO_TEMPLATE_NAME = "__form_studio_system";
+
+async function getOrCreateFormStudioInfra(tenantId: string, projectId: string): Promise<{ installedModuleId: string }> {
+  let template = await storage.getTemplateByName(FORM_STUDIO_TEMPLATE_NAME);
+  if (!template) {
+    template = await storage.createTemplate({
+      name: FORM_STUDIO_TEMPLATE_NAME,
+      domain: "ITSM",
+      version: "1.0.0",
+      description: "System template for Form Studio overrides",
+      isGlobal: false,
+    });
+  }
+
+  let installedApp = await storage.getInstalledAppByTenantAndTemplate(tenantId, template.id);
+  if (!installedApp) {
+    installedApp = await storage.createInstalledApp({
+      tenantId,
+      templateId: template.id,
+      templateVersion: template.version,
+    });
+    await storage.updateInstalledAppStatus(installedApp.id, "installed");
+  }
+
+  const templateModules = await storage.getTemplateModules(template.id);
+  let tmpl = templateModules[0];
+  if (!tmpl) {
+    tmpl = await storage.createTemplateModule({
+      templateId: template.id,
+      moduleType: "code",
+      moduleName: "form-studio",
+      defaultCapabilityProfile: "READ_ONLY",
+      orderIndex: 0,
+      metadata: {},
+    });
+  }
+
+  const modules = await storage.getModulesByProject(projectId);
+  let mod = modules.find(m => m.name === "form-studio");
+  if (!mod) {
+    mod = await storage.createModule({
+      projectId,
+      name: "form-studio",
+      type: "code",
+      rootPath: "/form-studio",
+    });
+  }
+
+  const existingInstalledModules = await storage.getInstalledModules(installedApp.id);
+  let installedModule = existingInstalledModules[0];
+  if (!installedModule) {
+    installedModule = await storage.createInstalledModule({
+      installedAppId: installedApp.id,
+      moduleId: mod.id,
+      templateModuleId: tmpl.id,
+      capabilityProfile: "READ_ONLY",
+      isOverride: true,
+    });
+  }
+
+  return { installedModuleId: installedModule.id };
+}
+
+export async function createFormOverrideDraft(
+  ctx: TenantContext,
+  recordTypeName: string,
+  formName: string,
+  changeSummary: string,
+  patch: Record<string, unknown>,
+  projectId?: string,
+): Promise<{ overrideId: string; changeId: string }> {
+  const recordType = await storage.getRecordTypeByTenantAndName(ctx.tenantId, recordTypeName);
+  if (!recordType) throw new FormServiceError(`Record type "${recordTypeName}" not found`, 404);
+
+  const formDef = await storage.getFormDefinitionByTenantRecordAndName(ctx.tenantId, recordType.id, formName);
+  if (!formDef) throw new FormServiceError(`Form "${formName}" not found for record type "${recordTypeName}"`, 404);
+
+  const violations = await validateFormOverridePatch(ctx.tenantId, patch);
+  if (violations.length > 0) {
+    throw new FormOverrideValidationError(violations);
+  }
+
+  let resolvedProjectId = projectId;
+  if (!resolvedProjectId) {
+    const projects = await storage.getProjectsByTenant(ctx.tenantId);
+    if (projects.length === 0) {
+      throw new FormServiceError("No projects found for tenant — create a project first", 400);
+    }
+    resolvedProjectId = projects[0].id;
+  }
+
+  const { installedModuleId } = await getOrCreateFormStudioInfra(ctx.tenantId, resolvedProjectId);
+
+  const change = await storage.createChange({
+    projectId: resolvedProjectId,
+    title: `Form Studio: ${changeSummary}`,
+    description: `Override for ${recordTypeName}:${formName}`,
+    modulePath: "/form-studio",
+  });
+
+  const override = await storage.createModuleOverride({
+    tenantId: ctx.tenantId,
+    installedModuleId,
+    overrideType: "form",
+    targetRef: `${recordTypeName}:${formName}`,
+    patch,
+    createdBy: "form-studio",
+    version: 1,
+  });
+
+  await storage.updateModuleOverrideChangeId(override.id, change.id);
+
+  return { overrideId: override.id, changeId: change.id };
+}
+
+export async function generateVibePatch(
+  ctx: TenantContext,
+  recordTypeName: string,
+  formName: string,
+  description: string,
+): Promise<{ patch: Record<string, unknown>; description: string }> {
+  const compiled = await compileForm(ctx, recordTypeName, formName);
+
+  const fieldNames = Object.values(compiled.fields).map(f => ({
+    id: f.id,
+    name: f.name,
+    label: f.label,
+    fieldType: f.fieldType,
+    isRequired: f.isRequired,
+    effective: f.effective,
+  }));
+
+  const sectionSummary = compiled.sections.map(s => ({
+    id: s.id,
+    title: s.title,
+    orderIndex: s.orderIndex,
+    fields: s.placements.map(p => ({
+      fieldId: p.fieldDefinitionId,
+      name: p.field.name,
+      column: p.column,
+      orderIndex: p.orderIndex,
+    })),
+  }));
+
+  const patch: Record<string, unknown> = {};
+
+  const desc = description.toLowerCase();
+
+  for (const field of fieldNames) {
+    if (desc.includes(field.name.toLowerCase()) || desc.includes(field.label.toLowerCase())) {
+      const fieldPatch: Record<string, unknown> = {};
+
+      if (desc.includes("required") && !field.isRequired) {
+        fieldPatch.effective = { ...(field.effective || {}), required: true };
+      }
+      if (desc.includes("readonly") || desc.includes("read only") || desc.includes("read-only")) {
+        fieldPatch.effective = { ...(fieldPatch.effective || field.effective || {}), readOnly: true };
+      }
+      if (desc.includes("hidden") || desc.includes("hide") || desc.includes("invisible")) {
+        fieldPatch.effective = { ...(fieldPatch.effective || field.effective || {}), visible: false };
+      }
+      if (desc.includes("visible") || desc.includes("show")) {
+        fieldPatch.effective = { ...(fieldPatch.effective || field.effective || {}), visible: true };
+      }
+
+      if (Object.keys(fieldPatch).length > 0) {
+        if (!patch.fields) patch.fields = {};
+        (patch.fields as Record<string, unknown>)[field.id] = fieldPatch;
+      }
+    }
+  }
+
+  if (desc.includes("move") || desc.includes("reorder")) {
+    for (const section of sectionSummary) {
+      for (const field of section.fields) {
+        const fieldDef = fieldNames.find(f => f.id === field.fieldId);
+        if (fieldDef && (desc.includes(fieldDef.name.toLowerCase()) || desc.includes(fieldDef.label.toLowerCase()))) {
+          if (desc.includes("up") || desc.includes("before") || desc.includes("first")) {
+            const newPlacements = section.fields.map(f => ({
+              ...f,
+              orderIndex: f.fieldId === field.fieldId ? Math.max(0, f.orderIndex - 1) : f.orderIndex,
+            }));
+            if (!patch.sections) patch.sections = [];
+            (patch.sections as unknown[]).push({
+              id: section.id,
+              placements: newPlacements,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    patch: Object.keys(patch).length > 0 ? patch : { _note: "Could not interpret the description into a patch. Try being more specific about which field and what change." },
+    description: `Interpreted from: "${description}"`,
+  };
 }

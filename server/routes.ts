@@ -105,6 +105,21 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/changes/:id/status", async (req, res) => {
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ message: "status is required" });
+    try {
+      const updated = await changeService.updateChangeStatus(req.tenantContext, req.params.id, status);
+      if (!updated) return res.status(404).json({ message: "Change not found" });
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof ChangeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/changes/:id/project", async (req, res) => {
     const change = await changeService.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
@@ -1026,6 +1041,53 @@ export async function registerRoutes(
         req.params.formName,
       );
       res.json(compiled);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Form Studio: Save Override ---
+  app.post("/api/forms/:recordTypeName/:formName/overrides", async (req, res) => {
+    try {
+      const { changeSummary, patch, projectId } = req.body;
+      if (!patch || typeof patch !== "object") {
+        return res.status(400).json({ message: "patch is required and must be a JSON object" });
+      }
+      if (!changeSummary || typeof changeSummary !== "string") {
+        return res.status(400).json({ message: "changeSummary is required" });
+      }
+
+      const result = await formService.createFormOverrideDraft(
+        req.tenantContext,
+        req.params.recordTypeName,
+        req.params.formName,
+        changeSummary,
+        patch,
+        projectId,
+      );
+      res.status(201).json(result);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Form Studio: Vibe Patch ---
+  app.post("/api/forms/:recordTypeName/:formName/vibePatch", async (req, res) => {
+    try {
+      const { description } = req.body;
+      if (!description || typeof description !== "string") {
+        return res.status(400).json({ message: "description is required" });
+      }
+
+      const patchResult = await formService.generateVibePatch(
+        req.tenantContext,
+        req.params.recordTypeName,
+        req.params.formName,
+        description,
+      );
+      res.json(patchResult);
     } catch (err) {
       if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;

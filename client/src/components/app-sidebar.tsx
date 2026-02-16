@@ -5,6 +5,7 @@ import {
   GitPullRequestArrow,
   Bot,
   Terminal,
+  PenTool,
 } from "lucide-react";
 import {
   Sidebar,
@@ -28,6 +29,7 @@ const navItems = [
 const toolItems = [
   { title: "Agent Skills", url: "/skills", icon: Bot },
   { title: "Runner", url: "/runner", icon: Terminal },
+  { title: "Form Studio", url: "/studio/forms", icon: PenTool },
 ];
 
 export function AppSidebar() {

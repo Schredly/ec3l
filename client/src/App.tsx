@@ -16,6 +16,7 @@ import Changes from "@/pages/changes";
 import ChangeDetail from "@/pages/change-detail";
 import Skills from "@/pages/skills";
 import Runner from "@/pages/runner";
+import FormStudio from "@/pages/form-studio";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/changes/:id" component={ChangeDetail} />
       <Route path="/skills" component={Skills} />
       <Route path="/runner" component={Runner} />
+      <Route path="/studio/forms" component={FormStudio} />
       <Route component={NotFound} />
     </Switch>
   );

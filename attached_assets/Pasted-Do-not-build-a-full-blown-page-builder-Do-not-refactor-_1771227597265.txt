@@ -1,0 +1,75 @@
+Do not build a full-blown page builder.
+Do not refactor unrelated systems.
+Keep UI minimal and premium-clean.
+
+Objective:
+Add a minimal Form Studio UI that supports targeted edits to compiled forms and saves changes as ModuleOverrides + Change records.
+
+Instructions:
+
+1) Add Form Studio Route + Page
+   Create a UI page:
+   - /studio/forms
+
+   The page must support:
+   - selecting tenant
+   - selecting recordType
+   - selecting formName
+   - fetching compiled form JSON from:
+       GET /tenants/:tenantId/forms/:recordTypeName/:formName/compiled
+   - rendering sections + fields clearly
+
+2) Targeted Editing (v1)
+   Add simple controls (no drag/drop yet):
+   - move field up/down within its section
+   - move field to another section (dropdown)
+   - toggle visible/readOnly/required when permitted
+     - required toggle must respect schema-required invariant (cannot unset)
+
+   The UI should maintain a local "working copy" of layout changes.
+
+3) Save as Patch Override
+   Implement an API endpoint:
+   - POST /tenants/:tenantId/forms/:recordTypeName/:formName/overrides
+
+   Request body includes:
+   - changeSummary
+   - patch operations (json)
+
+   Server behavior:
+   - create Change record
+   - create ModuleOverride with overrideType="form"
+   - validate patch using existing override validation rules
+   - if validation passes:
+       - mark override status = draft (do not auto-activate)
+   - return overrideId + changeId
+
+4) Activate Override (separate step)
+   Implement:
+   - POST /tenants/:tenantId/overrides/:overrideId/activate
+
+   Behavior:
+   - runs validation again
+   - transitions override to active
+   - updates Change status accordingly
+
+5) Optional: "Vibe Patch" Assistant (minimal)
+   Add a text box in the Form Studio:
+   - user selects a target field or section
+   - user describes desired change in natural language (e.g. "move phone field under email and make it required")
+   - UI sends request to:
+       POST /tenants/:tenantId/forms/:recordTypeName/:formName/vibePatch
+
+   Server:
+   - uses the agentic layer to propose patch operations ONLY
+   - must NOT apply patch automatically
+   - returns patch JSON to the UI for review and then Save
+
+6) Safety & Constraints
+   - All edits must produce patches + Change records
+   - No direct writes to FieldDefinition / FormDefinition from UI
+   - Respect tenant scope & RBAC placeholders (if RBAC not ready, use existing auth guard)
+   - Keep design simple: two-pane view (form preview + edit controls)
+
+Goal:
+A minimal Form Studio that demonstrates isolated widget-level editing and AI-assisted patch generation, backed by overrides and change governance.
