@@ -81,6 +81,19 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **API Routes**: GET /api/agent-proposals (list by tenant, optional ?changeId filter), GET /api/agent-proposals/:id, POST /api/agent-proposals (create, agent-only), POST /api/agent-proposals/:id/submit (human-only), POST /api/agent-proposals/:id/review (human-only, requires change.approve).
 - **Key Files**: server/services/agentProposalService.ts (proposal CRUD + validation), server/services/agentGuardService.ts (assertNotAgent guard), server/tenant.ts (agentId in TenantContext), server/services/rbacService.ts (resolveActorFromContext).
 
+## Runner Execution Interface (server/execution/)
+- **Purpose**: Explicit control-plane → runner boundary for all execution paths. The control plane must call the RunnerExecution interface, not internal helpers directly.
+- **ExecutionRequest**: Standardized request object with tenantContext, moduleExecutionContext, requestedAction (workflow_step | agent_task | agent_action | workspace_start | workspace_stop | skill_invoke), capabilities, and inputPayload. Built via `buildExecutionRequest()` helper.
+- **RunnerExecution Interface**: Three methods: `executeWorkflowStep(request)`, `executeTask(request)`, `executeAgentAction(request)`. Each returns `ExecutionResult` with success, output, logs, and optional error.
+- **LocalRunnerExecution**: Concrete implementation that wraps existing runner service (SimulatedRunnerService). All filesystem and shell access is contained within this implementation. Singleton via `getRunnerExecution()`.
+- **Boundary Logging**: Every call crossing the control-plane → runner boundary logs tenant, module, profile, action, and capabilities. Return logs include status and error info. Format: `[control-plane→runner]` and `[runner→control-plane]`.
+- **Execution Paths**:
+  - Workflow steps: `workflowEngine.executeStep()` → `runner.executeWorkflowStep()` → handler.execute()
+  - Agent tasks: `agentRunService.createAgentRun()` → `runner.executeTask()` → skillRegistry.invoke()
+  - Workspace operations: `workspaceService.startWorkspace()` → `runner.executeAgentAction()` → runnerService.startWorkspace()
+- **Key Files**: server/execution/types.ts (ExecutionRequest, RunnerExecution interface), server/execution/localRunnerExecution.ts (LocalRunnerExecution implementation), server/execution/index.ts (barrel exports).
+- **Constraint**: No filesystem or shell access exists outside the runner interface. All such operations go through LocalRunnerExecution which delegates to IRunnerService.
+
 ## External Dependencies
 - **GitHub**: For project connectivity and code repository management.
 - **PostgreSQL**: The primary database for persistent storage.

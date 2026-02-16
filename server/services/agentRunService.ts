@@ -5,6 +5,7 @@ import { CapabilityDeniedError } from "../capabilities";
 import { storage } from "../storage";
 import { skillRegistry } from "../skills/registry";
 import type { AgentRun, InsertAgentRun, ChangeRecord } from "@shared/schema";
+import { getRunnerExecution, buildExecutionRequest } from "../execution";
 
 export async function getAgentRuns(ctx: TenantContext): Promise<AgentRun[]> {
   void ctx;
@@ -23,6 +24,7 @@ export async function createAgentRun(
   moduleCtx: ModuleExecutionContext
 ): Promise<AgentRun> {
   void ctx;
+  const runner = getRunnerExecution();
   const moduleRootPath = moduleCtx.moduleRootPath || null;
   const moduleId = moduleCtx.moduleId || null;
 
@@ -46,6 +48,28 @@ export async function createAgentRun(
   ];
 
   for (const skill of requestedSkills) {
+    const taskRequest = buildExecutionRequest({
+      moduleExecutionContext: moduleCtx,
+      requestedAction: "skill_invoke",
+      inputPayload: {
+        skillName: skill.name,
+        target: skill.target,
+        workspaceId: change.id,
+        changeId: change.id,
+      },
+    });
+
+    const taskResult = await runner.executeTask(taskRequest);
+    logs.push(...taskResult.logs);
+
+    if (!taskResult.success) {
+      logs.push(`[agent] Boundary check failed for skill "${skill.name}" — ${taskResult.error || "unknown"}`);
+      logs.push(`[agent] Execution halted — boundary check failure is terminal`);
+      run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+      await storage.updateChangeStatus(change.id, "ValidationFailed");
+      return run;
+    }
+
     try {
       const result = await skillRegistry.invoke(skill.name, moduleCtx, {
         target: skill.target,

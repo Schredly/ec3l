@@ -3,6 +3,7 @@ import { assertModuleCapability, Capabilities } from "../capabilities";
 import { storage } from "../storage";
 import type { WorkflowStep, WorkflowExecution, WorkflowStepExecution } from "@shared/schema";
 import { checkRecordLock } from "./formService";
+import { getRunnerExecution, buildExecutionRequest } from "../execution";
 
 export class WorkflowExecutionError extends Error {
   public readonly statusCode: number;
@@ -511,23 +512,40 @@ async function executeStep(
     return failed!;
   }
 
+  const runner = getRunnerExecution();
+  const config = (step.config as StepConfig) || {};
+  const executionRequest = buildExecutionRequest({
+    moduleExecutionContext: moduleCtx,
+    requestedAction: "workflow_step",
+    inputPayload: {
+      stepType: step.stepType,
+      config,
+      input,
+      executionId: execution.id,
+      stepId: step.id,
+    },
+  });
+
+  const boundaryResult = await runner.executeWorkflowStep(executionRequest);
+
   try {
-    const config = (step.config as StepConfig) || {};
     const output = await handler.execute(config, input, moduleCtx);
+    const outputWithLogs = { ...output, runnerLogs: boundaryResult.logs };
 
     if (step.stepType === "approval" && output.status === "awaiting_approval") {
-      await storage.updateWorkflowStepExecution(stepExec.id, "awaiting_approval", output);
+      await storage.updateWorkflowStepExecution(stepExec.id, "awaiting_approval", outputWithLogs);
       const awaiting = await storage.getWorkflowStepExecution(stepExec.id);
       return awaiting!;
     }
 
-    await storage.updateWorkflowStepExecution(stepExec.id, "completed", output);
+    await storage.updateWorkflowStepExecution(stepExec.id, "completed", outputWithLogs);
     const completed = await storage.getWorkflowStepExecution(stepExec.id);
     return completed!;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Step execution error";
     await storage.updateWorkflowStepExecution(stepExec.id, "failed", {
       error: errorMsg,
+      runnerLogs: boundaryResult?.logs || [],
     });
     const failed = await storage.getWorkflowStepExecution(stepExec.id);
     return failed!;
