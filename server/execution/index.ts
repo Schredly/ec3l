@@ -10,3 +10,12 @@ export { LocalRunnerAdapter } from "./localRunnerAdapter";
 export { RemoteRunnerAdapter } from "./remoteRunnerAdapter";
 export { getRunnerExecution, getActiveAdapterType } from "./runnerAdapterFactory";
 export type { RunnerAdapterType } from "./runnerAdapterFactory";
+export { validateRequestAtBoundary, validateModuleBoundaryPath, boundaryErrorToResult } from "./boundaryGuard";
+export {
+  RunnerBoundaryError,
+  MissingTenantContextError,
+  MissingModuleContextError,
+  CapabilityNotGrantedError,
+  ModuleBoundaryEscapeError,
+  TenantContextMutationError,
+} from "./boundaryErrors";
