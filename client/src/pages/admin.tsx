@@ -130,6 +130,79 @@ function TenantsPanel() {
   );
 }
 
+type AdminModule = {
+  id: string;
+  name: string;
+  type: string;
+  version: string;
+  status: string;
+  installedAt: string;
+};
+
+function AppsPanel() {
+  const { data: modules, isLoading } = useQuery<AdminModule[]>({
+    queryKey: ["/api/admin/modules"],
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-testid="apps-loading">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!modules || modules.length === 0) {
+    return (
+      <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid="apps-empty">
+        <p className="text-sm">No modules installed for this tenant.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border rounded-md overflow-hidden" data-testid="apps-table">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Module Name</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Version</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Status</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Installed At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {modules.map((mod) => (
+            <tr
+              key={mod.id}
+              className="border-b last:border-b-0"
+              data-testid={`app-row-${mod.id}`}
+            >
+              <td className="px-4 py-2 font-medium" data-testid={`app-name-${mod.id}`}>
+                {mod.name}
+                <span className="ml-2 text-xs text-muted-foreground font-mono">{mod.type}</span>
+              </td>
+              <td className="px-4 py-2 font-mono text-xs" data-testid={`app-version-${mod.id}`}>
+                {mod.version}
+              </td>
+              <td className="px-4 py-2" data-testid={`app-status-${mod.id}`}>
+                <Badge variant="secondary" className="text-xs">
+                  {mod.status}
+                </Badge>
+              </td>
+              <td className="px-4 py-2 text-xs text-muted-foreground" data-testid={`app-installed-${mod.id}`}>
+                {new Date(mod.installedAt).toLocaleDateString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function PlaceholderPanel({ title }: { title: string }) {
   return (
     <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid={`admin-panel-${title.toLowerCase()}`}>
@@ -140,6 +213,7 @@ function PlaceholderPanel({ title }: { title: string }) {
 
 function AdminContent({ activeKey }: { activeKey: string }) {
   if (activeKey === "tenants") return <TenantsPanel />;
+  if (activeKey === "apps") return <AppsPanel />;
   const item = adminNavItems.find((i) => i.key === activeKey);
   return <PlaceholderPanel title={item?.title || activeKey} />;
 }

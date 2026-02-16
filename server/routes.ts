@@ -1525,6 +1525,35 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/modules", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const tenantId = req.tenantContext.tenantId;
+      const tenantProjects = await storage.getProjectsByTenant(tenantId);
+      const allModules = [];
+      for (const project of tenantProjects) {
+        const mods = await storage.getModulesByProject(project.id);
+        for (const m of mods) {
+          allModules.push({
+            id: m.id,
+            name: m.name,
+            type: m.type,
+            version: m.version,
+            status: "installed",
+            installedAt: m.createdAt,
+          });
+        }
+      }
+      res.json(allModules);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/admin/tenants", async (req, res) => {
     try {
       const actor = resolveActorFromContext(req.tenantContext);
