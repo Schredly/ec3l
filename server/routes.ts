@@ -1525,6 +1525,68 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/changes", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const tenantId = req.tenantContext.tenantId;
+
+      const projects = await storage.getProjectsByTenant(tenantId);
+      const projectIds = new Set(projects.map((p) => p.id));
+      const projectMap = new Map(projects.map((p) => [p.id, p.name]));
+
+      const allChanges = await storage.getChanges();
+      const tenantChanges = allChanges.filter((c) => projectIds.has(c.projectId));
+
+      const statusFilter = req.query.status as string | undefined;
+      const fromDate = req.query.from as string | undefined;
+      const toDate = req.query.to as string | undefined;
+
+      let filtered = tenantChanges;
+      if (statusFilter) {
+        filtered = filtered.filter((c) => c.status === statusFilter);
+      }
+      if (fromDate) {
+        const from = new Date(fromDate);
+        if (!isNaN(from.getTime())) {
+          filtered = filtered.filter((c) => new Date(c.createdAt) >= from);
+        }
+      }
+      if (toDate) {
+        const to = new Date(toDate);
+        if (!isNaN(to.getTime())) {
+          to.setHours(23, 59, 59, 999);
+          filtered = filtered.filter((c) => new Date(c.createdAt) <= to);
+        }
+      }
+
+      const results = await Promise.all(
+        filtered.map(async (c) => {
+          const agentRuns = await storage.getAgentRunsByChange(c.id);
+          const lastRun = agentRuns.length > 0 ? agentRuns[agentRuns.length - 1] : null;
+          return {
+            changeId: c.id,
+            title: c.title,
+            summary: c.description || c.title,
+            status: c.status,
+            projectName: projectMap.get(c.projectId) || c.projectId,
+            actorType: lastRun ? "agent" : "user",
+            actorId: lastRun?.id || null,
+            createdAt: c.createdAt,
+          };
+        })
+      );
+
+      results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.json(results);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/admin/approvals", async (req, res) => {
     try {
       const actor = resolveActorFromContext(req.tenantContext);

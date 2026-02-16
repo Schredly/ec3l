@@ -13,6 +13,8 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
+  FileText,
+  Filter,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +30,7 @@ const adminNavItems = [
   { title: "Overrides", key: "overrides", icon: Layers },
   { title: "Workflows", key: "workflows", icon: Workflow },
   { title: "Approvals", key: "approvals", icon: CheckCircle },
-  { title: "Changes", key: "changes", icon: GitPullRequestArrow },
+  { title: "Changes", key: "changes", icon: FileText },
 ];
 
 function AdminDenied() {
@@ -660,6 +662,161 @@ function WorkflowsPanel() {
   );
 }
 
+const CHANGE_STATUSES = ["Draft", "WorkspaceRunning", "Validating", "ValidationFailed", "Ready", "Merged"];
+
+type ChangeRow = {
+  changeId: string;
+  title: string;
+  summary: string;
+  status: string;
+  projectName: string;
+  actorType: string;
+  actorId: string | null;
+  createdAt: string;
+};
+
+function ChangesPanel() {
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
+
+  const queryParams = new URLSearchParams();
+  if (statusFilter) queryParams.set("status", statusFilter);
+  if (fromDate) queryParams.set("from", fromDate);
+  if (toDate) queryParams.set("to", toDate);
+  const qs = queryParams.toString();
+
+  const { data: changes, isLoading } = useQuery<ChangeRow[]>({
+    queryKey: ["/api/admin/changes", statusFilter, fromDate, toDate],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/changes${qs ? `?${qs}` : ""}`, {
+        headers: {
+          "x-tenant-id": localStorage.getItem("tenantId") || "default",
+          "x-user-id": localStorage.getItem("userId") || "user-admin",
+        },
+      });
+      if (!res.ok) throw new Error("Failed to load changes");
+      return res.json();
+    },
+  });
+
+  const statusColor = (s: string) => {
+    switch (s) {
+      case "Draft": return "secondary";
+      case "Ready": return "default";
+      case "Merged": return "default";
+      case "ValidationFailed": return "destructive";
+      default: return "outline" as const;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap" data-testid="changes-filters">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            data-testid="changes-filter-status"
+          >
+            <option value="">All statuses</option>
+            {CHANGE_STATUSES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">From</span>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            data-testid="changes-filter-from"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">To</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            data-testid="changes-filter-to"
+          />
+        </div>
+        {(statusFilter || fromDate || toDate) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => { setStatusFilter(""); setFromDate(""); setToDate(""); }}
+            data-testid="changes-filter-clear"
+          >
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2" data-testid="changes-loading">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      ) : !changes || changes.length === 0 ? (
+        <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid="changes-empty">
+          <p className="text-sm">No change records found{statusFilter ? ` with status "${statusFilter}"` : ""}{fromDate || toDate ? " in the selected date range" : ""}.</p>
+        </div>
+      ) : (
+        <div className="border rounded-md overflow-hidden" data-testid="changes-table">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">Change ID</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">Summary</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">Status</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">Actor</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {changes.map((c) => (
+                <tr key={c.changeId} className="border-b last:border-b-0" data-testid={`change-row-${c.changeId}`}>
+                  <td className="px-4 py-2 font-mono text-xs" data-testid={`change-id-${c.changeId}`}>
+                    {c.changeId.substring(0, 8)}...
+                  </td>
+                  <td className="px-4 py-2" data-testid={`change-summary-${c.changeId}`}>
+                    <div className="font-medium">{c.title}</div>
+                    {c.summary !== c.title && (
+                      <div className="text-xs text-muted-foreground mt-0.5">{c.summary}</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-2" data-testid={`change-status-${c.changeId}`}>
+                    <Badge variant={statusColor(c.status)} className="text-xs">
+                      {c.status}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-2 text-xs" data-testid={`change-actor-${c.changeId}`}>
+                    <span className="text-muted-foreground">{c.actorType}</span>
+                    {c.actorId && (
+                      <span className="ml-1 font-mono">{c.actorId.substring(0, 8)}...</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground" data-testid={`change-created-${c.changeId}`}>
+                    {new Date(c.createdAt).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlaceholderPanel({ title }: { title: string }) {
   return (
     <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid={`admin-panel-${title.toLowerCase()}`}>
@@ -674,6 +831,7 @@ function AdminContent({ activeKey }: { activeKey: string }) {
   if (activeKey === "overrides") return <OverridesPanel />;
   if (activeKey === "workflows") return <WorkflowsPanel />;
   if (activeKey === "approvals") return <ApprovalsPanel />;
+  if (activeKey === "changes") return <ChangesPanel />;
   const item = adminNavItems.find((i) => i.key === activeKey);
   return <PlaceholderPanel title={item?.title || activeKey} />;
 }
