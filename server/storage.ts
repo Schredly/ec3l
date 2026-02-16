@@ -94,6 +94,9 @@ import {
   type RbacUserRole,
   type RbacPolicy,
   type InsertRbacPolicy,
+  rbacAuditLogs,
+  type RbacAuditLog,
+  type InsertRbacAuditLog,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -265,6 +268,9 @@ export interface IStorage {
   getRbacPoliciesByTenant(tenantId: string): Promise<RbacPolicy[]>;
   createRbacPolicy(data: InsertRbacPolicy): Promise<RbacPolicy>;
   deleteRbacPolicy(id: string): Promise<void>;
+
+  createRbacAuditLog(data: InsertRbacAuditLog): Promise<RbacAuditLog>;
+  getRbacAuditLogs(tenantId: string, limit?: number): Promise<RbacAuditLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1004,6 +1010,18 @@ export class DatabaseStorage implements IStorage {
 
   async deleteRbacPolicy(id: string): Promise<void> {
     await db.delete(rbacPolicies).where(eq(rbacPolicies.id, id));
+  }
+
+  async createRbacAuditLog(data: InsertRbacAuditLog): Promise<RbacAuditLog> {
+    const [log] = await db.insert(rbacAuditLogs).values(data).returning();
+    return log;
+  }
+
+  async getRbacAuditLogs(tenantId: string, limit = 100): Promise<RbacAuditLog[]> {
+    return db.select().from(rbacAuditLogs)
+      .where(eq(rbacAuditLogs.tenantId, tenantId))
+      .orderBy(desc(rbacAuditLogs.timestamp))
+      .limit(limit);
   }
 }
 

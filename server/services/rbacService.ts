@@ -1,7 +1,7 @@
 import { storage } from "../storage";
 import type { TenantContext } from "../tenant";
 import { isSystemContext } from "../systemContext";
-import type { RbacPolicy, RbacRole } from "@shared/schema";
+import type { RbacPolicy, RbacRole, ActorIdentity, InsertRbacAuditLog } from "@shared/schema";
 
 export class RbacDeniedError extends Error {
   public readonly permission: string;
@@ -101,30 +101,65 @@ export async function seedDefaultRoles(tenantId: string): Promise<void> {
   }
 }
 
+async function recordAudit(
+  tenantId: string | null,
+  actor: ActorIdentity,
+  permission: string,
+  outcome: "allow" | "deny",
+  resourceType?: string,
+  resourceId?: string,
+  reason?: string,
+): Promise<void> {
+  try {
+    const data: InsertRbacAuditLog = {
+      tenantId,
+      actorType: actor.actorType,
+      actorId: actor.actorId ?? null,
+      permission,
+      resourceType: resourceType ?? null,
+      resourceId: resourceId ?? null,
+      outcome,
+      reason: reason ?? null,
+    };
+    await storage.createRbacAuditLog(data);
+  } catch (_err) {
+  }
+}
+
 export async function authorize(
   ctx: TenantContext | unknown,
-  userId: string | undefined,
+  actor: ActorIdentity,
   permission: string,
   resourceType?: string,
   resourceId?: string,
 ): Promise<void> {
   if (isSystemContext(ctx)) {
+    if (actor.actorType !== "system") {
+      const tenantId = (ctx as any).tenantId ?? null;
+      await recordAudit(tenantId, actor, permission, "deny", resourceType, resourceId, "non-system actor passed system context");
+      throw new RbacDeniedError(permission, resourceType, resourceId);
+    }
+    await recordAudit(null, actor, permission, "allow", resourceType, resourceId, "system context bypass");
     return;
   }
 
   const tenantCtx = ctx as TenantContext;
+
+  if (!actor.actorId) {
+    await recordAudit(tenantCtx.tenantId ?? null, actor, permission, "deny", resourceType, resourceId, "missing actor identity");
+    throw new RbacDeniedError(permission, resourceType, resourceId);
+  }
+
   if (!tenantCtx.tenantId) {
+    await recordAudit(null, actor, permission, "deny", resourceType, resourceId, "missing tenant context");
     throw new RbacDeniedError(permission, resourceType, resourceId);
   }
 
-  if (!userId) {
-    throw new RbacDeniedError(permission, resourceType, resourceId);
-  }
-
-  const allRoles = await storage.getRbacUserRolesByTenant(userId, tenantCtx.tenantId);
+  const allRoles = await storage.getRbacUserRolesByTenant(actor.actorId, tenantCtx.tenantId);
   const roles = allRoles.filter(r => r.status === "active");
 
   if (roles.length === 0) {
+    await recordAudit(tenantCtx.tenantId, actor, permission, "deny", resourceType, resourceId, "no active roles");
     throw new RbacDeniedError(permission, resourceType, resourceId);
   }
 
@@ -132,6 +167,7 @@ export async function authorize(
   const permByName = new Map(allPerms.map(p => [p.name, p]));
   const targetPerm = permByName.get(permission);
   if (!targetPerm) {
+    await recordAudit(tenantCtx.tenantId, actor, permission, "deny", resourceType, resourceId, "unknown permission");
     throw new RbacDeniedError(permission, resourceType, resourceId);
   }
 
@@ -151,6 +187,7 @@ export async function authorize(
   }
 
   if (!hasPermission) {
+    await recordAudit(tenantCtx.tenantId, actor, permission, "deny", resourceType, resourceId, "permission not granted by any role");
     throw new RbacDeniedError(permission, resourceType, resourceId);
   }
 
@@ -164,6 +201,7 @@ export async function authorize(
     });
 
     if (hasDeny) {
+      await recordAudit(tenantCtx.tenantId, actor, permission, "deny", resourceType, resourceId, "denied by policy");
       throw new RbacDeniedError(permission, resourceType, resourceId);
     }
 
@@ -175,9 +213,27 @@ export async function authorize(
 
     const hasAnyPolicyForType = relevantPolicies.length > 0;
     if (hasAnyPolicyForType && !hasAllow) {
+      await recordAudit(tenantCtx.tenantId, actor, permission, "deny", resourceType, resourceId, "no allow policy for resource type");
       throw new RbacDeniedError(permission, resourceType, resourceId);
     }
   }
+
+  await recordAudit(tenantCtx.tenantId, actor, permission, "allow", resourceType, resourceId);
+}
+
+export function actorFromContext(ctx: TenantContext): ActorIdentity {
+  if (!ctx.userId) {
+    throw new RbacDeniedError("unknown", undefined, undefined);
+  }
+  return { actorType: "user", actorId: ctx.userId };
+}
+
+export function agentActor(agentId: string): ActorIdentity {
+  return { actorType: "agent", actorId: agentId };
+}
+
+export function systemActor(): ActorIdentity {
+  return { actorType: "system", actorId: null };
 }
 
 export async function getUserRolesForTenant(userId: string, tenantId: string): Promise<RbacRole[]> {

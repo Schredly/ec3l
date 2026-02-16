@@ -175,6 +175,17 @@ export const rbacPolicyEffectEnum = pgEnum("rbac_policy_effect", [
   "deny",
 ]);
 
+export const rbacActorTypeEnum = pgEnum("rbac_actor_type", [
+  "user",
+  "agent",
+  "system",
+]);
+
+export const rbacAuditOutcomeEnum = pgEnum("rbac_audit_outcome", [
+  "allow",
+  "deny",
+]);
+
 export const rbacResourceTypeEnum = pgEnum("rbac_resource_type", [
   "form",
   "workflow",
@@ -516,6 +527,19 @@ export const rbacPolicies = pgTable("rbac_policies", {
   effect: rbacPolicyEffectEnum("effect").notNull(),
 });
 
+export const rbacAuditLogs = pgTable("rbac_audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id"),
+  actorType: rbacActorTypeEnum("actor_type").notNull(),
+  actorId: varchar("actor_id"),
+  permission: text("permission").notNull(),
+  resourceType: text("resource_type"),
+  resourceId: varchar("resource_id"),
+  outcome: rbacAuditOutcomeEnum("outcome").notNull(),
+  reason: text("reason"),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+});
+
 // Insert schemas
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -758,6 +782,19 @@ export type RbacRole = typeof rbacRoles.$inferSelect;
 export type RbacRolePermission = typeof rbacRolePermissions.$inferSelect;
 export type RbacUserRole = typeof rbacUserRoles.$inferSelect;
 export type RbacPolicy = typeof rbacPolicies.$inferSelect;
+
+export type RbacAuditLog = typeof rbacAuditLogs.$inferSelect;
+
+export type ActorIdentity =
+  | { actorType: "user"; actorId: string }
+  | { actorType: "agent"; actorId: string }
+  | { actorType: "system"; actorId?: null };
+
+export const insertRbacAuditLogSchema = createInsertSchema(rbacAuditLogs).omit({
+  id: true,
+  timestamp: true,
+});
+export type InsertRbacAuditLog = z.infer<typeof insertRbacAuditLogSchema>;
 
 export const insertRbacRoleSchema = createInsertSchema(rbacRoles).omit({
   id: true,

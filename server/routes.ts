@@ -30,8 +30,9 @@ import { startScheduler } from "./services/schedulerService";
 import * as formService from "./services/formService";
 import { FormServiceError } from "./services/formService";
 import * as rbacService from "./services/rbacService";
-import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles } from "./services/rbacService";
+import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles, actorFromContext, systemActor } from "./services/rbacService";
 import { insertRbacRoleSchema, insertRbacPolicySchema } from "@shared/schema";
+import type { ActorIdentity } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -115,7 +116,7 @@ export async function registerRoutes(
     if (!status) return res.status(400).json({ message: "status is required" });
     try {
       if (status === "Ready" || status === "Merged") {
-        await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+        await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
       }
       const updated = await changeService.updateChangeStatus(req.tenantContext, req.params.id, status);
       if (!updated) return res.status(404).json({ message: "Change not found" });
@@ -179,7 +180,7 @@ export async function registerRoutes(
   // Check in
   app.post("/api/changes/:id/checkin", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
       const change = await changeService.getChange(req.tenantContext, req.params.id);
       if (!change) return res.status(404).json({ message: "Change not found" });
 
@@ -204,7 +205,7 @@ export async function registerRoutes(
   // Merge
   app.post("/api/changes/:id/merge", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
       const change = await changeService.getChange(req.tenantContext, req.params.id);
       if (!change) return res.status(404).json({ message: "Change not found" });
 
@@ -385,7 +386,7 @@ export async function registerRoutes(
 
   app.post("/api/overrides/:id/activate", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.OVERRIDE_ACTIVATE, "override", req.params.id);
+      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.OVERRIDE_ACTIVATE, "override", req.params.id);
       const override = await overrideService.activateOverride(req.tenantContext, req.params.id);
       res.json(override);
     } catch (err) {
@@ -546,7 +547,7 @@ export async function registerRoutes(
 
   app.post("/api/workflow-definitions/:id/execute", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.WORKFLOW_EXECUTE, "workflow", req.params.id);
+      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.WORKFLOW_EXECUTE, "workflow", req.params.id);
       const { moduleId, input } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -612,7 +613,7 @@ export async function registerRoutes(
 
   app.post("/api/workflow-executions/:id/resume", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.WORKFLOW_APPROVE, "workflow", req.params.id);
+      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.WORKFLOW_APPROVE, "workflow", req.params.id);
       const { moduleId, stepExecutionId, outcome } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -1089,7 +1090,7 @@ export async function registerRoutes(
   // --- Form Studio: Save Override ---
   app.post("/api/forms/:recordTypeName/:formName/overrides", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.FORM_EDIT, "form");
+      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.FORM_EDIT, "form");
       const { changeSummary, operations, projectId } = req.body;
       if (!changeSummary || typeof changeSummary !== "string") {
         return res.status(400).json({ message: "changeSummary is required" });
@@ -1148,7 +1149,7 @@ export async function registerRoutes(
 
   async function requireRbacAdmin(req: import("express").Request, res: import("express").Response): Promise<boolean> {
     try {
-      await rbacService.authorize(req.tenantContext, req.tenantContext.userId, PERMISSIONS.CHANGE_APPROVE);
+      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE);
       return true;
     } catch (err) {
       if (err instanceof RbacDeniedError) {
@@ -1313,6 +1314,13 @@ export async function registerRoutes(
     await seedDefaultRoles(req.tenantContext.tenantId);
     const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
     res.json({ message: "Default roles seeded", roles });
+  });
+
+  app.get("/api/rbac/audit-logs", async (req, res) => {
+    if (!(await requireRbacAdmin(req, res))) return;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+    const logs = await storage.getRbacAuditLogs(req.tenantContext.tenantId, limit);
+    res.json(logs);
   });
 
   startScheduler();
