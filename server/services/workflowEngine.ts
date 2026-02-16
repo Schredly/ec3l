@@ -137,11 +137,53 @@ const decisionHandler: StepHandler = {
   },
 };
 
+const recordMutationHandler: StepHandler = {
+  async execute(config, input, _moduleCtx) {
+    const targetRecordType = config.targetRecordType as string;
+    const mutations = config.mutations as Record<string, unknown> | undefined;
+    const sourceMapping = config.sourceMapping as Record<string, string> | undefined;
+    const recordIdField = (config.recordIdField as string) || "employeeId";
+
+    if (!targetRecordType) {
+      throw new Error("record_mutation step requires targetRecordType in config");
+    }
+
+    const resolvedMutations: Record<string, unknown> = {};
+
+    if (mutations) {
+      for (const [field, value] of Object.entries(mutations)) {
+        resolvedMutations[field] = value;
+      }
+    }
+
+    if (sourceMapping) {
+      for (const [targetField, sourceField] of Object.entries(sourceMapping)) {
+        if (sourceField in input) {
+          resolvedMutations[targetField] = input[sourceField];
+        }
+      }
+    }
+
+    const recordId = input[recordIdField] as string | undefined;
+
+    return {
+      stepType: "record_mutation",
+      targetRecordType,
+      recordId: recordId || null,
+      recordIdField,
+      mutations: resolvedMutations,
+      appliedAt: new Date().toISOString(),
+      inputRef: input,
+    };
+  },
+};
+
 const stepHandlers: Record<string, StepHandler> = {
   assignment: assignmentHandler,
   approval: approvalHandler,
   notification: notificationHandler,
   decision: decisionHandler,
+  record_mutation: recordMutationHandler,
 };
 
 export function validateDecisionSteps(steps: WorkflowStep[]): string[] {

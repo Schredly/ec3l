@@ -1354,6 +1354,7 @@ export async function registerRoutes(
           jobChangeDefault: result.forms.jobChangeDefault,
         },
         rbac: result.rbac,
+        workflows: result.workflows,
       });
     } catch (err) {
       if (err instanceof HrLiteInstallError) {

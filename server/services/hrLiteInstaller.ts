@@ -10,6 +10,9 @@ import type {
   RbacRole,
   RbacPermission,
   RbacPolicy,
+  WorkflowDefinition,
+  WorkflowStep,
+  WorkflowTrigger,
 } from "@shared/schema";
 
 export class HrLiteInstallError extends Error {
@@ -35,6 +38,14 @@ export interface HrLiteRbacRoleResult {
   policyCount: number;
 }
 
+export interface HrLiteWorkflowResult {
+  id: string;
+  name: string;
+  status: string;
+  stepCount: number;
+  triggerId: string;
+}
+
 export interface HrLiteInstallResult {
   module: { id: string; name: string; type: string; version: string };
   recordTypes: {
@@ -58,6 +69,9 @@ export interface HrLiteInstallResult {
     hrAdmin: HrLiteRbacRoleResult;
     manager: HrLiteRbacRoleResult;
     employee: HrLiteRbacRoleResult;
+  };
+  workflows: {
+    hireEmployee: HrLiteWorkflowResult;
   };
 }
 
@@ -402,6 +416,164 @@ async function installHrLiteRbac(
   };
 }
 
+interface WorkflowStepSpec {
+  stepType: "assignment" | "approval" | "notification" | "decision" | "record_mutation";
+  config: Record<string, unknown>;
+  orderIndex: number;
+}
+
+async function ensureWorkflowDefinition(
+  ctx: TenantContext,
+  name: string,
+  triggerType: "record_event" | "schedule" | "manual",
+  triggerConfig: Record<string, unknown> | null,
+): Promise<WorkflowDefinition> {
+  const existing = await storage.getWorkflowDefinitionsByTenant(ctx.tenantId);
+  const found = existing.find((w) => w.name === name);
+  if (found) return found;
+  return storage.createWorkflowDefinition({
+    tenantId: ctx.tenantId,
+    name,
+    triggerType,
+    triggerConfig,
+  });
+}
+
+async function ensureWorkflowSteps(
+  wfId: string,
+  stepSpecs: WorkflowStepSpec[],
+): Promise<WorkflowStep[]> {
+  const existingSteps = await storage.getWorkflowStepsByDefinition(wfId);
+  const result: WorkflowStep[] = [];
+
+  for (const spec of stepSpecs) {
+    const found = existingSteps.find((s) => s.orderIndex === spec.orderIndex);
+    if (found) {
+      result.push(found);
+    } else {
+      const step = await storage.createWorkflowStep({
+        workflowDefinitionId: wfId,
+        stepType: spec.stepType,
+        config: spec.config,
+        orderIndex: spec.orderIndex,
+      });
+      result.push(step);
+    }
+  }
+  return result;
+}
+
+async function ensureWorkflowTrigger(
+  ctx: TenantContext,
+  wfId: string,
+  triggerType: "record_event" | "schedule" | "manual",
+  triggerConfig: Record<string, unknown>,
+): Promise<WorkflowTrigger> {
+  const existing = await storage.getWorkflowTriggersByDefinition(wfId);
+  const found = existing.find(
+    (t) => t.triggerType === triggerType && t.status === "active",
+  );
+  if (found) return found;
+  return storage.createWorkflowTrigger({
+    tenantId: ctx.tenantId,
+    workflowDefinitionId: wfId,
+    triggerType,
+    triggerConfig,
+  });
+}
+
+async function installHireEmployeeWorkflow(
+  ctx: TenantContext,
+  employeeRt: RecordType,
+  jobChangeRt: RecordType,
+): Promise<HrLiteWorkflowResult> {
+  const wf = await ensureWorkflowDefinition(
+    ctx,
+    "hire_employee",
+    "record_event",
+    {
+      recordType: jobChangeRt.name,
+      fieldConditions: { changeType: "hire" },
+    },
+  );
+
+  const steps = await ensureWorkflowSteps(wf.id, [
+    {
+      stepType: "decision",
+      orderIndex: 0,
+      config: {
+        label: "Validate required fields",
+        conditionField: "employeeId",
+        conditionOperator: "truthy",
+        onTrueStepIndex: 1,
+        onFalseStepIndex: 0,
+      },
+    },
+    {
+      stepType: "approval",
+      orderIndex: 1,
+      config: {
+        label: "HR Admin Approval",
+        approver: "role:HR Admin",
+        requiredPermission: "workflow.approve",
+        requiredRole: "HR Admin",
+      },
+    },
+    {
+      stepType: "approval",
+      orderIndex: 2,
+      config: {
+        label: "Manager Approval",
+        approver: "role:Manager",
+        requiredPermission: "workflow.approve",
+        requiredRole: "Manager",
+      },
+    },
+    {
+      stepType: "record_mutation",
+      orderIndex: 3,
+      config: {
+        label: "Update Employee Record",
+        targetRecordType: employeeRt.name,
+        recordIdField: "employeeId",
+        mutations: { status: "active" },
+        sourceMapping: {
+          title: "proposedTitle",
+          department: "proposedDepartment",
+          managerId: "proposedManagerId",
+        },
+      },
+    },
+    {
+      stepType: "record_mutation",
+      orderIndex: 4,
+      config: {
+        label: "Update Job Change Status",
+        targetRecordType: jobChangeRt.name,
+        recordIdField: "jobChangeId",
+        mutations: { status: "applied" },
+      },
+    },
+  ]);
+
+  if (wf.status !== "active") {
+    await storage.updateWorkflowDefinitionStatus(wf.id, "active");
+  }
+
+  const trigger = await ensureWorkflowTrigger(ctx, wf.id, "record_event", {
+    recordType: jobChangeRt.name,
+    fieldConditions: { changeType: "hire" },
+  });
+
+  return {
+    id: wf.id,
+    name: wf.name,
+    status: "active",
+    stepCount: steps.length,
+    triggerId: trigger.id,
+  };
+}
+
 async function installEmployeeFields(
   rt: RecordType,
   statusCl: ChoiceList,
@@ -704,6 +876,8 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
     jobChangeFormId: jobChangeForm.id,
   });
 
+  const hireWorkflow = await installHireEmployeeWorkflow(ctx, employeeRt, jobChangeRt);
+
   return {
     module,
     recordTypes: { employee: employeeRt, jobChange: jobChangeRt },
@@ -718,5 +892,8 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
       jobChangeDefault: jobChangeForm,
     },
     rbac,
+    workflows: {
+      hireEmployee: hireWorkflow,
+    },
   };
 }

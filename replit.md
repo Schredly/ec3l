@@ -65,6 +65,8 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **ChoiceLists**: employee_status (candidate, active, leave, terminated), job_change_type (hire, promotion, transfer, termination), job_change_status (draft, pendingApproval, approved, rejected, applied).
 - **FormDefinitions**: `employee_default` (3 sections: Identity, Role & Org, Employment Details) and `job_change_default` (3 sections: Change Details, Proposed Updates, Approval Status).
 - **RBAC Roles**: HR Admin (full access), Manager (form.view + workflow.approve, scoped to job_change), Employee (form.view, scoped to employee form).
+- **Workflows**: `hire_employee` workflow with record_event trigger (job_change where changeType=hire). Steps: (0) decision — validate employeeId, (1) approval — HR Admin, (2) approval — Manager, (3) record_mutation — update employee status to active with field mappings from job_change, (4) record_mutation — update job_change status to applied. Workflow is created active with an active trigger.
+- **Workflow Step Types**: assignment, approval, notification, decision, record_mutation. The `record_mutation` handler resolves mutations from static values and sourceMapping (input field → target field).
 - **Tenant Isolation**: All metadata is tenant-scoped; install requires valid tenant context; foreign key constraints prevent cross-tenant access.
 
 ## External Dependencies

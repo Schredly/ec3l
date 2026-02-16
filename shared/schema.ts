@@ -85,6 +85,7 @@ export const wfStepTypeEnum = pgEnum("wf_step_type", [
   "approval",
   "notification",
   "decision",
+  "record_mutation",
 ]);
 
 export const wfExecutionStatusEnum = pgEnum("wf_execution_status", [
