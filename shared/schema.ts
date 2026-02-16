@@ -125,6 +125,45 @@ export const overrideStatusEnum = pgEnum("override_status", [
   "retired",
 ]);
 
+export const recordTypeStatusEnum = pgEnum("record_type_status", [
+  "draft",
+  "active",
+  "retired",
+]);
+
+export const fieldTypeEnum = pgEnum("field_type", [
+  "string",
+  "number",
+  "boolean",
+  "date",
+  "datetime",
+  "reference",
+  "choice",
+  "text",
+]);
+
+export const choiceListStatusEnum = pgEnum("choice_list_status", [
+  "active",
+  "disabled",
+]);
+
+export const formDefinitionStatusEnum = pgEnum("form_definition_status", [
+  "draft",
+  "active",
+  "retired",
+]);
+
+export const formBehaviorRuleTypeEnum = pgEnum("form_behavior_rule_type", [
+  "visible",
+  "required",
+  "readOnly",
+]);
+
+export const formBehaviorRuleStatusEnum = pgEnum("form_behavior_rule_status", [
+  "active",
+  "disabled",
+]);
+
 // Phase 1: Tenant
 export const tenants = pgTable("tenants", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -335,6 +374,89 @@ export const workflowExecutionIntents = pgTable("workflow_execution_intents", {
   dispatchedAt: timestamp("dispatched_at"),
 });
 
+// Phase 11: Data Dictionary & Forms
+export const recordTypes = pgTable("record_types", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  version: integer("version").notNull().default(1),
+  status: recordTypeStatusEnum("status").notNull().default("draft"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_record_types_tenant_name").on(table.tenantId, table.name),
+]);
+
+export const choiceLists = pgTable("choice_lists", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  name: text("name").notNull(),
+  status: choiceListStatusEnum("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_choice_lists_tenant_name").on(table.tenantId, table.name),
+]);
+
+export const choiceItems = pgTable("choice_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  choiceListId: varchar("choice_list_id").notNull().references(() => choiceLists.id),
+  value: text("value").notNull(),
+  label: text("label").notNull(),
+  orderIndex: integer("order_index").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+});
+
+export const fieldDefinitions = pgTable("field_definitions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  recordTypeId: varchar("record_type_id").notNull().references(() => recordTypes.id),
+  name: text("name").notNull(),
+  label: text("label").notNull(),
+  fieldType: fieldTypeEnum("field_type").notNull(),
+  isRequired: boolean("is_required").notNull().default(false),
+  defaultValue: jsonb("default_value"),
+  choiceListId: varchar("choice_list_id").references(() => choiceLists.id),
+  referenceRecordTypeId: varchar("reference_record_type_id").references(() => recordTypes.id),
+  orderIndex: integer("order_index").notNull().default(0),
+});
+
+export const formDefinitions = pgTable("form_definitions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  recordTypeId: varchar("record_type_id").notNull().references(() => recordTypes.id),
+  name: text("name").notNull(),
+  version: integer("version").notNull().default(1),
+  status: formDefinitionStatusEnum("status").notNull().default("draft"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_form_definitions_tenant_record_name").on(table.tenantId, table.recordTypeId, table.name),
+]);
+
+export const formSections = pgTable("form_sections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  formDefinitionId: varchar("form_definition_id").notNull().references(() => formDefinitions.id),
+  title: text("title").notNull(),
+  orderIndex: integer("order_index").notNull().default(0),
+});
+
+export const formFieldPlacements = pgTable("form_field_placements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  formSectionId: varchar("form_section_id").notNull().references(() => formSections.id),
+  fieldDefinitionId: varchar("field_definition_id").notNull().references(() => fieldDefinitions.id),
+  column: integer("column").notNull().default(1),
+  orderIndex: integer("order_index").notNull().default(0),
+});
+
+export const formBehaviorRules = pgTable("form_behavior_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  formDefinitionId: varchar("form_definition_id").notNull().references(() => formDefinitions.id),
+  ruleType: formBehaviorRuleTypeEnum("rule_type").notNull(),
+  targetFieldDefinitionId: varchar("target_field_definition_id").notNull().references(() => fieldDefinitions.id),
+  condition: jsonb("condition").notNull(),
+  value: boolean("value").notNull().default(true),
+  orderIndex: integer("order_index").notNull().default(0),
+  status: formBehaviorRuleStatusEnum("status").notNull().default("active"),
+});
+
 // Insert schemas
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -451,6 +573,45 @@ export const insertWorkflowExecutionIntentSchema = createInsertSchema(workflowEx
   dispatchedAt: true,
 });
 
+export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+});
+
+export const insertFieldDefinitionSchema = createInsertSchema(fieldDefinitions).omit({
+  id: true,
+});
+
+export const insertChoiceListSchema = createInsertSchema(choiceLists).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+});
+
+export const insertChoiceItemSchema = createInsertSchema(choiceItems).omit({
+  id: true,
+});
+
+export const insertFormDefinitionSchema = createInsertSchema(formDefinitions).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+});
+
+export const insertFormSectionSchema = createInsertSchema(formSections).omit({
+  id: true,
+});
+
+export const insertFormFieldPlacementSchema = createInsertSchema(formFieldPlacements).omit({
+  id: true,
+});
+
+export const insertFormBehaviorRuleSchema = createInsertSchema(formBehaviorRules).omit({
+  id: true,
+  status: true,
+});
+
 // Types
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
@@ -508,3 +669,27 @@ export type WorkflowTrigger = typeof workflowTriggers.$inferSelect;
 
 export type InsertWorkflowExecutionIntent = z.infer<typeof insertWorkflowExecutionIntentSchema>;
 export type WorkflowExecutionIntent = typeof workflowExecutionIntents.$inferSelect;
+
+export type InsertRecordType = z.infer<typeof insertRecordTypeSchema>;
+export type RecordType = typeof recordTypes.$inferSelect;
+
+export type InsertFieldDefinition = z.infer<typeof insertFieldDefinitionSchema>;
+export type FieldDefinition = typeof fieldDefinitions.$inferSelect;
+
+export type InsertChoiceList = z.infer<typeof insertChoiceListSchema>;
+export type ChoiceList = typeof choiceLists.$inferSelect;
+
+export type InsertChoiceItem = z.infer<typeof insertChoiceItemSchema>;
+export type ChoiceItem = typeof choiceItems.$inferSelect;
+
+export type InsertFormDefinition = z.infer<typeof insertFormDefinitionSchema>;
+export type FormDefinition = typeof formDefinitions.$inferSelect;
+
+export type InsertFormSection = z.infer<typeof insertFormSectionSchema>;
+export type FormSection = typeof formSections.$inferSelect;
+
+export type InsertFormFieldPlacement = z.infer<typeof insertFormFieldPlacementSchema>;
+export type FormFieldPlacement = typeof formFieldPlacements.$inferSelect;
+
+export type InsertFormBehaviorRule = z.infer<typeof insertFormBehaviorRuleSchema>;
+export type FormBehaviorRule = typeof formBehaviorRules.$inferSelect;

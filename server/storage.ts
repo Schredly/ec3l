@@ -20,6 +20,14 @@ import {
   workflowStepExecutions,
   workflowTriggers,
   workflowExecutionIntents,
+  recordTypes,
+  choiceLists,
+  choiceItems,
+  fieldDefinitions,
+  formDefinitions,
+  formSections,
+  formFieldPlacements,
+  formBehaviorRules,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -58,6 +66,22 @@ import {
   type InsertWorkflowTrigger,
   type WorkflowExecutionIntent,
   type InsertWorkflowExecutionIntent,
+  type RecordType,
+  type InsertRecordType,
+  type ChoiceList,
+  type InsertChoiceList,
+  type ChoiceItem,
+  type InsertChoiceItem,
+  type FieldDefinition,
+  type InsertFieldDefinition,
+  type FormDefinition,
+  type InsertFormDefinition,
+  type FormSection,
+  type InsertFormSection,
+  type FormFieldPlacement,
+  type InsertFormFieldPlacement,
+  type FormBehaviorRule,
+  type InsertFormBehaviorRule,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -163,6 +187,45 @@ export interface IStorage {
   createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent>;
   updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined>;
   updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined>;
+
+  getRecordType(id: string): Promise<RecordType | undefined>;
+  getRecordTypesByTenant(tenantId: string): Promise<RecordType[]>;
+  getRecordTypeByTenantAndName(tenantId: string, name: string): Promise<RecordType | undefined>;
+  createRecordType(data: InsertRecordType): Promise<RecordType>;
+  updateRecordTypeStatus(id: string, status: RecordType["status"]): Promise<RecordType | undefined>;
+
+  getFieldDefinition(id: string): Promise<FieldDefinition | undefined>;
+  getFieldDefinitionsByRecordType(recordTypeId: string): Promise<FieldDefinition[]>;
+  createFieldDefinition(data: InsertFieldDefinition): Promise<FieldDefinition>;
+
+  getChoiceList(id: string): Promise<ChoiceList | undefined>;
+  getChoiceListsByTenant(tenantId: string): Promise<ChoiceList[]>;
+  createChoiceList(data: InsertChoiceList): Promise<ChoiceList>;
+  updateChoiceListStatus(id: string, status: ChoiceList["status"]): Promise<ChoiceList | undefined>;
+
+  getChoiceItem(id: string): Promise<ChoiceItem | undefined>;
+  getChoiceItemsByList(choiceListId: string): Promise<ChoiceItem[]>;
+  createChoiceItem(data: InsertChoiceItem): Promise<ChoiceItem>;
+
+  getFormDefinition(id: string): Promise<FormDefinition | undefined>;
+  getFormDefinitionsByTenant(tenantId: string): Promise<FormDefinition[]>;
+  getFormDefinitionByTenantRecordAndName(tenantId: string, recordTypeId: string, name: string): Promise<FormDefinition | undefined>;
+  createFormDefinition(data: InsertFormDefinition): Promise<FormDefinition>;
+  updateFormDefinitionStatus(id: string, status: FormDefinition["status"]): Promise<FormDefinition | undefined>;
+
+  getFormSection(id: string): Promise<FormSection | undefined>;
+  getFormSectionsByDefinition(formDefinitionId: string): Promise<FormSection[]>;
+  createFormSection(data: InsertFormSection): Promise<FormSection>;
+
+  getFormFieldPlacement(id: string): Promise<FormFieldPlacement | undefined>;
+  getFormFieldPlacementsBySection(formSectionId: string): Promise<FormFieldPlacement[]>;
+  createFormFieldPlacement(data: InsertFormFieldPlacement): Promise<FormFieldPlacement>;
+
+  getFormBehaviorRule(id: string): Promise<FormBehaviorRule | undefined>;
+  getFormBehaviorRulesByDefinition(formDefinitionId: string): Promise<FormBehaviorRule[]>;
+  getActiveFormBehaviorRulesByDefinition(formDefinitionId: string): Promise<FormBehaviorRule[]>;
+  createFormBehaviorRule(data: InsertFormBehaviorRule): Promise<FormBehaviorRule>;
+  updateFormBehaviorRuleStatus(id: string, status: FormBehaviorRule["status"]): Promise<FormBehaviorRule | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -638,6 +701,161 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(workflowExecutionIntents.id, id), eq(workflowExecutionIntents.status, "pending")))
       .returning();
     return intent;
+  }
+
+  async getRecordType(id: string): Promise<RecordType | undefined> {
+    const [item] = await db.select().from(recordTypes).where(eq(recordTypes.id, id));
+    return item;
+  }
+
+  async getRecordTypesByTenant(tenantId: string): Promise<RecordType[]> {
+    return db.select().from(recordTypes).where(eq(recordTypes.tenantId, tenantId)).orderBy(desc(recordTypes.createdAt));
+  }
+
+  async getRecordTypeByTenantAndName(tenantId: string, name: string): Promise<RecordType | undefined> {
+    const [item] = await db.select().from(recordTypes).where(
+      and(eq(recordTypes.tenantId, tenantId), eq(recordTypes.name, name))
+    );
+    return item;
+  }
+
+  async createRecordType(data: InsertRecordType): Promise<RecordType> {
+    const [item] = await db.insert(recordTypes).values(data).returning();
+    return item;
+  }
+
+  async updateRecordTypeStatus(id: string, status: RecordType["status"]): Promise<RecordType | undefined> {
+    const [item] = await db.update(recordTypes).set({ status }).where(eq(recordTypes.id, id)).returning();
+    return item;
+  }
+
+  async getFieldDefinition(id: string): Promise<FieldDefinition | undefined> {
+    const [item] = await db.select().from(fieldDefinitions).where(eq(fieldDefinitions.id, id));
+    return item;
+  }
+
+  async getFieldDefinitionsByRecordType(recordTypeId: string): Promise<FieldDefinition[]> {
+    return db.select().from(fieldDefinitions).where(eq(fieldDefinitions.recordTypeId, recordTypeId)).orderBy(asc(fieldDefinitions.orderIndex));
+  }
+
+  async createFieldDefinition(data: InsertFieldDefinition): Promise<FieldDefinition> {
+    const [item] = await db.insert(fieldDefinitions).values(data).returning();
+    return item;
+  }
+
+  async getChoiceList(id: string): Promise<ChoiceList | undefined> {
+    const [item] = await db.select().from(choiceLists).where(eq(choiceLists.id, id));
+    return item;
+  }
+
+  async getChoiceListsByTenant(tenantId: string): Promise<ChoiceList[]> {
+    return db.select().from(choiceLists).where(eq(choiceLists.tenantId, tenantId)).orderBy(desc(choiceLists.createdAt));
+  }
+
+  async createChoiceList(data: InsertChoiceList): Promise<ChoiceList> {
+    const [item] = await db.insert(choiceLists).values(data).returning();
+    return item;
+  }
+
+  async updateChoiceListStatus(id: string, status: ChoiceList["status"]): Promise<ChoiceList | undefined> {
+    const [item] = await db.update(choiceLists).set({ status }).where(eq(choiceLists.id, id)).returning();
+    return item;
+  }
+
+  async getChoiceItem(id: string): Promise<ChoiceItem | undefined> {
+    const [item] = await db.select().from(choiceItems).where(eq(choiceItems.id, id));
+    return item;
+  }
+
+  async getChoiceItemsByList(choiceListId: string): Promise<ChoiceItem[]> {
+    return db.select().from(choiceItems).where(eq(choiceItems.choiceListId, choiceListId)).orderBy(asc(choiceItems.orderIndex));
+  }
+
+  async createChoiceItem(data: InsertChoiceItem): Promise<ChoiceItem> {
+    const [item] = await db.insert(choiceItems).values(data).returning();
+    return item;
+  }
+
+  async getFormDefinition(id: string): Promise<FormDefinition | undefined> {
+    const [item] = await db.select().from(formDefinitions).where(eq(formDefinitions.id, id));
+    return item;
+  }
+
+  async getFormDefinitionsByTenant(tenantId: string): Promise<FormDefinition[]> {
+    return db.select().from(formDefinitions).where(eq(formDefinitions.tenantId, tenantId)).orderBy(desc(formDefinitions.createdAt));
+  }
+
+  async getFormDefinitionByTenantRecordAndName(tenantId: string, recordTypeId: string, name: string): Promise<FormDefinition | undefined> {
+    const [item] = await db.select().from(formDefinitions).where(
+      and(eq(formDefinitions.tenantId, tenantId), eq(formDefinitions.recordTypeId, recordTypeId), eq(formDefinitions.name, name))
+    );
+    return item;
+  }
+
+  async createFormDefinition(data: InsertFormDefinition): Promise<FormDefinition> {
+    const [item] = await db.insert(formDefinitions).values(data).returning();
+    return item;
+  }
+
+  async updateFormDefinitionStatus(id: string, status: FormDefinition["status"]): Promise<FormDefinition | undefined> {
+    const [item] = await db.update(formDefinitions).set({ status }).where(eq(formDefinitions.id, id)).returning();
+    return item;
+  }
+
+  async getFormSection(id: string): Promise<FormSection | undefined> {
+    const [item] = await db.select().from(formSections).where(eq(formSections.id, id));
+    return item;
+  }
+
+  async getFormSectionsByDefinition(formDefinitionId: string): Promise<FormSection[]> {
+    return db.select().from(formSections).where(eq(formSections.formDefinitionId, formDefinitionId)).orderBy(asc(formSections.orderIndex));
+  }
+
+  async createFormSection(data: InsertFormSection): Promise<FormSection> {
+    const [item] = await db.insert(formSections).values(data).returning();
+    return item;
+  }
+
+  async getFormFieldPlacement(id: string): Promise<FormFieldPlacement | undefined> {
+    const [item] = await db.select().from(formFieldPlacements).where(eq(formFieldPlacements.id, id));
+    return item;
+  }
+
+  async getFormFieldPlacementsBySection(formSectionId: string): Promise<FormFieldPlacement[]> {
+    return db.select().from(formFieldPlacements).where(eq(formFieldPlacements.formSectionId, formSectionId)).orderBy(asc(formFieldPlacements.orderIndex));
+  }
+
+  async createFormFieldPlacement(data: InsertFormFieldPlacement): Promise<FormFieldPlacement> {
+    const [item] = await db.insert(formFieldPlacements).values(data).returning();
+    return item;
+  }
+
+  async getFormBehaviorRule(id: string): Promise<FormBehaviorRule | undefined> {
+    const [item] = await db.select().from(formBehaviorRules).where(eq(formBehaviorRules.id, id));
+    return item;
+  }
+
+  async getFormBehaviorRulesByDefinition(formDefinitionId: string): Promise<FormBehaviorRule[]> {
+    return db.select().from(formBehaviorRules).where(eq(formBehaviorRules.formDefinitionId, formDefinitionId)).orderBy(asc(formBehaviorRules.orderIndex));
+  }
+
+  async getActiveFormBehaviorRulesByDefinition(formDefinitionId: string): Promise<FormBehaviorRule[]> {
+    return db.select().from(formBehaviorRules)
+      .where(and(
+        eq(formBehaviorRules.formDefinitionId, formDefinitionId),
+        eq(formBehaviorRules.status, "active"),
+      ))
+      .orderBy(asc(formBehaviorRules.orderIndex));
+  }
+
+  async createFormBehaviorRule(data: InsertFormBehaviorRule): Promise<FormBehaviorRule> {
+    const [item] = await db.insert(formBehaviorRules).values(data).returning();
+    return item;
+  }
+
+  async updateFormBehaviorRuleStatus(id: string, status: FormBehaviorRule["status"]): Promise<FormBehaviorRule | undefined> {
+    const [item] = await db.update(formBehaviorRules).set({ status }).where(eq(formBehaviorRules.id, id)).returning();
+    return item;
   }
 }
 

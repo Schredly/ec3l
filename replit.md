@@ -32,6 +32,13 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **ModuleOverrides**: Tenant-scoped overrides for installed template modules, supporting workflow, form, rule, and config changes.
 - **WorkflowDefinitions**: Tenant-scoped workflow definitions with various trigger types and statuses.
 - **WorkflowExecutions**: Records of workflow execution.
+- **RecordTypes**: Tenant-scoped data dictionary entries (e.g., "Incident", "Employee") with draft/active/retired lifecycle.
+- **FieldDefinitions**: Per-RecordType field metadata (name, label, type, required, defaults, choice/reference links).
+- **ChoiceLists / ChoiceItems**: Reusable tenant-scoped constant lists for choice-type fields.
+- **FormDefinitions**: Named form layouts per RecordType (e.g., "Default", "Agent View") with draft/active/retired lifecycle.
+- **FormSections**: Ordered sections within a form definition.
+- **FormFieldPlacements**: Ordered field placements within sections (column 1 or 2).
+- **FormBehaviorRules**: Simple visibility/required/readOnly rules with JSON conditions, applied per form.
 
 **Key Architectural Decisions:**
 - **Override Composition**: Active overrides are deterministically ordered and applied sequentially. Controlled deep merging is used for nested objects, with strict validation against template baselines to prevent destructive changes.

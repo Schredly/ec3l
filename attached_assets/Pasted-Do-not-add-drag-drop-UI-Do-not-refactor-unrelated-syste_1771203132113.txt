@@ -1,0 +1,122 @@
+Do not add drag/drop UI.
+Do not refactor unrelated systems.
+Do not introduce external integrations.
+
+Objective:
+Introduce metadata-driven forms that are tenant-scoped, overrideable, and can be rendered by returning a compiled form model.
+
+Instructions:
+
+1) Add Core Data Dictionary Models
+   Introduce schema metadata:
+
+   - RecordType
+     - id
+     - tenantId
+     - name (e.g., "Incident", "Employee", "Request")
+     - description
+     - version
+     - status (draft | active | retired)
+     - createdAt
+
+   - FieldDefinition
+     - id
+     - recordTypeId
+     - name (internal field name)
+     - label (display)
+     - fieldType (string | number | boolean | date | datetime | reference | choice | text)
+     - isRequired (boolean)
+     - defaultValue (json)
+     - choiceListId (nullable)
+     - referenceRecordTypeId (nullable)
+     - orderIndex
+
+2) Add Constant Lists (Choices)
+   Introduce a reusable choice list:
+
+   - ChoiceList
+     - id
+     - tenantId
+     - name
+     - status (active | disabled)
+
+   - ChoiceItem
+     - id
+     - choiceListId
+     - value
+     - label
+     - orderIndex
+     - isActive
+
+3) Add Form Layout Models
+   Introduce a form definition separate from RecordType:
+
+   - FormDefinition
+     - id
+     - tenantId
+     - recordTypeId
+     - name (e.g., "Default", "Agent View", "Mobile")
+     - version
+     - status (draft | active | retired)
+
+   - FormSection
+     - id
+     - formDefinitionId
+     - title
+     - orderIndex
+
+   - FormFieldPlacement
+     - id
+     - formSectionId
+     - fieldDefinitionId
+     - column (1 or 2)
+     - orderIndex
+
+4) Add Form Behaviors (v1 rules)
+   Introduce simple behavior rules:
+
+   - FormBehaviorRule
+     - id
+     - formDefinitionId
+     - ruleType (visible | required | readOnly)
+     - targetFieldDefinitionId
+     - condition (json expression)
+     - value (boolean)
+     - orderIndex
+     - status (active | disabled)
+
+5) Override Integration (Patch Layers)
+   - Add overrideType "form" support using existing ModuleOverride mechanism:
+       - allow patching:
+         - FieldDefinition
+         - FormSection
+         - FormFieldPlacement
+         - FormBehaviorRule
+         - ChoiceList / ChoiceItem (optional)
+   - Overrides must be tenant-scoped, versioned, active-only, deterministic ordering.
+
+6) Form Compilation API
+   Implement a control-plane API:
+   - GET /tenants/:tenantId/forms/:recordTypeName/:formName/compiled
+
+   Behavior:
+   - loads active RecordType + FieldDefinitions
+   - loads active FormDefinition + layout
+   - applies active form overrides in order
+   - returns a compiled JSON model including:
+       - sections, fields, placements
+       - field metadata (type, required, default, choices)
+       - behavior rules
+
+7) Safety & Governance
+   - FormDefinition and schema edits must create Changes and follow approval
+   - Only tenant contexts can modify tenant forms
+   - SystemContext may define global templates but not tenant form overrides
+
+Constraints:
+- No drag/drop UI
+- No database record storage for business records yet unless already present
+- No complex expression language; condition can be simple JSON rules for now
+
+Goal:
+A minimal, enterprise-ready forms metadata system that supports safe tenant customization via patch layers and can render via a compiled form JSON response.

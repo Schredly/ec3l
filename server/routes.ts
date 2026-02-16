@@ -24,9 +24,11 @@ import * as workflowService from "./services/workflowService";
 import { WorkflowServiceError } from "./services/workflowService";
 import * as triggerService from "./services/triggerService";
 import { TriggerServiceError } from "./services/triggerService";
-import { insertWorkflowTriggerSchema } from "@shared/schema";
+import { insertWorkflowTriggerSchema, insertRecordTypeSchema, insertFieldDefinitionSchema, insertChoiceListSchema, insertChoiceItemSchema, insertFormDefinitionSchema, insertFormSectionSchema, insertFormFieldPlacementSchema, insertFormBehaviorRuleSchema } from "@shared/schema";
 import { dispatchPendingIntents } from "./services/intentDispatcher";
 import { startScheduler } from "./services/schedulerService";
+import * as formService from "./services/formService";
+import { FormServiceError } from "./services/formService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -747,6 +749,285 @@ export async function registerRoutes(
       const dispatched = await dispatchPendingIntents();
       res.json({ dispatched: dispatched.length, intents: dispatched });
     } catch (err) {
+      throw err;
+    }
+  });
+
+  // --- Record Types ---
+  app.get("/api/record-types", async (req, res) => {
+    try {
+      const types = await formService.getRecordTypesByTenant(req.tenantContext);
+      res.json(types);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/record-types/:id", async (req, res) => {
+    try {
+      const rt = await formService.getRecordType(req.tenantContext, req.params.id);
+      if (!rt) return res.status(404).json({ message: "Record type not found" });
+      res.json(rt);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/record-types", async (req, res) => {
+    try {
+      const parsed = insertRecordTypeSchema.omit({ tenantId: true }).parse(req.body);
+      const rt = await formService.createRecordType(req.tenantContext, parsed);
+      res.status(201).json(rt);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/record-types/:id/activate", async (req, res) => {
+    try {
+      const rt = await formService.updateRecordTypeStatus(req.tenantContext, req.params.id, "active");
+      res.json(rt);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/record-types/:id/retire", async (req, res) => {
+    try {
+      const rt = await formService.updateRecordTypeStatus(req.tenantContext, req.params.id, "retired");
+      res.json(rt);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Field Definitions ---
+  app.get("/api/record-types/:id/fields", async (req, res) => {
+    try {
+      const fields = await formService.getFieldDefinitionsByRecordType(req.tenantContext, req.params.id);
+      res.json(fields);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/record-types/:id/fields", async (req, res) => {
+    try {
+      const parsed = insertFieldDefinitionSchema.omit({ recordTypeId: true }).parse(req.body);
+      const field = await formService.createFieldDefinition(req.tenantContext, {
+        ...parsed,
+        recordTypeId: req.params.id,
+      });
+      res.status(201).json(field);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Choice Lists ---
+  app.get("/api/choice-lists", async (req, res) => {
+    try {
+      const lists = await formService.getChoiceListsByTenant(req.tenantContext);
+      res.json(lists);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/choice-lists/:id", async (req, res) => {
+    try {
+      const cl = await formService.getChoiceList(req.tenantContext, req.params.id);
+      if (!cl) return res.status(404).json({ message: "Choice list not found" });
+      res.json(cl);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/choice-lists", async (req, res) => {
+    try {
+      const parsed = insertChoiceListSchema.omit({ tenantId: true }).parse(req.body);
+      const cl = await formService.createChoiceList(req.tenantContext, parsed);
+      res.status(201).json(cl);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Choice Items ---
+  app.get("/api/choice-lists/:id/items", async (req, res) => {
+    try {
+      const items = await formService.getChoiceItemsByList(req.tenantContext, req.params.id);
+      res.json(items);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/choice-lists/:id/items", async (req, res) => {
+    try {
+      const parsed = insertChoiceItemSchema.omit({ choiceListId: true }).parse(req.body);
+      const item = await formService.createChoiceItem(req.tenantContext, {
+        ...parsed,
+        choiceListId: req.params.id,
+      });
+      res.status(201).json(item);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Form Definitions ---
+  app.get("/api/form-definitions", async (req, res) => {
+    try {
+      const defs = await formService.getFormDefinitionsByTenant(req.tenantContext);
+      res.json(defs);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/form-definitions/:id", async (req, res) => {
+    try {
+      const fd = await formService.getFormDefinition(req.tenantContext, req.params.id);
+      if (!fd) return res.status(404).json({ message: "Form definition not found" });
+      res.json(fd);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/form-definitions", async (req, res) => {
+    try {
+      const parsed = insertFormDefinitionSchema.omit({ tenantId: true }).parse(req.body);
+      const fd = await formService.createFormDefinition(req.tenantContext, parsed);
+      res.status(201).json(fd);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/form-definitions/:id/activate", async (req, res) => {
+    try {
+      const fd = await formService.updateFormDefinitionStatus(req.tenantContext, req.params.id, "active");
+      res.json(fd);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/form-definitions/:id/retire", async (req, res) => {
+    try {
+      const fd = await formService.updateFormDefinitionStatus(req.tenantContext, req.params.id, "retired");
+      res.json(fd);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Form Sections ---
+  app.get("/api/form-definitions/:id/sections", async (req, res) => {
+    try {
+      const sections = await formService.getFormSectionsByDefinition(req.tenantContext, req.params.id);
+      res.json(sections);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/form-definitions/:id/sections", async (req, res) => {
+    try {
+      const parsed = insertFormSectionSchema.omit({ formDefinitionId: true }).parse(req.body);
+      const section = await formService.createFormSection(req.tenantContext, {
+        ...parsed,
+        formDefinitionId: req.params.id,
+      });
+      res.status(201).json(section);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Form Field Placements ---
+  app.get("/api/form-sections/:id/placements", async (req, res) => {
+    try {
+      const placements = await formService.getFormFieldPlacementsBySection(req.tenantContext, req.params.id);
+      res.json(placements);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/form-sections/:id/placements", async (req, res) => {
+    try {
+      const parsed = insertFormFieldPlacementSchema.omit({ formSectionId: true }).parse(req.body);
+      const placement = await formService.createFormFieldPlacement(req.tenantContext, {
+        ...parsed,
+        formSectionId: req.params.id,
+      });
+      res.status(201).json(placement);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Form Behavior Rules ---
+  app.get("/api/form-definitions/:id/rules", async (req, res) => {
+    try {
+      const rules = await formService.getFormBehaviorRulesByDefinition(req.tenantContext, req.params.id);
+      res.json(rules);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/form-definitions/:id/rules", async (req, res) => {
+    try {
+      const parsed = insertFormBehaviorRuleSchema.omit({ formDefinitionId: true }).parse(req.body);
+      const rule = await formService.createFormBehaviorRule(req.tenantContext, {
+        ...parsed,
+        formDefinitionId: req.params.id,
+      });
+      res.status(201).json(rule);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  // --- Form Compilation ---
+  app.get("/api/forms/:recordTypeName/:formName/compiled", async (req, res) => {
+    try {
+      const compiled = await formService.compileForm(
+        req.tenantContext,
+        req.params.recordTypeName,
+        req.params.formName,
+      );
+      res.json(compiled);
+    } catch (err) {
+      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
