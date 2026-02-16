@@ -1525,6 +1525,52 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/workflows", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const definitions = await storage.getWorkflowDefinitionsByTenant(req.tenantContext.tenantId);
+      res.json(definitions);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/workflow-executions", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const executions = await storage.getWorkflowExecutionsByTenant(req.tenantContext.tenantId);
+      const definitions = await storage.getWorkflowDefinitionsByTenant(req.tenantContext.tenantId);
+      const defMap = new Map(definitions.map((d) => [d.id, d.name]));
+      const intents = await storage.getWorkflowExecutionIntentsByTenant(req.tenantContext.tenantId);
+      const intentByExecId = new Map(intents.filter((i) => i.executionId).map((i) => [i.executionId, i]));
+      const enriched = executions.map((ex) => {
+        const intent = intentByExecId.get(ex.id);
+        const inputObj = ex.input && typeof ex.input === "object" ? (ex.input as Record<string, unknown>) : {};
+        return {
+          id: ex.id,
+          workflowName: defMap.get(ex.workflowDefinitionId) || ex.workflowDefinitionId,
+          status: ex.status === "paused" ? "waiting" : ex.status,
+          startedAt: ex.startedAt,
+          completedAt: ex.completedAt,
+          actorType: intent?.triggerType || "system",
+          actorId: (inputObj.requester as string) || (inputObj.agentId as string) || null,
+          error: ex.error,
+        };
+      });
+      res.json(enriched);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/admin/overrides", async (req, res) => {
     try {
       const actor = resolveActorFromContext(req.tenantContext);

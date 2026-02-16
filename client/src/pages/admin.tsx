@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { setTenantId, apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
-import type { Tenant, ModuleOverride } from "@shared/schema";
+import type { Tenant, ModuleOverride, WorkflowDefinition } from "@shared/schema";
 
 const adminNavItems = [
   { title: "Tenants", key: "tenants", icon: Building2 },
@@ -363,6 +363,155 @@ function OverridesPanel() {
   );
 }
 
+type WorkflowExecutionRow = {
+  id: string;
+  workflowName: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  actorType: string;
+  actorId: string | null;
+  error: string | null;
+};
+
+function WorkflowsPanel() {
+  const { data: workflows, isLoading: wfLoading } = useQuery<WorkflowDefinition[]>({
+    queryKey: ["/api/admin/workflows"],
+  });
+
+  const { data: executions, isLoading: exLoading } = useQuery<WorkflowExecutionRow[]>({
+    queryKey: ["/api/admin/workflow-executions"],
+  });
+
+  const isLoading = wfLoading || exLoading;
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-testid="workflows-loading">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">Workflow Definitions</h2>
+        {!workflows || workflows.length === 0 ? (
+          <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid="workflows-empty">
+            <p className="text-sm">No workflows defined for this tenant.</p>
+          </div>
+        ) : (
+          <div className="border rounded-md overflow-hidden" data-testid="workflows-table">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Workflow Name</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Trigger Type</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Status</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Version</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Created At</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workflows.map((wf) => (
+                  <tr
+                    key={wf.id}
+                    className="border-b last:border-b-0"
+                    data-testid={`workflow-row-${wf.id}`}
+                  >
+                    <td className="px-4 py-2 font-medium" data-testid={`workflow-name-${wf.id}`}>
+                      {wf.name}
+                    </td>
+                    <td className="px-4 py-2" data-testid={`workflow-trigger-${wf.id}`}>
+                      <Badge variant="secondary" className="text-xs">
+                        {wf.triggerType}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2" data-testid={`workflow-status-${wf.id}`}>
+                      <Badge variant={wf.status === "active" ? "default" : "secondary"} className="text-xs">
+                        {wf.status === "active" ? "active" : "inactive"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs" data-testid={`workflow-version-${wf.id}`}>
+                      v{wf.version}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground" data-testid={`workflow-created-${wf.id}`}>
+                      {new Date(wf.createdAt).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">Recent Executions</h2>
+        {!executions || executions.length === 0 ? (
+          <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid="executions-empty">
+            <p className="text-sm">No workflow executions found.</p>
+          </div>
+        ) : (
+          <div className="border rounded-md overflow-hidden" data-testid="executions-table">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Execution ID</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Workflow</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Status</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Started At</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Actor Type</th>
+                  <th className="text-left px-4 py-2 font-medium text-muted-foreground">Actor ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {executions.map((ex) => {
+                  const statusVariant =
+                    ex.status === "completed" ? "default" :
+                    ex.status === "running" ? "secondary" :
+                    ex.status === "failed" ? "destructive" : "secondary";
+                  return (
+                    <tr
+                      key={ex.id}
+                      className="border-b last:border-b-0"
+                      data-testid={`execution-row-${ex.id}`}
+                    >
+                      <td className="px-4 py-2 font-mono text-xs" data-testid={`execution-id-${ex.id}`}>
+                        {ex.id.substring(0, 8)}...
+                      </td>
+                      <td className="px-4 py-2 font-medium" data-testid={`execution-workflow-${ex.id}`}>
+                        {ex.workflowName}
+                      </td>
+                      <td className="px-4 py-2" data-testid={`execution-status-${ex.id}`}>
+                        <Badge variant={statusVariant} className="text-xs">
+                          {ex.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground" data-testid={`execution-started-${ex.id}`}>
+                        {new Date(ex.startedAt).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-2 text-xs" data-testid={`execution-actortype-${ex.id}`}>
+                        {ex.actorType}
+                      </td>
+                      <td className="px-4 py-2 text-xs font-mono text-muted-foreground" data-testid={`execution-actorid-${ex.id}`}>
+                        {ex.actorId || "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PlaceholderPanel({ title }: { title: string }) {
   return (
     <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid={`admin-panel-${title.toLowerCase()}`}>
@@ -375,6 +524,7 @@ function AdminContent({ activeKey }: { activeKey: string }) {
   if (activeKey === "tenants") return <TenantsPanel />;
   if (activeKey === "apps") return <AppsPanel />;
   if (activeKey === "overrides") return <OverridesPanel />;
+  if (activeKey === "workflows") return <WorkflowsPanel />;
   const item = adminNavItems.find((i) => i.key === activeKey);
   return <PlaceholderPanel title={item?.title || activeKey} />;
 }
