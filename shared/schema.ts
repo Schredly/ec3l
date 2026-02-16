@@ -868,6 +868,52 @@ export const insertRbacPolicySchema = createInsertSchema(rbacPolicies).omit({
 });
 export type InsertRbacPolicy = z.infer<typeof insertRbacPolicySchema>;
 
+// --- Execution Telemetry ---
+
+export const telemetryEventTypeEnum = pgEnum("telemetry_event_type", [
+  "execution_started",
+  "execution_completed",
+  "execution_failed",
+]);
+
+export const telemetryExecutionTypeEnum = pgEnum("telemetry_execution_type", [
+  "workflow_step",
+  "task",
+  "agent_action",
+]);
+
+export const telemetryActorTypeEnum = pgEnum("telemetry_actor_type", [
+  "user",
+  "agent",
+  "system",
+]);
+
+export const executionTelemetryEvents = pgTable("execution_telemetry_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventType: telemetryEventTypeEnum("event_type").notNull(),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  moduleId: varchar("module_id").notNull(),
+  executionType: telemetryExecutionTypeEnum("execution_type").notNull(),
+  workflowId: varchar("workflow_id"),
+  workflowStepId: varchar("workflow_step_id"),
+  executionId: varchar("execution_id").notNull(),
+  actorType: telemetryActorTypeEnum("actor_type").notNull(),
+  actorId: varchar("actor_id"),
+  status: text("status").notNull(),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  affectedRecordIds: jsonb("affected_record_ids"),
+});
+
+export const insertExecutionTelemetryEventSchema = createInsertSchema(executionTelemetryEvents).omit({
+  id: true,
+  timestamp: true,
+});
+
+export type InsertExecutionTelemetryEvent = z.infer<typeof insertExecutionTelemetryEventSchema>;
+export type ExecutionTelemetryEvent = typeof executionTelemetryEvents.$inferSelect;
+
 // --- Form Patch Operations (explicit, typed) ---
 
 export const formPatchOperationTypes = [

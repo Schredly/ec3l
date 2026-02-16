@@ -1736,6 +1736,24 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/execution-telemetry", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const tenantId = req.tenantContext.tenantId;
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+      const events = await storage.getExecutionTelemetryEvents(tenantId, { from, to, limit });
+      res.json(events);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/admin/check-access", async (req, res) => {
     try {
       const actor = resolveActorFromContext(req.tenantContext);

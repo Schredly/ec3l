@@ -1,4 +1,4 @@
-import { eq, desc, and, asc } from "drizzle-orm";
+import { eq, desc, and, asc, gte, lte } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants,
@@ -33,6 +33,7 @@ import {
   rbacRolePermissions,
   rbacUserRoles,
   rbacPolicies,
+  executionTelemetryEvents,
   type Tenant,
   type InsertTenant,
   type Project,
@@ -103,6 +104,8 @@ import {
   agentProposals,
   type AgentProposal,
   type InsertAgentProposal,
+  type ExecutionTelemetryEvent,
+  type InsertExecutionTelemetryEvent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -287,6 +290,9 @@ export interface IStorage {
 
   createRbacAuditLog(data: InsertRbacAuditLog): Promise<RbacAuditLog>;
   getRbacAuditLogs(tenantId: string, limit?: number): Promise<RbacAuditLog[]>;
+
+  createExecutionTelemetryEvent(data: InsertExecutionTelemetryEvent): Promise<ExecutionTelemetryEvent>;
+  getExecutionTelemetryEvents(tenantId: string, opts?: { from?: Date; to?: Date; limit?: number }): Promise<ExecutionTelemetryEvent[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1089,6 +1095,25 @@ export class DatabaseStorage implements IStorage {
       .where(eq(rbacAuditLogs.tenantId, tenantId))
       .orderBy(desc(rbacAuditLogs.timestamp))
       .limit(limit);
+  }
+
+  async createExecutionTelemetryEvent(data: InsertExecutionTelemetryEvent): Promise<ExecutionTelemetryEvent> {
+    const [event] = await db.insert(executionTelemetryEvents).values(data).returning();
+    return event;
+  }
+
+  async getExecutionTelemetryEvents(tenantId: string, opts?: { from?: Date; to?: Date; limit?: number }): Promise<ExecutionTelemetryEvent[]> {
+    const conditions = [eq(executionTelemetryEvents.tenantId, tenantId)];
+    if (opts?.from) {
+      conditions.push(gte(executionTelemetryEvents.timestamp, opts.from));
+    }
+    if (opts?.to) {
+      conditions.push(lte(executionTelemetryEvents.timestamp, opts.to));
+    }
+    return db.select().from(executionTelemetryEvents)
+      .where(and(...conditions))
+      .orderBy(desc(executionTelemetryEvents.timestamp))
+      .limit(opts?.limit ?? 500);
   }
 }
 

@@ -3,6 +3,8 @@ import { createRunnerService } from "../runner";
 import type { RunnerInstruction } from "../runner";
 import { logBoundaryCrossing, logBoundaryReturn } from "./logging";
 import { validateRequestAtBoundary, validateModuleBoundaryPath, boundaryErrorToResult } from "./boundaryGuard";
+import { RunnerBoundaryError } from "./boundaryErrors";
+import { generateExecutionId, emitExecutionStarted, emitExecutionCompleted, emitExecutionFailed } from "./telemetryEmitter";
 
 const runnerService = createRunnerService();
 
@@ -10,6 +12,7 @@ export class LocalRunnerAdapter implements RunnerExecution {
   readonly adapterName = "LocalRunnerAdapter";
 
   async executeWorkflowStep(request: ExecutionRequest): Promise<ExecutionResult> {
+    const execId = generateExecutionId();
     logBoundaryCrossing(this.adapterName, "executeWorkflowStep", request);
 
     try {
@@ -17,8 +20,11 @@ export class LocalRunnerAdapter implements RunnerExecution {
     } catch (err) {
       const result = boundaryErrorToResult(err, "executeWorkflowStep");
       logBoundaryReturn(this.adapterName, "executeWorkflowStep", result);
+      await emitExecutionFailed(execId, "executeWorkflowStep", request, err instanceof RunnerBoundaryError ? err.errorType : "UNKNOWN", result.error || "Unknown error");
       return result;
     }
+
+    await emitExecutionStarted(execId, "executeWorkflowStep", request);
 
     const { moduleExecutionContext, inputPayload } = request;
     const stepType = inputPayload.stepType as string;
@@ -42,6 +48,7 @@ export class LocalRunnerAdapter implements RunnerExecution {
       };
 
       logBoundaryReturn(this.adapterName, "executeWorkflowStep", result);
+      await emitExecutionCompleted(execId, "executeWorkflowStep", request, result);
       return result;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -52,11 +59,13 @@ export class LocalRunnerAdapter implements RunnerExecution {
         error: errorMsg,
       };
       logBoundaryReturn(this.adapterName, "executeWorkflowStep", result);
+      await emitExecutionFailed(execId, "executeWorkflowStep", request, null, errorMsg);
       return result;
     }
   }
 
   async executeTask(request: ExecutionRequest): Promise<ExecutionResult> {
+    const execId = generateExecutionId();
     logBoundaryCrossing(this.adapterName, "executeTask", request);
 
     try {
@@ -64,8 +73,11 @@ export class LocalRunnerAdapter implements RunnerExecution {
     } catch (err) {
       const result = boundaryErrorToResult(err, "executeTask");
       logBoundaryReturn(this.adapterName, "executeTask", result);
+      await emitExecutionFailed(execId, "executeTask", request, err instanceof RunnerBoundaryError ? err.errorType : "UNKNOWN", result.error || "Unknown error");
       return result;
     }
+
+    await emitExecutionStarted(execId, "executeTask", request);
 
     const { moduleExecutionContext, inputPayload } = request;
     const skillName = inputPayload.skillName as string;
@@ -95,15 +107,18 @@ export class LocalRunnerAdapter implements RunnerExecution {
       };
 
       logBoundaryReturn(this.adapterName, "executeTask", result);
+      await emitExecutionCompleted(execId, "executeTask", request, result);
       return result;
     } catch (err) {
       const result = boundaryErrorToResult(err, "executeTask");
       logBoundaryReturn(this.adapterName, "executeTask", result);
+      await emitExecutionFailed(execId, "executeTask", request, err instanceof RunnerBoundaryError ? err.errorType : "EXECUTION_ERROR", result.error || "Unknown error");
       return result;
     }
   }
 
   async executeAgentAction(request: ExecutionRequest): Promise<ExecutionResult> {
+    const execId = generateExecutionId();
     logBoundaryCrossing(this.adapterName, "executeAgentAction", request);
 
     try {
@@ -111,8 +126,11 @@ export class LocalRunnerAdapter implements RunnerExecution {
     } catch (err) {
       const result = boundaryErrorToResult(err, "executeAgentAction");
       logBoundaryReturn(this.adapterName, "executeAgentAction", result);
+      await emitExecutionFailed(execId, "executeAgentAction", request, err instanceof RunnerBoundaryError ? err.errorType : "UNKNOWN", result.error || "Unknown error");
       return result;
     }
+
+    await emitExecutionStarted(execId, "executeAgentAction", request);
 
     const { moduleExecutionContext, inputPayload } = request;
     const actionType = inputPayload.actionType as string;
@@ -160,6 +178,7 @@ export class LocalRunnerAdapter implements RunnerExecution {
             error: `Unknown agent action type: ${actionType}`,
           };
           logBoundaryReturn(this.adapterName, "executeAgentAction", result);
+          await emitExecutionFailed(execId, "executeAgentAction", request, "UNKNOWN_ACTION", result.error);
           return result;
         }
       }
@@ -176,10 +195,16 @@ export class LocalRunnerAdapter implements RunnerExecution {
       };
 
       logBoundaryReturn(this.adapterName, "executeAgentAction", result);
+      if (result.success) {
+        await emitExecutionCompleted(execId, "executeAgentAction", request, result);
+      } else {
+        await emitExecutionFailed(execId, "executeAgentAction", request, null, result.error || "Runner execution failed");
+      }
       return result;
     } catch (err) {
       const result = boundaryErrorToResult(err, "executeAgentAction");
       logBoundaryReturn(this.adapterName, "executeAgentAction", result);
+      await emitExecutionFailed(execId, "executeAgentAction", request, err instanceof RunnerBoundaryError ? err.errorType : "EXECUTION_ERROR", result.error || "Unknown error");
       return result;
     }
   }
