@@ -4,7 +4,9 @@ import type {
   RecordType,
   ChoiceList,
   FieldDefinition,
-  Module,
+  FormDefinition,
+  FormSection,
+  FormFieldPlacement,
 } from "@shared/schema";
 
 export class HrLiteInstallError extends Error {
@@ -14,6 +16,13 @@ export class HrLiteInstallError extends Error {
     this.name = "HrLiteInstallError";
     this.statusCode = statusCode;
   }
+}
+
+export interface HrLiteFormResult {
+  id: string;
+  name: string;
+  sectionCount: number;
+  fieldCount: number;
 }
 
 export interface HrLiteInstallResult {
@@ -30,6 +39,10 @@ export interface HrLiteInstallResult {
   fields: {
     employee: FieldDefinition[];
     jobChange: FieldDefinition[];
+  };
+  forms: {
+    employeeDefault: HrLiteFormResult;
+    jobChangeDefault: HrLiteFormResult;
   };
 }
 
@@ -130,6 +143,124 @@ async function ensureModule(
     name: mod.name,
     type: mod.type,
     version: HR_LITE_VERSION,
+  };
+}
+
+async function ensureFormDefinition(
+  ctx: TenantContext,
+  recordTypeId: string,
+  name: string,
+): Promise<FormDefinition> {
+  const existing = await storage.getFormDefinitionByTenantRecordAndName(
+    ctx.tenantId,
+    recordTypeId,
+    name,
+  );
+  if (existing) return existing;
+  const fd = await storage.createFormDefinition({
+    tenantId: ctx.tenantId,
+    recordTypeId,
+    name,
+  });
+  return fd;
+}
+
+async function ensureFormSection(
+  formDefinitionId: string,
+  title: string,
+  orderIndex: number,
+  existingSections: FormSection[],
+): Promise<FormSection> {
+  const found = existingSections.find(
+    (s) => s.title === title && s.formDefinitionId === formDefinitionId,
+  );
+  if (found) return found;
+  return storage.createFormSection({ formDefinitionId, title, orderIndex });
+}
+
+async function ensureFormFieldPlacement(
+  formSectionId: string,
+  fieldDefinitionId: string,
+  orderIndex: number,
+  column: number,
+  existingPlacements: FormFieldPlacement[],
+): Promise<FormFieldPlacement> {
+  const found = existingPlacements.find(
+    (p) =>
+      p.formSectionId === formSectionId &&
+      p.fieldDefinitionId === fieldDefinitionId,
+  );
+  if (found) return found;
+  return storage.createFormFieldPlacement({
+    formSectionId,
+    fieldDefinitionId,
+    orderIndex,
+    column,
+  });
+}
+
+interface FormFieldSpec {
+  fieldName: string;
+  orderIndex: number;
+  column?: number;
+}
+
+interface FormSectionSpec {
+  title: string;
+  orderIndex: number;
+  fields: FormFieldSpec[];
+}
+
+async function installForm(
+  ctx: TenantContext,
+  recordType: RecordType,
+  formName: string,
+  sectionSpecs: FormSectionSpec[],
+  fieldDefs: FieldDefinition[],
+): Promise<HrLiteFormResult> {
+  const fd = await ensureFormDefinition(ctx, recordType.id, formName);
+
+  if (fd.status !== "active") {
+    await storage.updateFormDefinitionStatus(fd.id, "active");
+  }
+
+  const existingSections = await storage.getFormSectionsByDefinition(fd.id);
+  let totalFieldCount = 0;
+
+  for (const spec of sectionSpecs) {
+    const section = await ensureFormSection(
+      fd.id,
+      spec.title,
+      spec.orderIndex,
+      existingSections,
+    );
+
+    const existingPlacements =
+      await storage.getFormFieldPlacementsBySection(section.id);
+
+    for (const fieldSpec of spec.fields) {
+      const fieldDef = fieldDefs.find((f) => f.name === fieldSpec.fieldName);
+      if (!fieldDef) {
+        throw new HrLiteInstallError(
+          `Field "${fieldSpec.fieldName}" not found on record type "${recordType.name}"`,
+        );
+      }
+      await ensureFormFieldPlacement(
+        section.id,
+        fieldDef.id,
+        fieldSpec.orderIndex,
+        fieldSpec.column ?? 1,
+        existingPlacements,
+      );
+      totalFieldCount++;
+    }
+  }
+
+  return {
+    id: fd.id,
+    name: fd.name,
+    sectionCount: sectionSpecs.length,
+    fieldCount: totalFieldCount,
   };
 }
 
@@ -368,6 +499,66 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
     jobChangeStatusCl,
   );
 
+  const employeeForm = await installForm(ctx, employeeRt, "employee_default", [
+    {
+      title: "Identity",
+      orderIndex: 0,
+      fields: [
+        { fieldName: "employeeId", orderIndex: 0 },
+        { fieldName: "firstName", orderIndex: 1 },
+        { fieldName: "lastName", orderIndex: 2 },
+        { fieldName: "email", orderIndex: 3 },
+      ],
+    },
+    {
+      title: "Role & Org",
+      orderIndex: 1,
+      fields: [
+        { fieldName: "title", orderIndex: 0 },
+        { fieldName: "department", orderIndex: 1 },
+        { fieldName: "managerId", orderIndex: 2 },
+      ],
+    },
+    {
+      title: "Employment Details",
+      orderIndex: 2,
+      fields: [
+        { fieldName: "status", orderIndex: 0 },
+        { fieldName: "startDate", orderIndex: 1 },
+        { fieldName: "location", orderIndex: 2 },
+      ],
+    },
+  ], employeeFields);
+
+  const jobChangeForm = await installForm(ctx, jobChangeRt, "job_change_default", [
+    {
+      title: "Change Details",
+      orderIndex: 0,
+      fields: [
+        { fieldName: "employeeId", orderIndex: 0 },
+        { fieldName: "changeType", orderIndex: 1 },
+        { fieldName: "effectiveDate", orderIndex: 2 },
+      ],
+    },
+    {
+      title: "Proposed Updates",
+      orderIndex: 1,
+      fields: [
+        { fieldName: "proposedTitle", orderIndex: 0 },
+        { fieldName: "proposedDepartment", orderIndex: 1 },
+        { fieldName: "proposedManagerId", orderIndex: 2 },
+      ],
+    },
+    {
+      title: "Approval Status",
+      orderIndex: 2,
+      fields: [
+        { fieldName: "status", orderIndex: 0 },
+        { fieldName: "reason", orderIndex: 1 },
+      ],
+    },
+  ], jobChangeFields);
+
   return {
     module,
     recordTypes: { employee: employeeRt, jobChange: jobChangeRt },
@@ -377,5 +568,9 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
       jobChangeStatus: jobChangeStatusCl,
     },
     fields: { employee: employeeFields, jobChange: jobChangeFields },
+    forms: {
+      employeeDefault: employeeForm,
+      jobChangeDefault: jobChangeForm,
+    },
   };
 }

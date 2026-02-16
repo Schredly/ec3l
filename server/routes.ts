@@ -1349,6 +1349,10 @@ export async function registerRoutes(
           changeType: result.choiceLists.changeType.id,
           jobChangeStatus: result.choiceLists.jobChangeStatus.id,
         },
+        forms: {
+          employeeDefault: result.forms.employeeDefault,
+          jobChangeDefault: result.forms.jobChangeDefault,
+        },
       });
     } catch (err) {
       if (err instanceof HrLiteInstallError) {
