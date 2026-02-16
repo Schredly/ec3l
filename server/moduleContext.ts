@@ -1,15 +1,8 @@
-import type { TenantContext } from "./tenant";
-import type { Capability } from "./capabilities";
-import type { CapabilityProfileName } from "./capabilityProfiles";
+export type { ModuleExecutionContext } from "@shared/executionTypes";
+import type { TenantContext } from "@shared/executionTypes";
+import type { ModuleExecutionContext } from "@shared/executionTypes";
+import type { CapabilityProfileName } from "@shared/executionTypes";
 import { resolveProfile } from "./capabilityProfiles";
-
-export type ModuleExecutionContext = {
-  tenantContext: TenantContext;
-  moduleId: string;
-  moduleRootPath: string;
-  capabilityProfile: CapabilityProfileName;
-  capabilities: Capability[];
-};
 
 export function buildModuleExecutionContext(opts: {
   tenantContext: TenantContext;

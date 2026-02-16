@@ -1,7 +1,7 @@
-import type { ModuleExecutionContext } from "./moduleContext";
+export type { Capability } from "@shared/executionTypes";
+import type { Capability } from "@shared/executionTypes";
+import type { ModuleExecutionContext } from "@shared/executionTypes";
 import type { SystemContext } from "./systemContext";
-
-export type Capability = string;
 
 export const Capabilities = {
   FS_READ: "fs:read",

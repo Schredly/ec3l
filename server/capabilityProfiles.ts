@@ -1,11 +1,7 @@
-import type { Capability } from "./capabilities";
+export type { CapabilityProfileName } from "@shared/executionTypes";
+import type { Capability } from "@shared/executionTypes";
+import type { CapabilityProfileName } from "@shared/executionTypes";
 import { Capabilities } from "./capabilities";
-
-export type CapabilityProfileName =
-  | "CODE_MODULE_DEFAULT"
-  | "WORKFLOW_MODULE_DEFAULT"
-  | "READ_ONLY"
-  | "SYSTEM_PRIVILEGED";
 
 export const CapabilityProfiles: Record<CapabilityProfileName, Capability[]> = {
   CODE_MODULE_DEFAULT: [

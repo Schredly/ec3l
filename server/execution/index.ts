@@ -19,3 +19,6 @@ export {
   ModuleBoundaryEscapeError,
   TenantContextMutationError,
 } from "./boundaryErrors";
+
+export { configureRunnerTelemetry } from "./telemetryEmitter";
+export type { RunnerTelemetrySink, TelemetryEventData } from "./telemetryEmitter";

@@ -2,6 +2,10 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { initRunner } from "../runner/init";
+import type { RunnerTelemetrySink, TelemetryEventData } from "../runner/telemetry";
+import { storage } from "./storage";
+import type { InsertExecutionTelemetryEvent } from "@shared/schema";
 
 const app = express();
 const httpServer = createServer(app);
@@ -58,6 +62,29 @@ app.use((req, res, next) => {
 
   next();
 });
+
+const storageTelemetrySink: RunnerTelemetrySink = {
+  async emit(event: TelemetryEventData): Promise<void> {
+    const data: InsertExecutionTelemetryEvent = {
+      eventType: event.eventType,
+      tenantId: event.tenantId,
+      moduleId: event.moduleId,
+      executionType: event.executionType,
+      workflowId: event.workflowId,
+      workflowStepId: event.workflowStepId,
+      executionId: event.executionId,
+      actorType: event.actorType,
+      actorId: event.actorId,
+      status: event.status,
+      errorCode: event.errorCode ?? null,
+      errorMessage: event.errorMessage ?? null,
+      affectedRecordIds: event.affectedRecordIds ?? null,
+    };
+    await storage.createExecutionTelemetryEvent(data);
+  },
+};
+
+initRunner({ telemetrySink: storageTelemetrySink });
 
 (async () => {
   const { seedDatabase } = await import("./seed");

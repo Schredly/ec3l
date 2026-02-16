@@ -1,4 +1,4 @@
-import type { Capability } from "./capabilities";
+import type { Capability } from "@shared/executionTypes";
 import { resolveProfile } from "./capabilityProfiles";
 
 const SYSTEM_BRAND = Symbol("SystemContext");

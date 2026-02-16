@@ -1,11 +1,6 @@
 import type { Request } from "express";
-
-export type TenantContext = {
-  tenantId: string;
-  userId?: string;
-  agentId?: string;
-  source: "header" | "system";
-};
+export type { TenantContext } from "@shared/executionTypes";
+import type { TenantContext } from "@shared/executionTypes";
 
 export class TenantResolutionError extends Error {
   constructor(message = "Missing tenant context") {
