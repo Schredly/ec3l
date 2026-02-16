@@ -27,7 +27,12 @@ export function getRunnerExecution(): RunnerExecution {
   if (!runnerExecution) {
     activeAdapterType = resolveAdapterType();
     runnerExecution = createAdapter(activeAdapterType);
-    console.log(`[runner-adapter] Using ${activeAdapterType === "local" ? "LocalRunnerAdapter" : "RemoteRunnerAdapter"} (RUNNER_ADAPTER=${activeAdapterType})`);
+    if (activeAdapterType === "remote") {
+      const url = process.env.RUNNER_URL || "http://localhost:4001";
+      console.log(`[runner-adapter] Using RemoteRunnerAdapter (RUNNER_ADAPTER=remote, RUNNER_URL=${url})`);
+    } else {
+      console.log(`[runner-adapter] Using LocalRunnerAdapter (RUNNER_ADAPTER=local)`);
+    }
   }
   return runnerExecution;
 }

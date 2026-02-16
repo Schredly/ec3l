@@ -30,5 +30,7 @@ export { createRunnerService, enforceModuleBoundary } from "./service";
 export type { IRunnerService, RunnerInstruction, RunnerResult } from "./service";
 export { ModuleBoundaryViolationError } from "./service";
 
+export { createRunnerHttpServer } from "./server";
+
 export { initRunner } from "./init";
 export type { RunnerConfig, RunnerInstance } from "./init";

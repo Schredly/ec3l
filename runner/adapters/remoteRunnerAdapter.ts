@@ -1,48 +1,111 @@
+import http from "http";
+import https from "https";
 import type { ExecutionRequest, ExecutionResult, RunnerExecution } from "../types";
 import { logBoundaryCrossing, logBoundaryReturn } from "../logging";
-import { validateRequestAtBoundary, boundaryErrorToResult } from "../boundaryGuard";
-import { RunnerBoundaryError } from "../boundaryErrors";
-import { generateExecutionId, emitExecutionStarted, emitExecutionFailed } from "../telemetry";
+
+const DEFAULT_RUNNER_URL = "http://localhost:4001";
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+function getRunnerUrl(): string {
+  return process.env.RUNNER_URL || DEFAULT_RUNNER_URL;
+}
+
+function getTimeoutMs(): number {
+  const val = process.env.RUNNER_TIMEOUT_MS;
+  if (val) {
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_TIMEOUT_MS;
+}
+
+function postExecute(request: ExecutionRequest): Promise<ExecutionResult> {
+  const runnerUrl = getRunnerUrl();
+  const timeoutMs = getTimeoutMs();
+
+  return new Promise((resolve, reject) => {
+    const url = new URL("/execute", runnerUrl);
+    const isHttps = url.protocol === "https:";
+    const transport = isHttps ? https : http;
+
+    const body = JSON.stringify(request);
+
+    const options: http.RequestOptions = {
+      hostname: url.hostname,
+      port: url.port || (isHttps ? 443 : 80),
+      path: url.pathname,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+      timeout: timeoutMs,
+    };
+
+    const req = transport.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf-8");
+        try {
+          const result = JSON.parse(raw) as ExecutionResult;
+          resolve(result);
+        } catch {
+          resolve({
+            success: false,
+            output: {},
+            logs: [`[remote-runner] Failed to parse runner response`],
+            error: `Invalid JSON from runner: ${raw.substring(0, 200)}`,
+          });
+        }
+      });
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({
+        success: false,
+        output: {},
+        logs: [`[remote-runner] Request timed out after ${timeoutMs}ms`],
+        error: `Runner request timed out after ${timeoutMs}ms`,
+      });
+    });
+
+    req.on("error", (err) => {
+      resolve({
+        success: false,
+        output: {},
+        logs: [`[remote-runner] Connection error: ${err.message}`],
+        error: `Runner connection error: ${err.message}`,
+      });
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
 
 export class RemoteRunnerAdapter implements RunnerExecution {
   readonly adapterName = "RemoteRunnerAdapter";
 
-  private async executeStub(method: string, request: ExecutionRequest): Promise<ExecutionResult> {
-    const execId = generateExecutionId();
-    logBoundaryCrossing(this.adapterName, method, request);
-
-    try {
-      validateRequestAtBoundary(request);
-    } catch (err) {
-      const result = boundaryErrorToResult(err, method);
-      logBoundaryReturn(this.adapterName, method, result);
-      await emitExecutionFailed(execId, method, request, err instanceof RunnerBoundaryError ? err.errorType : "UNKNOWN", result.error || "Unknown error");
-      return result;
-    }
-
-    await emitExecutionStarted(execId, method, request);
-
-    const result: ExecutionResult = {
-      success: false,
-      output: {},
-      logs: [`[runner] RemoteRunnerAdapter.${method} is not implemented`],
-      error: "RemoteRunnerAdapter is not yet implemented — configure RUNNER_ADAPTER=local to use LocalRunnerAdapter",
-    };
-
-    logBoundaryReturn(this.adapterName, method, result);
-    await emitExecutionFailed(execId, method, request, "NOT_IMPLEMENTED", result.error!);
+  async executeWorkflowStep(request: ExecutionRequest): Promise<ExecutionResult> {
+    logBoundaryCrossing(this.adapterName, "executeWorkflowStep", request);
+    const result = await postExecute(request);
+    logBoundaryReturn(this.adapterName, "executeWorkflowStep", result);
     return result;
   }
 
-  async executeWorkflowStep(request: ExecutionRequest): Promise<ExecutionResult> {
-    return this.executeStub("executeWorkflowStep", request);
-  }
-
   async executeTask(request: ExecutionRequest): Promise<ExecutionResult> {
-    return this.executeStub("executeTask", request);
+    logBoundaryCrossing(this.adapterName, "executeTask", request);
+    const result = await postExecute(request);
+    logBoundaryReturn(this.adapterName, "executeTask", result);
+    return result;
   }
 
   async executeAgentAction(request: ExecutionRequest): Promise<ExecutionResult> {
-    return this.executeStub("executeAgentAction", request);
+    logBoundaryCrossing(this.adapterName, "executeAgentAction", request);
+    const result = await postExecute(request);
+    logBoundaryReturn(this.adapterName, "executeAgentAction", result);
+    return result;
   }
 }
