@@ -29,6 +29,15 @@ export class FormServiceError extends Error {
   }
 }
 
+export class FormOverrideValidationError extends FormServiceError {
+  public readonly violations: string[];
+  constructor(violations: string[]) {
+    super(`Form override validation failed: ${violations.join("; ")}`, 400);
+    this.name = "FormOverrideValidationError";
+    this.violations = violations;
+  }
+}
+
 // --- RecordType ---
 
 export async function getRecordTypesByTenant(ctx: TenantContext): Promise<RecordType[]> {
@@ -202,14 +211,86 @@ export async function createFormBehaviorRule(ctx: TenantContext, data: InsertFor
   const field = await storage.getFieldDefinition(data.targetFieldDefinitionId);
   if (!field) throw new FormServiceError("Target field definition not found", 404);
 
+  if (data.ruleType === "required" && data.value === false && field.isRequired) {
+    throw new FormServiceError(
+      `Cannot create rule that removes requiredness from field "${field.name}" — FieldDefinition.isRequired is absolute and cannot be overridden to false`,
+    );
+  }
+
   return storage.createFormBehaviorRule(data);
 }
 
-// --- Form Compilation ---
+// --- Form Override Validation ---
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {
   return val !== null && typeof val === "object" && !Array.isArray(val);
 }
+
+export async function validateFormOverridePatch(
+  tenantId: string,
+  patch: Record<string, unknown>,
+): Promise<string[]> {
+  const violations: string[] = [];
+
+  if (patch.fields && isPlainObject(patch.fields)) {
+    const fieldsPatch = patch.fields as Record<string, unknown>;
+    for (const fieldId of Object.keys(fieldsPatch)) {
+      const fd = await storage.getFieldDefinition(fieldId);
+      if (!fd) {
+        violations.push(`Override references non-existent field definition: ${fieldId}`);
+        continue;
+      }
+
+      const fieldPatch = fieldsPatch[fieldId];
+      if (isPlainObject(fieldPatch)) {
+        if (fieldPatch.isRequired === false && fd.isRequired) {
+          violations.push(
+            `Override attempts to set isRequired=false on field "${fd.name}" — FieldDefinition.isRequired is absolute and cannot be overridden to false`,
+          );
+        }
+      }
+    }
+  }
+
+  if (patch.sections && Array.isArray(patch.sections)) {
+    for (const section of patch.sections) {
+      if (!isPlainObject(section)) continue;
+      if (section.placements && Array.isArray(section.placements)) {
+        for (const placement of section.placements) {
+          if (!isPlainObject(placement)) continue;
+          const placementFieldId = placement.fieldDefinitionId as string | undefined;
+          if (placementFieldId) {
+            const fd = await storage.getFieldDefinition(placementFieldId);
+            if (!fd) {
+              violations.push(`Override placement references non-existent field definition: ${placementFieldId}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (patch.behaviorRules && Array.isArray(patch.behaviorRules)) {
+    for (const rule of patch.behaviorRules) {
+      if (!isPlainObject(rule)) continue;
+      const targetId = rule.targetFieldDefinitionId as string | undefined;
+      if (targetId) {
+        const fd = await storage.getFieldDefinition(targetId);
+        if (!fd) {
+          violations.push(`Override behavior rule references non-existent field definition: ${targetId}`);
+        } else if (rule.ruleType === "required" && rule.value === false && fd.isRequired) {
+          violations.push(
+            `Override behavior rule attempts to remove requiredness from field "${fd.name}" — FieldDefinition.isRequired is absolute`,
+          );
+        }
+      }
+    }
+  }
+
+  return violations;
+}
+
+// --- Form Compilation ---
 
 function applyFormOverridePatch(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { ...base };
@@ -225,6 +306,12 @@ function applyFormOverridePatch(base: Record<string, unknown>, patch: Record<str
   return result;
 }
 
+export type CompiledFieldFlags = {
+  required: boolean;
+  readOnly: boolean;
+  visible: boolean;
+};
+
 export type CompiledField = {
   id: string;
   name: string;
@@ -234,6 +321,7 @@ export type CompiledField = {
   defaultValue: unknown;
   choices?: { value: string; label: string }[];
   referenceRecordTypeId?: string | null;
+  effective: CompiledFieldFlags;
 };
 
 export type CompiledPlacement = {
@@ -278,6 +366,43 @@ export type CompiledForm = {
   overridesApplied: number;
 };
 
+function computeEffectiveFlags(
+  fd: FieldDefinition,
+  behaviorRules: FormBehaviorRule[],
+): CompiledFieldFlags {
+  const flags: CompiledFieldFlags = {
+    required: fd.isRequired,
+    readOnly: false,
+    visible: true,
+  };
+
+  const fieldRules = behaviorRules
+    .filter(r => r.targetFieldDefinitionId === fd.id)
+    .sort((a, b) => a.orderIndex - b.orderIndex);
+
+  for (const rule of fieldRules) {
+    switch (rule.ruleType) {
+      case "required":
+        if (rule.value === true) {
+          flags.required = true;
+        }
+        break;
+      case "readOnly":
+        flags.readOnly = rule.value;
+        break;
+      case "visible":
+        flags.visible = rule.value;
+        break;
+    }
+  }
+
+  if (fd.isRequired) {
+    flags.required = true;
+  }
+
+  return flags;
+}
+
 export async function compileForm(
   ctx: TenantContext,
   recordTypeName: string,
@@ -314,6 +439,7 @@ export async function compileForm(
   }
 
   function buildCompiledField(fd: FieldDefinition): CompiledField {
+    const effectiveFlags = computeEffectiveFlags(fd, behaviorRules);
     const cf: CompiledField = {
       id: fd.id,
       name: fd.name,
@@ -321,6 +447,7 @@ export async function compileForm(
       fieldType: fd.fieldType,
       isRequired: fd.isRequired,
       defaultValue: fd.defaultValue,
+      effective: effectiveFlags,
     };
     if (fd.fieldType === "choice" && fd.choiceListId) {
       cf.choices = choiceCache.get(fd.choiceListId) ?? [];
@@ -404,5 +531,30 @@ export async function compileForm(
 
   compiled.overridesApplied = activeFormOverrides.length;
 
-  return compiled as unknown as CompiledForm;
+  const result = compiled as unknown as CompiledForm;
+  enforceRequiredInvariant(result, fieldMap);
+
+  return result;
+}
+
+function enforceRequiredInvariant(
+  compiled: CompiledForm,
+  fieldMap: Map<string, FieldDefinition>,
+): void {
+  for (const fieldId of Object.keys(compiled.fields)) {
+    const fd = fieldMap.get(fieldId);
+    if (fd && fd.isRequired) {
+      compiled.fields[fieldId].isRequired = true;
+      compiled.fields[fieldId].effective.required = true;
+    }
+  }
+  for (const section of compiled.sections) {
+    for (const placement of section.placements) {
+      const fd = fieldMap.get(placement.field.id);
+      if (fd && fd.isRequired) {
+        placement.field.isRequired = true;
+        placement.field.effective.required = true;
+      }
+    }
+  }
 }

@@ -5,6 +5,7 @@ import type {
   ModuleOverride,
   InsertModuleOverride,
 } from "@shared/schema";
+import { validateFormOverridePatch } from "./formService";
 
 export class OverrideServiceError extends Error {
   public readonly statusCode: number;
@@ -273,6 +274,16 @@ export async function activateOverride(
           await storage.updateChangeStatus(override.changeId, "ValidationFailed");
         }
         throw new OverridePatchValidationError(violations);
+      }
+    }
+
+    if (override.overrideType === "form") {
+      const formViolations = await validateFormOverridePatch(ctx.tenantId, patch);
+      if (formViolations.length > 0) {
+        if (override.changeId) {
+          await storage.updateChangeStatus(override.changeId, "ValidationFailed");
+        }
+        throw new OverridePatchValidationError(formViolations);
       }
     }
   }
