@@ -363,6 +363,154 @@ function OverridesPanel() {
   );
 }
 
+type ApprovalItem = {
+  approvalId: string;
+  executionId: string;
+  workflowDefinitionId: string;
+  workflowName: string;
+  stepType: string;
+  requiredRole: string;
+  requestedBy: string;
+  status: string;
+  createdAt: string;
+};
+
+function ApprovalsPanel() {
+  const { toast } = useToast();
+
+  const { data: approvals, isLoading } = useQuery<ApprovalItem[]>({
+    queryKey: ["/api/admin/approvals"],
+  });
+
+  const { data: modules } = useQuery<AdminModule[]>({
+    queryKey: ["/api/admin/modules"],
+  });
+
+  const resolveMutation = useMutation({
+    mutationFn: async ({ executionId, approvalId, approved }: { executionId: string; approvalId: string; approved: boolean }) => {
+      const moduleId = modules?.[0]?.id;
+      if (!moduleId) throw new Error("No module available for execution context");
+      const res = await apiRequest("POST", `/api/workflow-executions/${executionId}/resume`, {
+        moduleId,
+        stepExecutionId: approvalId,
+        outcome: { approved },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "Action failed");
+      }
+      return res.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/workflow-executions"] });
+      toast({
+        title: variables.approved ? "Approved" : "Rejected",
+        description: `Approval ${variables.approved ? "granted" : "denied"} successfully.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Action failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-testid="approvals-loading">
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!approvals || approvals.length === 0) {
+    return (
+      <div className="border rounded-md p-8 flex items-center justify-center text-muted-foreground" data-testid="approvals-empty">
+        <p className="text-sm">No pending approvals for this tenant.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border rounded-md overflow-hidden" data-testid="approvals-table">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Approval ID</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Workflow</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Requested By</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Required Role</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Status</th>
+            <th className="text-left px-4 py-2 font-medium text-muted-foreground">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {approvals.map((item) => (
+            <tr
+              key={item.approvalId}
+              className="border-b last:border-b-0"
+              data-testid={`approval-row-${item.approvalId}`}
+            >
+              <td className="px-4 py-2 font-mono text-xs" data-testid={`approval-id-${item.approvalId}`}>
+                {item.approvalId.substring(0, 8)}...
+              </td>
+              <td className="px-4 py-2 font-medium" data-testid={`approval-workflow-${item.approvalId}`}>
+                {item.workflowName}
+              </td>
+              <td className="px-4 py-2 text-xs" data-testid={`approval-requestedby-${item.approvalId}`}>
+                {item.requestedBy}
+              </td>
+              <td className="px-4 py-2 text-xs" data-testid={`approval-role-${item.approvalId}`}>
+                {item.requiredRole}
+              </td>
+              <td className="px-4 py-2" data-testid={`approval-status-${item.approvalId}`}>
+                <Badge variant="secondary" className="text-xs">
+                  {item.status}
+                </Badge>
+              </td>
+              <td className="px-4 py-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      resolveMutation.mutate({
+                        executionId: item.executionId,
+                        approvalId: item.approvalId,
+                        approved: true,
+                      })
+                    }
+                    disabled={resolveMutation.isPending}
+                    data-testid={`approval-approve-${item.approvalId}`}
+                  >
+                    <Check className="w-3 h-3 mr-1" />
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() =>
+                      resolveMutation.mutate({
+                        executionId: item.executionId,
+                        approvalId: item.approvalId,
+                        approved: false,
+                      })
+                    }
+                    disabled={resolveMutation.isPending}
+                    data-testid={`approval-reject-${item.approvalId}`}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 type WorkflowExecutionRow = {
   id: string;
   workflowName: string;
@@ -525,6 +673,7 @@ function AdminContent({ activeKey }: { activeKey: string }) {
   if (activeKey === "apps") return <AppsPanel />;
   if (activeKey === "overrides") return <OverridesPanel />;
   if (activeKey === "workflows") return <WorkflowsPanel />;
+  if (activeKey === "approvals") return <ApprovalsPanel />;
   const item = adminNavItems.find((i) => i.key === activeKey);
   return <PlaceholderPanel title={item?.title || activeKey} />;
 }

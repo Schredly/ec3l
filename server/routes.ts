@@ -1525,6 +1525,49 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/approvals", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const tenantId = req.tenantContext.tenantId;
+
+      const executions = await storage.getWorkflowExecutionsByTenant(tenantId);
+      const pausedExecutions = executions.filter((e) => e.status === "paused");
+      const definitions = await storage.getWorkflowDefinitionsByTenant(tenantId);
+      const defMap = new Map(definitions.map((d) => [d.id, d]));
+
+      const approvals = [];
+      for (const exec of pausedExecutions) {
+        const stepExecs = await storage.getWorkflowStepExecutionsByExecution(exec.id);
+        const awaitingSteps = stepExecs.filter((se) => se.status === "awaiting_approval");
+        for (const stepExec of awaitingSteps) {
+          const step = await storage.getWorkflowStep(stepExec.workflowStepId);
+          const def = defMap.get(exec.workflowDefinitionId);
+          const config = step?.config as Record<string, unknown> | undefined;
+          const output = stepExec.output as Record<string, unknown> | undefined;
+          const inputObj = exec.input && typeof exec.input === "object" ? (exec.input as Record<string, unknown>) : {};
+          approvals.push({
+            approvalId: stepExec.id,
+            executionId: exec.id,
+            workflowDefinitionId: exec.workflowDefinitionId,
+            workflowName: def?.name || exec.workflowDefinitionId,
+            stepType: step?.stepType || "approval",
+            requiredRole: (config?.approver as string) || "pending",
+            requestedBy: (inputObj.requester as string) || (inputObj.agentId as string) || "system",
+            status: "awaiting_approval",
+            createdAt: output?.createdAt || exec.startedAt,
+          });
+        }
+      }
+      res.json(approvals);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/admin/workflows", async (req, res) => {
     try {
       const actor = resolveActorFromContext(req.tenantContext);
