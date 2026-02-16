@@ -1525,6 +1525,20 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/overrides", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const overrides = await storage.getModuleOverridesByTenant(req.tenantContext.tenantId);
+      res.json(overrides);
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/admin/modules", async (req, res) => {
     try {
       const actor = resolveActorFromContext(req.tenantContext);
