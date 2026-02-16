@@ -9,11 +9,6 @@ export type ActorContext = Readonly<{
   actorType: "user" | "system" | "agent";
 }>;
 
-/**
- * Governance metadata.
- * Optional in Step 11A-2.
- * Will become required for write operations in Step 11A-4.
- */
 export type GovernanceContext = Readonly<{
   changeId?: OpaqueId;
   actor?: ActorContext;
