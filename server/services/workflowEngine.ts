@@ -180,7 +180,15 @@ export async function executeWorkflow(
   moduleCtx: ModuleExecutionContext,
   workflowDefinitionId: string,
   input: Record<string, unknown>,
+  intentId: string,
 ): Promise<WorkflowExecution> {
+  if (!intentId) {
+    throw new WorkflowExecutionError(
+      "Workflow execution requires a valid intentId — direct execution is not allowed",
+      403,
+    );
+  }
+
   assertModuleCapability(moduleCtx, Capabilities.CMD_RUN);
 
   const definition = await storage.getWorkflowDefinition(workflowDefinitionId);
@@ -207,6 +215,7 @@ export async function executeWorkflow(
   const execution = await storage.createWorkflowExecution({
     tenantId: moduleCtx.tenantContext.tenantId,
     workflowDefinitionId,
+    intentId,
     input,
   });
 

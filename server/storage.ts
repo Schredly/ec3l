@@ -159,6 +159,7 @@ export interface IStorage {
   getWorkflowExecutionIntent(id: string): Promise<WorkflowExecutionIntent | undefined>;
   getWorkflowExecutionIntentsByTenant(tenantId: string): Promise<WorkflowExecutionIntent[]>;
   getPendingIntents(): Promise<WorkflowExecutionIntent[]>;
+  getIntentByIdempotencyKey(key: string): Promise<WorkflowExecutionIntent | undefined>;
   createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent>;
   updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined>;
   updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined>;
@@ -606,7 +607,19 @@ export class DatabaseStorage implements IStorage {
       .orderBy(asc(workflowExecutionIntents.createdAt));
   }
 
+  async getIntentByIdempotencyKey(key: string): Promise<WorkflowExecutionIntent | undefined> {
+    const [intent] = await db.select().from(workflowExecutionIntents)
+      .where(eq(workflowExecutionIntents.idempotencyKey, key));
+    return intent;
+  }
+
   async createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent> {
+    if (data.idempotencyKey) {
+      const existing = await this.getIntentByIdempotencyKey(data.idempotencyKey);
+      if (existing) {
+        return existing;
+      }
+    }
     const [intent] = await db.insert(workflowExecutionIntents).values(data).returning();
     return intent;
   }
@@ -614,7 +627,7 @@ export class DatabaseStorage implements IStorage {
   async updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined> {
     const [intent] = await db.update(workflowExecutionIntents)
       .set({ status: "dispatched", executionId, dispatchedAt: new Date() })
-      .where(eq(workflowExecutionIntents.id, id))
+      .where(and(eq(workflowExecutionIntents.id, id), eq(workflowExecutionIntents.status, "pending")))
       .returning();
     return intent;
   }
@@ -622,7 +635,7 @@ export class DatabaseStorage implements IStorage {
   async updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined> {
     const [intent] = await db.update(workflowExecutionIntents)
       .set({ status: "failed", error, dispatchedAt: new Date() })
-      .where(eq(workflowExecutionIntents.id, id))
+      .where(and(eq(workflowExecutionIntents.id, id), eq(workflowExecutionIntents.status, "pending")))
       .returning();
     return intent;
   }

@@ -85,6 +85,9 @@ async function checkScheduledTriggers(): Promise<WorkflowExecutionIntent[]> {
       }
 
       if (shouldFire) {
+        const minuteBucket = Math.floor(Date.now() / 60000);
+        const idempotencyKey = `schedule:${trigger.id}:${trigger.workflowDefinitionId}:${minuteBucket}`;
+
         const intent = await storage.createWorkflowExecutionIntent({
           tenantId: tenant.id,
           workflowDefinitionId: trigger.workflowDefinitionId,
@@ -94,6 +97,7 @@ async function checkScheduledTriggers(): Promise<WorkflowExecutionIntent[]> {
             scheduledAt: new Date().toISOString(),
             cronOrInterval: config.cron || config.interval,
           },
+          idempotencyKey,
         });
         emitted.push(intent);
       }

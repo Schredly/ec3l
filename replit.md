@@ -53,11 +53,12 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **Change lifecycle integration**: Workflow definitions require linked Change to be Ready/Merged before activation (fail-closed).
 - **Tenant isolation**: All CRUD and execution verifies tenant ownership.
 - **SystemContext inspection**: systemInspectWorkflows() and systemInspectExecution() for platform-level read access.
+- **Intent-only execution**: WorkflowExecution creation requires a valid intentId — direct execution is not allowed. The engine fails closed without an intentId. The API execute endpoint creates an intent first, then dispatches it through the intent dispatcher. All executions record their source intentId for audit.
 - **API Routes**: GET/POST /api/workflow-definitions, POST /api/workflow-definitions/:id/activate, POST /api/workflow-definitions/:id/retire, GET/POST /api/workflow-definitions/:id/steps, POST /api/workflow-definitions/:id/execute, GET /api/workflow-executions, GET /api/workflow-executions/:id, GET /api/workflow-executions/:id/steps, POST /api/workflow-executions/:id/resume
 
 ## Workflow Triggers & Execution Intents (server/services/triggerService.ts, schedulerService.ts, intentDispatcher.ts)
 - **WorkflowTrigger model**: id, tenantId, workflowDefinitionId, triggerType (record_event | schedule | manual), triggerConfig (json), status (active | disabled), createdAt.
-- **WorkflowExecutionIntent model**: id, tenantId, workflowDefinitionId, triggerType, triggerPayload, status (pending | dispatched | failed), executionId, error, createdAt, dispatchedAt.
+- **WorkflowExecutionIntent model**: id, tenantId, workflowDefinitionId, triggerType, triggerPayload, idempotencyKey, status (pending | dispatched | failed | duplicate), executionId, error, createdAt, dispatchedAt.
 - **Trigger types**:
   - `record_event`: Matches on recordType + optional fieldConditions. Supported events: record.created, record.updated.
   - `schedule`: Config includes cron or interval (e.g., "5m", "1h"). Scheduler runs in control plane, polls every 60s, emits intents at fire time. Idempotent via lastCheckByTrigger map.

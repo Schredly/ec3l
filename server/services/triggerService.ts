@@ -133,11 +133,15 @@ export async function fireManualTrigger(
     throw new TriggerServiceError("Workflow definition is not active");
   }
 
+  const firedAt = new Date().toISOString();
+  const idempotencyKey = `manual:${trigger.id}:${trigger.workflowDefinitionId}:${firedAt}`;
+
   return storage.createWorkflowExecutionIntent({
     tenantId: ctx.tenantId,
     workflowDefinitionId: trigger.workflowDefinitionId,
     triggerType: "manual",
-    triggerPayload: { ...payload, triggerId: trigger.id, firedBy: "api", firedAt: new Date().toISOString() },
+    triggerPayload: { ...payload, triggerId: trigger.id, firedBy: "api", firedAt },
+    idempotencyKey,
   });
 }
 
@@ -177,6 +181,10 @@ export async function emitRecordEvent(
     const wf = await storage.getWorkflowDefinition(trigger.workflowDefinitionId);
     if (!wf || wf.status !== "active") continue;
 
+    const matchedAt = new Date().toISOString();
+    const recordDataKey = JSON.stringify(recordData, Object.keys(recordData).sort());
+    const idempotencyKey = `record_event:${trigger.id}:${trigger.workflowDefinitionId}:${event}:${recordType}:${recordDataKey}`;
+
     const intent = await storage.createWorkflowExecutionIntent({
       tenantId: ctx.tenantId,
       workflowDefinitionId: trigger.workflowDefinitionId,
@@ -186,8 +194,9 @@ export async function emitRecordEvent(
         event,
         recordType,
         recordData,
-        matchedAt: new Date().toISOString(),
+        matchedAt,
       },
+      idempotencyKey,
     });
 
     matchedIntents.push(intent);

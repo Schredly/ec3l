@@ -109,6 +109,7 @@ export const wfIntentStatusEnum = pgEnum("wf_intent_status", [
   "pending",
   "dispatched",
   "failed",
+  "duplicate",
 ]);
 
 export const overrideTypeEnum = pgEnum("override_type", [
@@ -290,6 +291,7 @@ export const workflowExecutions = pgTable("workflow_executions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   workflowDefinitionId: varchar("workflow_definition_id").notNull().references(() => workflowDefinitions.id),
+  intentId: varchar("intent_id"),
   status: wfExecutionStatusEnum("status").notNull().default("running"),
   input: jsonb("input"),
   accumulatedInput: jsonb("accumulated_input"),
@@ -325,6 +327,7 @@ export const workflowExecutionIntents = pgTable("workflow_execution_intents", {
   workflowDefinitionId: varchar("workflow_definition_id").notNull().references(() => workflowDefinitions.id),
   triggerType: wfTriggerTypeEnum("trigger_type").notNull(),
   triggerPayload: jsonb("trigger_payload"),
+  idempotencyKey: text("idempotency_key"),
   status: wfIntentStatusEnum("status").notNull().default("pending"),
   executionId: varchar("execution_id").references(() => workflowExecutions.id),
   error: text("error"),

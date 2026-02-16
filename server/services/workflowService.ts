@@ -2,7 +2,8 @@ import type { TenantContext } from "../tenant";
 import type { SystemContext } from "../systemContext";
 import type { ModuleExecutionContext } from "../moduleContext";
 import { storage } from "../storage";
-import { executeWorkflow as runWorkflow, resumeWorkflowExecution as engineResumeWorkflow, validateDecisionSteps, WorkflowExecutionError } from "./workflowEngine";
+import { resumeWorkflowExecution as engineResumeWorkflow, validateDecisionSteps, WorkflowExecutionError } from "./workflowEngine";
+import { dispatchIntent } from "./intentDispatcher";
 import type {
   WorkflowDefinition,
   InsertWorkflowDefinition,
@@ -196,7 +197,7 @@ export async function getWorkflowSteps(
 
 export async function executeWorkflow(
   ctx: TenantContext,
-  moduleCtx: ModuleExecutionContext,
+  _moduleCtx: ModuleExecutionContext,
   workflowDefinitionId: string,
   input: Record<string, unknown>,
 ): Promise<WorkflowExecution> {
@@ -209,14 +210,38 @@ export async function executeWorkflow(
     throw new WorkflowServiceError("Workflow definition does not belong to this tenant", 403);
   }
 
-  try {
-    return await runWorkflow(moduleCtx, workflowDefinitionId, input);
-  } catch (err) {
-    if (err instanceof WorkflowExecutionError) {
-      throw new WorkflowServiceError(err.message, err.statusCode);
-    }
-    throw err;
+  if (wf.status !== "active") {
+    throw new WorkflowServiceError(
+      `Cannot execute workflow with status "${wf.status}" — must be active`,
+      400,
+    );
   }
+
+  const idempotencyKey = `api:${ctx.tenantId}:${workflowDefinitionId}:${new Date().toISOString()}`;
+  const intent = await storage.createWorkflowExecutionIntent({
+    tenantId: ctx.tenantId,
+    workflowDefinitionId,
+    triggerType: "manual",
+    triggerPayload: { ...input, source: "direct_api", createdAt: new Date().toISOString() },
+    idempotencyKey,
+  });
+
+  const dispatched = await dispatchIntent(intent);
+
+  if (dispatched.status === "failed") {
+    throw new WorkflowServiceError(dispatched.error || "Intent dispatch failed", 500);
+  }
+
+  if (!dispatched.executionId) {
+    throw new WorkflowServiceError("Intent dispatched but no execution created", 500);
+  }
+
+  const execution = await storage.getWorkflowExecution(dispatched.executionId);
+  if (!execution) {
+    throw new WorkflowServiceError("Execution not found after dispatch", 500);
+  }
+
+  return execution;
 }
 
 export async function resumeWorkflowExecution(

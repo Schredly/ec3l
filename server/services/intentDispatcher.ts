@@ -26,22 +26,30 @@ export async function dispatchPendingIntents(): Promise<WorkflowExecutionIntent[
 export async function dispatchIntent(
   intent: WorkflowExecutionIntent,
 ): Promise<WorkflowExecutionIntent> {
+  if (intent.status !== "pending") {
+    return intent;
+  }
+
   const wf = await storage.getWorkflowDefinition(intent.workflowDefinitionId);
   if (!wf) {
-    return (await storage.updateIntentFailed(intent.id, "Workflow definition not found"))!;
+    const failed = await storage.updateIntentFailed(intent.id, "Workflow definition not found");
+    return failed ?? intent;
   }
 
   if (wf.status !== "active") {
-    return (await storage.updateIntentFailed(intent.id, `Workflow definition is not active (status: ${wf.status})`))!;
+    const failed = await storage.updateIntentFailed(intent.id, `Workflow definition is not active (status: ${wf.status})`);
+    return failed ?? intent;
   }
 
   if (wf.tenantId !== intent.tenantId) {
-    return (await storage.updateIntentFailed(intent.id, "Tenant mismatch between intent and workflow definition"))!;
+    const failed = await storage.updateIntentFailed(intent.id, "Tenant mismatch between intent and workflow definition");
+    return failed ?? intent;
   }
 
   const steps = await storage.getWorkflowStepsByDefinition(wf.id);
   if (steps.length === 0) {
-    return (await storage.updateIntentFailed(intent.id, "Workflow has no steps defined"))!;
+    const failed = await storage.updateIntentFailed(intent.id, "Workflow has no steps defined");
+    return failed ?? intent;
   }
 
   let moduleId: string | null = null;
@@ -70,7 +78,8 @@ export async function dispatchIntent(
   }
 
   if (!mod) {
-    return (await storage.updateIntentFailed(intent.id, "No module found for workflow execution context"))!;
+    const failed = await storage.updateIntentFailed(intent.id, "No module found for workflow execution context");
+    return failed ?? intent;
   }
 
   const tenantCtx = { tenantId: intent.tenantId, source: "system" as const };
@@ -83,10 +92,15 @@ export async function dispatchIntent(
 
   try {
     const payload = (intent.triggerPayload as Record<string, unknown>) || {};
-    const execution = await executeWorkflow(moduleCtx, wf.id, payload);
-    return (await storage.updateIntentDispatched(intent.id, execution.id))!;
+    const execution = await executeWorkflow(moduleCtx, wf.id, payload, intent.id);
+    const dispatched = await storage.updateIntentDispatched(intent.id, execution.id);
+    if (!dispatched) {
+      return intent;
+    }
+    return dispatched;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown dispatch error";
-    return (await storage.updateIntentFailed(intent.id, errorMsg))!;
+    const failed = await storage.updateIntentFailed(intent.id, errorMsg);
+    return failed ?? intent;
   }
 }
