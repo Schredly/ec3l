@@ -64,6 +64,7 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 - **RecordTypes**: `employee` (10 fields: employeeId, firstName, lastName, email, title, department, managerId, status, startDate, location) and `job_change` (8 fields: employeeId, changeType, effectiveDate, proposedTitle, proposedDepartment, proposedManagerId, reason, status).
 - **ChoiceLists**: employee_status (candidate, active, leave, terminated), job_change_type (hire, promotion, transfer, termination), job_change_status (draft, pendingApproval, approved, rejected, applied).
 - **FormDefinitions**: `employee_default` (3 sections: Identity, Role & Org, Employment Details) and `job_change_default` (3 sections: Change Details, Proposed Updates, Approval Status).
+- **RBAC Roles**: HR Admin (full access), Manager (form.view + workflow.approve, scoped to job_change), Employee (form.view, scoped to employee form).
 - **Tenant Isolation**: All metadata is tenant-scoped; install requires valid tenant context; foreign key constraints prevent cross-tenant access.
 
 ## External Dependencies

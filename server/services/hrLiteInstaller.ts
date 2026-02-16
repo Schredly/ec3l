@@ -7,6 +7,9 @@ import type {
   FormDefinition,
   FormSection,
   FormFieldPlacement,
+  RbacRole,
+  RbacPermission,
+  RbacPolicy,
 } from "@shared/schema";
 
 export class HrLiteInstallError extends Error {
@@ -23,6 +26,13 @@ export interface HrLiteFormResult {
   name: string;
   sectionCount: number;
   fieldCount: number;
+}
+
+export interface HrLiteRbacRoleResult {
+  id: string;
+  name: string;
+  permissionCount: number;
+  policyCount: number;
 }
 
 export interface HrLiteInstallResult {
@@ -43,6 +53,11 @@ export interface HrLiteInstallResult {
   forms: {
     employeeDefault: HrLiteFormResult;
     jobChangeDefault: HrLiteFormResult;
+  };
+  rbac: {
+    hrAdmin: HrLiteRbacRoleResult;
+    manager: HrLiteRbacRoleResult;
+    employee: HrLiteRbacRoleResult;
   };
 }
 
@@ -261,6 +276,129 @@ async function installForm(
     name: fd.name,
     sectionCount: sectionSpecs.length,
     fieldCount: totalFieldCount,
+  };
+}
+
+async function ensureRbacRole(
+  ctx: TenantContext,
+  name: string,
+  description: string,
+): Promise<RbacRole> {
+  let role = await storage.getRbacRoleByTenantAndName(ctx.tenantId, name);
+  if (!role) {
+    role = await storage.createRbacRole({
+      tenantId: ctx.tenantId,
+      name,
+      description,
+    });
+  }
+  return role;
+}
+
+async function ensureRolePermissions(
+  roleId: string,
+  permissionNames: string[],
+  allPerms: RbacPermission[],
+): Promise<number> {
+  const permByName = new Map(allPerms.map((p) => [p.name, p]));
+  const existingRolePerms = await storage.getRbacRolePermissions(roleId);
+  const existingPermIds = new Set(existingRolePerms.map((rp) => rp.permissionId));
+  let count = 0;
+
+  for (const permName of permissionNames) {
+    const perm = permByName.get(permName);
+    if (perm) {
+      if (!existingPermIds.has(perm.id)) {
+        await storage.addRbacRolePermission(roleId, perm.id);
+      }
+      count++;
+    }
+  }
+  return count;
+}
+
+async function ensurePolicy(
+  ctx: TenantContext,
+  roleId: string,
+  resourceType: "form" | "workflow" | "override" | "change",
+  effect: "allow" | "deny",
+  resourceId: string | null,
+  existingPolicies: RbacPolicy[],
+): Promise<RbacPolicy> {
+  const found = existingPolicies.find(
+    (p) =>
+      p.roleId === roleId &&
+      p.resourceType === resourceType &&
+      p.effect === effect &&
+      p.resourceId === resourceId,
+  );
+  if (found) return found;
+  return storage.createRbacPolicy({
+    tenantId: ctx.tenantId,
+    roleId,
+    resourceType,
+    effect,
+    resourceId,
+  });
+}
+
+interface HrLiteRbacContext {
+  employeeRt: RecordType;
+  jobChangeRt: RecordType;
+  employeeFormId: string;
+  jobChangeFormId: string;
+}
+
+async function installHrLiteRbac(
+  ctx: TenantContext,
+  rbacCtx: HrLiteRbacContext,
+): Promise<{ hrAdmin: HrLiteRbacRoleResult; manager: HrLiteRbacRoleResult; employee: HrLiteRbacRoleResult }> {
+  const allPerms = await storage.getRbacPermissions();
+  const existingPolicies = await storage.getRbacPoliciesByTenant(ctx.tenantId);
+
+  const hrAdminRole = await ensureRbacRole(
+    ctx,
+    "HR Admin",
+    "Full access to all HR Lite operations",
+  );
+  const hrAdminPermCount = await ensureRolePermissions(
+    hrAdminRole.id,
+    ["form.view", "form.edit", "workflow.execute", "workflow.approve", "override.activate", "change.approve"],
+    allPerms,
+  );
+
+  const managerRole = await ensureRbacRole(
+    ctx,
+    "Manager",
+    "Can view forms and approve job changes",
+  );
+  const managerPermCount = await ensureRolePermissions(
+    managerRole.id,
+    ["form.view", "workflow.approve"],
+    allPerms,
+  );
+  let managerPolicyCount = 0;
+  await ensurePolicy(ctx, managerRole.id, "change", "allow", rbacCtx.jobChangeRt.id, existingPolicies);
+  managerPolicyCount++;
+
+  const employeeRole = await ensureRbacRole(
+    ctx,
+    "Employee",
+    "Can view own employee form",
+  );
+  const employeePermCount = await ensureRolePermissions(
+    employeeRole.id,
+    ["form.view"],
+    allPerms,
+  );
+  let employeePolicyCount = 0;
+  await ensurePolicy(ctx, employeeRole.id, "form", "allow", rbacCtx.employeeFormId, existingPolicies);
+  employeePolicyCount++;
+
+  return {
+    hrAdmin: { id: hrAdminRole.id, name: hrAdminRole.name, permissionCount: hrAdminPermCount, policyCount: 0 },
+    manager: { id: managerRole.id, name: managerRole.name, permissionCount: managerPermCount, policyCount: managerPolicyCount },
+    employee: { id: employeeRole.id, name: employeeRole.name, permissionCount: employeePermCount, policyCount: employeePolicyCount },
   };
 }
 
@@ -559,6 +697,13 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
     },
   ], jobChangeFields);
 
+  const rbac = await installHrLiteRbac(ctx, {
+    employeeRt,
+    jobChangeRt,
+    employeeFormId: employeeForm.id,
+    jobChangeFormId: jobChangeForm.id,
+  });
+
   return {
     module,
     recordTypes: { employee: employeeRt, jobChange: jobChangeRt },
@@ -572,5 +717,6 @@ export async function installHrLite(ctx: TenantContext): Promise<HrLiteInstallRe
       employeeDefault: employeeForm,
       jobChangeDefault: jobChangeForm,
     },
+    rbac,
   };
 }
