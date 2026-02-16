@@ -1525,6 +1525,19 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/check-access", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      res.json({ allowed: true });
+    } catch (err) {
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ allowed: false, message: err.message });
+      }
+      throw err;
+    }
+  });
+
   startScheduler();
 
   return httpServer;

@@ -30,6 +30,7 @@ export const PERMISSIONS = {
   WORKFLOW_APPROVE: "workflow.approve",
   OVERRIDE_ACTIVATE: "override.activate",
   CHANGE_APPROVE: "change.approve",
+  ADMIN_VIEW: "admin.view",
 } as const;
 
 export type PermissionName = typeof PERMISSIONS[keyof typeof PERMISSIONS];
@@ -41,6 +42,7 @@ const ALL_PERMISSIONS: { name: string; description: string }[] = [
   { name: PERMISSIONS.WORKFLOW_APPROVE, description: "Approve or reject workflow approval steps" },
   { name: PERMISSIONS.OVERRIDE_ACTIVATE, description: "Activate module overrides" },
   { name: PERMISSIONS.CHANGE_APPROVE, description: "Approve changes (transition to Ready/Merged)" },
+  { name: PERMISSIONS.ADMIN_VIEW, description: "View the Admin Console" },
 ];
 
 const DEFAULT_ROLES: { name: string; description: string; permissions: string[] }[] = [

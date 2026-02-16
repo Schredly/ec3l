@@ -6,6 +6,7 @@ import {
   Bot,
   Terminal,
   PenTool,
+  Shield,
 } from "lucide-react";
 import {
   Sidebar,
@@ -30,6 +31,7 @@ const toolItems = [
   { title: "Agent Skills", url: "/skills", icon: Bot },
   { title: "Runner", url: "/runner", icon: Terminal },
   { title: "Form Studio", url: "/studio/forms", icon: PenTool },
+  { title: "Admin", url: "/admin", icon: Shield },
 ];
 
 export function AppSidebar() {

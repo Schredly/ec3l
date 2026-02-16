@@ -47,7 +47,7 @@ The platform is built on a multi-tenant architecture, allowing separate ownershi
 
 ## RBAC System (server/services/rbacService.ts)
 - **Models**: RbacPermission (global), RbacRole (tenant-scoped), RbacRolePermission (role→permission), RbacUserRole (user→role), RbacPolicy (tenant-scoped, role→resourceType→effect), RbacAuditLog (authorization decision records).
-- **Permissions**: form.view, form.edit, workflow.execute, workflow.approve, override.activate, change.approve.
+- **Permissions**: form.view, form.edit, workflow.execute, workflow.approve, override.activate, change.approve, admin.view.
 - **Policy scoping**: Policies scope permissions to resource types (form, workflow, override, change) with optional resourceId. Null resourceId = all resources of that type. Deny overrides allow.
 - **Actor Identity**: authorize() requires explicit ActorIdentity with actorType (user | agent | system) and actorId (required for user/agent, null for system). Missing actor identity fails closed. Context mapping: UI requests → actorType=user, actorId=userId via actorFromContext(); agent actions → actorType=agent, actorId=agentId via agentActor(); SystemContext → actorType=system via systemActor() with RBAC bypass.
 - **Audit Attribution**: Every authorize() call records an RbacAuditLog entry with actorType, actorId, permission, resourceType, resourceId, outcome (allow/deny), reason, and timestamp. GET /api/rbac/audit-logs (admin-only) retrieves audit history.

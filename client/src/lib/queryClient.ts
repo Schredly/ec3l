@@ -8,8 +8,16 @@ export function setTenantId(id: string) {
   localStorage.setItem("tenantId", id);
 }
 
+function getUserId(): string {
+  return localStorage.getItem("userId") || "user-admin";
+}
+
+export function setUserId(id: string) {
+  localStorage.setItem("userId", id);
+}
+
 function tenantHeaders(): Record<string, string> {
-  return { "x-tenant-id": getTenantId() };
+  return { "x-tenant-id": getTenantId(), "x-user-id": getUserId() };
 }
 
 async function throwIfResNotOk(res: Response) {

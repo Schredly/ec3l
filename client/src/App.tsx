@@ -17,6 +17,7 @@ import ChangeDetail from "@/pages/change-detail";
 import Skills from "@/pages/skills";
 import Runner from "@/pages/runner";
 import FormStudio from "@/pages/form-studio";
+import AdminConsole from "@/pages/admin";
 
 function Router() {
   return (
@@ -29,6 +30,7 @@ function Router() {
       <Route path="/skills" component={Skills} />
       <Route path="/runner" component={Runner} />
       <Route path="/studio/forms" component={FormStudio} />
+      <Route path="/admin/:section?" component={AdminConsole} />
       <Route component={NotFound} />
     </Switch>
   );
