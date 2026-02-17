@@ -424,7 +424,7 @@ export const workflowExecutionIntents = pgTable("workflow_execution_intents", {
 export const recordTypes = pgTable("record_types", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
-  projectId: varchar("project_id").references(() => projects.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
   name: text("name").notNull(),
   key: text("key"),
   description: text("description"),

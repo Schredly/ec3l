@@ -999,7 +999,10 @@ export async function registerRoutes(
 
   app.post("/api/record-types", async (req, res) => {
     try {
-      if (req.body.key && req.body.projectId) {
+      if (!req.body.projectId) {
+        return res.status(400).json({ message: "projectId is required" });
+      }
+      if (req.body.key) {
         const rt = await recordTypeService.createRecordType(req.tenantContext, req.body);
         return res.status(201).json(rt);
       }
