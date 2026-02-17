@@ -4,6 +4,7 @@
 // before db.ts is imported. Tooling (drizzle-kit) loads dotenv separately.
 // Do NOT move dotenv loading into db.ts or services.
 
+console.log("DATABASE_URL at runtime =", process.env.DATABASE_URL);
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
