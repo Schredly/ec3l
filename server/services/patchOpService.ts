@@ -11,6 +11,22 @@ export class PatchOpServiceError extends Error {
   }
 }
 
+function validateSetFieldPayload(payload: Record<string, unknown>): void {
+  if (!payload.recordType || typeof payload.recordType !== "string") {
+    throw new PatchOpServiceError('set_field payload requires a string "recordType"');
+  }
+  if (!payload.field || typeof payload.field !== "string") {
+    throw new PatchOpServiceError('set_field payload requires a string "field"');
+  }
+  if (!payload.definition || typeof payload.definition !== "object" || Array.isArray(payload.definition)) {
+    throw new PatchOpServiceError('set_field payload requires an object "definition"');
+  }
+  const def = payload.definition as Record<string, unknown>;
+  if (!def.type || typeof def.type !== "string") {
+    throw new PatchOpServiceError('set_field definition requires a string "type"');
+  }
+}
+
 export async function createPatchOp(
   ctx: TenantContext,
   changeId: string,
@@ -34,6 +50,8 @@ export async function createPatchOp(
     throw new PatchOpServiceError("Target does not belong to this change", 400);
   }
 
+  const p = (payload ?? {}) as Record<string, unknown>;
+
   if (opType === "edit_file") {
     if (target.type !== "file") {
       throw new PatchOpServiceError(
@@ -43,12 +61,29 @@ export async function createPatchOp(
     }
   }
 
+  if (opType === "set_field") {
+    if (target.type !== "record_type") {
+      throw new PatchOpServiceError(
+        'set_field operations require a target of type "record_type"',
+        400,
+      );
+    }
+    validateSetFieldPayload(p);
+    const rt = await ts.getRecordTypeByKey(p.recordType as string);
+    if (!rt) {
+      throw new PatchOpServiceError(
+        `Record type "${p.recordType}" not found`,
+        404,
+      );
+    }
+  }
+
   return ts.createChangePatchOp({
     tenantId: ctx.tenantId,
     changeId,
     targetId,
     opType,
-    payload: payload as Record<string, unknown>,
+    payload: p,
   });
 }
 

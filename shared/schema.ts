@@ -5,6 +5,7 @@ import { z } from "zod";
 
 export const changeStatusEnum = pgEnum("change_status", [
   "Draft",
+  "Implementing",
   "WorkspaceRunning",
   "Validating",
   "ValidationFailed",
@@ -493,6 +494,8 @@ export const changePatchOps = pgTable("change_patch_ops", {
   targetId: varchar("target_id").notNull().references(() => changeTargets.id),
   opType: text("op_type").notNull(),
   payload: jsonb("payload").notNull(),
+  previousSnapshot: jsonb("previous_snapshot"),
+  executedAt: timestamp("executed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

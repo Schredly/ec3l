@@ -1,6 +1,7 @@
 import type { TenantContext } from "../tenant";
 import { getTenantStorage } from "../tenantStorage";
 import type { ChangeRecord, InsertChangeRecord } from "@shared/schema";
+import { executePatchOps } from "../executors/patchOpExecutor";
 
 export async function getChangesByProject(ctx: TenantContext, projectId: string): Promise<ChangeRecord[]> {
   const ts = getTenantStorage(ctx);
@@ -66,6 +67,26 @@ export async function updateChangeStatus(
   branchName?: string
 ): Promise<ChangeRecord | undefined> {
   const ts = getTenantStorage(ctx);
+
+  if (status === "Implementing") {
+    const change = await ts.getChange(id);
+    if (!change) return undefined;
+
+    await ts.updateChangeStatus(id, "Implementing", branchName);
+
+    const result = await executePatchOps(ctx, id);
+    if (!result.success) {
+      await ts.updateChangeStatus(id, "ValidationFailed");
+      throw new ChangeServiceError(
+        `Patch op execution failed: ${result.error}`,
+        422,
+      );
+    }
+
+    const updated = await ts.updateChangeStatus(id, "Validating");
+    return updated;
+  }
+
   return ts.updateChangeStatus(id, status, branchName);
 }
 

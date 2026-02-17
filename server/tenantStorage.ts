@@ -647,5 +647,46 @@ export function getTenantStorage(ctx: TenantContext) {
         .where(eq(recordTypes.tenantId, tenantId))
         .orderBy(desc(recordTypes.createdAt));
     },
+
+    async updateRecordTypeSchema(
+      id: string,
+      schema: unknown,
+    ): Promise<RecordType | undefined> {
+      const [existing] = await db
+        .select()
+        .from(recordTypes)
+        .where(
+          and(eq(recordTypes.id, id), eq(recordTypes.tenantId, tenantId)),
+        );
+      if (!existing) return undefined;
+      const [updated] = await db
+        .update(recordTypes)
+        .set({ schema })
+        .where(eq(recordTypes.id, id))
+        .returning();
+      return updated;
+    },
+
+    async updateChangePatchOpSnapshot(
+      id: string,
+      previousSnapshot: unknown,
+    ): Promise<ChangePatchOp | undefined> {
+      const [existing] = await db
+        .select()
+        .from(changePatchOps)
+        .where(
+          and(
+            eq(changePatchOps.id, id),
+            eq(changePatchOps.tenantId, tenantId),
+          ),
+        );
+      if (!existing) return undefined;
+      const [updated] = await db
+        .update(changePatchOps)
+        .set({ previousSnapshot, executedAt: new Date() })
+        .where(eq(changePatchOps.id, id))
+        .returning();
+      return updated;
+    },
   };
 }

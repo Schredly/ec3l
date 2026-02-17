@@ -5,6 +5,7 @@ import type { ChangeRecord, ChangeTarget, ChangePatchOp } from "@shared/schema";
 const mockTenantStorage = {
   getChange: vi.fn(),
   getChangeTarget: vi.fn(),
+  getRecordTypeByKey: vi.fn(),
   createChangePatchOp: vi.fn(),
   getChangePatchOpsByChange: vi.fn(),
 };
@@ -51,6 +52,16 @@ const fakeFormTarget: ChangeTarget = {
   changeId: "change-1",
   type: "form",
   selector: { formId: "form-1" },
+  createdAt: new Date(),
+};
+
+const fakeRecordTypeTarget: ChangeTarget = {
+  id: "ct-rt",
+  tenantId: "tenant-a",
+  projectId: "proj-1",
+  changeId: "change-1",
+  type: "record_type",
+  selector: { recordTypeId: "rt-1" },
   createdAt: new Date(),
 };
 
@@ -134,6 +145,103 @@ describe("patchOpService", () => {
 
       const result = await createPatchOp(ctx, "change-1", "ct-file", "edit_file", { content: "x" });
       expect(result).toEqual(fakePatchOp);
+    });
+
+    it("creates set_field op with valid payload and record_type target", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue({ id: "rt-1", key: "incident" });
+      const expected = {
+        ...fakePatchOp,
+        targetId: "ct-rt",
+        opType: "set_field",
+        payload: { recordType: "incident", field: "severity", definition: { type: "number", required: true } },
+      };
+      mockTenantStorage.createChangePatchOp.mockResolvedValue(expected);
+
+      const result = await createPatchOp(ctx, "change-1", "ct-rt", "set_field", {
+        recordType: "incident",
+        field: "severity",
+        definition: { type: "number", required: true },
+      });
+      expect(result.opType).toBe("set_field");
+      expect(mockTenantStorage.getRecordTypeByKey).toHaveBeenCalledWith("incident");
+    });
+
+    it("rejects set_field when target type is not record_type", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangeTarget.mockResolvedValue(fakeFormTarget);
+
+      await expect(
+        createPatchOp(ctx, "change-1", "ct-form", "set_field", {
+          recordType: "incident",
+          field: "severity",
+          definition: { type: "number" },
+        }),
+      ).rejects.toThrow(/set_field.*type "record_type"/);
+    });
+
+    it("rejects set_field when recordType not found", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue(undefined);
+
+      await expect(
+        createPatchOp(ctx, "change-1", "ct-rt", "set_field", {
+          recordType: "nonexistent",
+          field: "severity",
+          definition: { type: "number" },
+        }),
+      ).rejects.toThrow('Record type "nonexistent" not found');
+    });
+
+    it("rejects set_field with missing recordType in payload", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
+
+      await expect(
+        createPatchOp(ctx, "change-1", "ct-rt", "set_field", {
+          field: "severity",
+          definition: { type: "number" },
+        }),
+      ).rejects.toThrow(/recordType/);
+    });
+
+    it("rejects set_field with missing field in payload", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
+
+      await expect(
+        createPatchOp(ctx, "change-1", "ct-rt", "set_field", {
+          recordType: "incident",
+          definition: { type: "number" },
+        }),
+      ).rejects.toThrow(/field/);
+    });
+
+    it("rejects set_field with missing definition in payload", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
+
+      await expect(
+        createPatchOp(ctx, "change-1", "ct-rt", "set_field", {
+          recordType: "incident",
+          field: "severity",
+        }),
+      ).rejects.toThrow(/definition/);
+    });
+
+    it("rejects set_field when definition missing type", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
+
+      await expect(
+        createPatchOp(ctx, "change-1", "ct-rt", "set_field", {
+          recordType: "incident",
+          field: "severity",
+          definition: { required: true },
+        }),
+      ).rejects.toThrow(/definition requires a string "type"/);
     });
 
     it("allows non-edit_file opType on any target type", async () => {
