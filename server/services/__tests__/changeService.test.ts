@@ -72,6 +72,19 @@ vi.mock("../../tenantStorage", () => ({
   getTenantStorage: () => mockTenantStorage,
 }));
 
+const mockExecutePatchOps = vi.fn();
+vi.mock("../../executors/patchOpExecutor", () => ({
+  executePatchOps: (...args: unknown[]) => mockExecutePatchOps(...args),
+  PatchOpExecutionError: class PatchOpExecutionError extends Error {
+    public readonly statusCode: number;
+    constructor(message: string, statusCode = 400) {
+      super(message);
+      this.name = "PatchOpExecutionError";
+      this.statusCode = statusCode;
+    }
+  },
+}));
+
 import {
   getChanges,
   getChange,
@@ -270,6 +283,38 @@ describe("changeService", () => {
       expect(mockTenantStorage.createChange).toHaveBeenCalledWith(
         expect.objectContaining({ environmentId: "env-1" }),
       );
+    });
+  });
+
+  describe("updateChangeStatus — Merged branch", () => {
+    it("executes patch ops and sets status to Merged on success", async () => {
+      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Ready" });
+      mockExecutePatchOps.mockResolvedValue({ success: true, appliedCount: 2 });
+      const merged = { ...fakeChange, status: "Merged" };
+      mockTenantStorage.updateChangeStatus.mockResolvedValue(merged);
+
+      const result = await updateChangeStatus(ctx, "change-1", "Merged");
+
+      expect(mockExecutePatchOps).toHaveBeenCalledWith(ctx, "change-1");
+      expect(mockTenantStorage.updateChangeStatus).toHaveBeenCalledWith("change-1", "Merged", undefined);
+      expect(result).toEqual(merged);
+    });
+
+    it("sets ValidationFailed and throws 422 when execution result is not success", async () => {
+      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Ready" });
+      mockExecutePatchOps.mockResolvedValue({ success: false, appliedCount: 0, error: "Record type not found" });
+      mockTenantStorage.updateChangeStatus.mockResolvedValue({ ...fakeChange, status: "ValidationFailed" });
+
+      await expect(updateChangeStatus(ctx, "change-1", "Merged")).rejects.toThrow(ChangeServiceError);
+      expect(mockTenantStorage.updateChangeStatus).toHaveBeenCalledWith("change-1", "ValidationFailed");
+    });
+
+    it("returns undefined when change not found", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(undefined);
+
+      const result = await updateChangeStatus(ctx, "no-such", "Merged");
+      expect(result).toBeUndefined();
+      expect(mockExecutePatchOps).not.toHaveBeenCalled();
     });
   });
 });

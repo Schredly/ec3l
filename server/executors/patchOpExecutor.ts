@@ -209,24 +209,15 @@ export async function executeChange(
 ): Promise<ExecutionResult> {
   const ts = getTenantStorage(ctx);
 
-  // Guard: change must exist and be in Implementing state
+  // Guard: change must exist
   const change = await ts.getChange(changeId);
   if (!change) {
     throw new PatchOpExecutionError("Change not found", 404);
   }
-  if (change.status !== "Implementing") {
-    throw new PatchOpExecutionError(
-      `Change must be in "Implementing" state, got "${change.status}"`,
-      409,
-    );
-  }
 
   const ops = await ts.getChangePatchOpsByChange(changeId);
   if (ops.length === 0) {
-    throw new PatchOpExecutionError(
-      "No patch ops to execute for this change",
-      400,
-    );
+    return { success: true, appliedCount: 0 };
   }
 
   logExec(changeId, `executing ${ops.length} patch op(s)`);

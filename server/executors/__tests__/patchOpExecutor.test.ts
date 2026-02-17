@@ -34,7 +34,7 @@ const fakeChange: ChangeRecord = {
   projectId: "proj-1",
   title: "Fix bug",
   description: null,
-  status: "Implementing",
+  status: "Ready",
   branchName: null,
   moduleId: null,
   modulePath: null,
@@ -286,21 +286,12 @@ describe("patchOpExecutor", () => {
       await expect(executeChange(ctx, "no-change")).rejects.toThrow("Change not found");
     });
 
-    it("throws if change is not in Implementing state", async () => {
-      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Draft" });
-
-      await expect(executeChange(ctx, "change-1")).rejects.toThrow(
-        /must be in "Implementing" state/,
-      );
-    });
-
-    it("throws if no patch ops exist", async () => {
+    it("returns success with zero applied when no patch ops exist", async () => {
       mockTenantStorage.getChange.mockResolvedValue(fakeChange);
       mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([]);
 
-      await expect(executeChange(ctx, "change-1")).rejects.toThrow(
-        "No patch ops to execute",
-      );
+      const result = await executeChange(ctx, "change-1");
+      expect(result).toEqual({ success: true, appliedCount: 0 });
     });
   });
 

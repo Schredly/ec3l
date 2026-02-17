@@ -321,6 +321,9 @@ export async function registerRoutes(
       if (err instanceof RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
+      if (err instanceof ChangeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
       throw err;
     }
   });
