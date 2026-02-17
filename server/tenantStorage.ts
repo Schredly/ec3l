@@ -41,9 +41,6 @@ import {
   changeTargets,
   type ChangeTarget,
   type InsertChangeTarget,
-  changePatchOps,
-  type ChangePatchOp,
-  type InsertChangePatchOp,
 } from "@shared/schema";
 import type { TenantContext } from "./tenant";
 
@@ -588,29 +585,5 @@ export function getTenantStorage(ctx: TenantContext) {
       return target;
     },
 
-    // --- Change Patch Operations (tenant-scoped) ---
-
-    async createChangePatchOp(data: InsertChangePatchOp): Promise<ChangePatchOp> {
-      const [op] = await db
-        .insert(changePatchOps)
-        .values({ ...data, tenantId })
-        .returning();
-      return op;
-    },
-
-    async getChangePatchOpsByChange(changeId: string): Promise<ChangePatchOp[]> {
-      const change = await this.getChange(changeId);
-      if (!change) return [];
-      return db
-        .select()
-        .from(changePatchOps)
-        .where(
-          and(
-            eq(changePatchOps.changeId, changeId),
-            eq(changePatchOps.tenantId, tenantId),
-          ),
-        )
-        .orderBy(desc(changePatchOps.createdAt));
-    },
   };
 }

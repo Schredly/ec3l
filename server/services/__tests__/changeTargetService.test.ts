@@ -55,8 +55,8 @@ const fakeTarget: ChangeTarget = {
   tenantId: "tenant-a",
   projectId: "proj-1",
   changeId: "change-1",
-  type: "module",
-  selector: { moduleId: "mod-1" },
+  type: "form",
+  selector: { formId: "form-1" },
   createdAt: new Date(),
 };
 
@@ -68,14 +68,14 @@ describe("changeTargetService", () => {
   });
 
   describe("createChangeTarget", () => {
-    it("creates a target for an existing change", async () => {
+    it("creates a target for an existing draft change", async () => {
       mockTenantStorage.getChange.mockResolvedValue(fakeChange);
       mockTenantStorage.getProject.mockResolvedValue(fakeProject);
       mockTenantStorage.createChangeTarget.mockResolvedValue(fakeTarget);
 
       const result = await createChangeTarget(ctx, "change-1", {
-        type: "module",
-        selector: { moduleId: "mod-1" },
+        type: "form",
+        selector: { formId: "form-1" },
       });
 
       expect(mockTenantStorage.getChange).toHaveBeenCalledWith("change-1");
@@ -84,8 +84,8 @@ describe("changeTargetService", () => {
         tenantId: "tenant-a",
         projectId: "proj-1",
         changeId: "change-1",
-        type: "module",
-        selector: { moduleId: "mod-1" },
+        type: "form",
+        selector: { formId: "form-1" },
       });
       expect(result).toEqual(fakeTarget);
     });
@@ -95,15 +95,8 @@ describe("changeTargetService", () => {
 
       await expect(
         createChangeTarget(ctx, "no-change", {
-          type: "module",
-          selector: { moduleId: "mod-1" },
-        }),
-      ).rejects.toThrow(ChangeTargetServiceError);
-
-      await expect(
-        createChangeTarget(ctx, "no-change", {
-          type: "module",
-          selector: { moduleId: "mod-1" },
+          type: "form",
+          selector: { formId: "form-1" },
         }),
       ).rejects.toThrow("Change not found");
     });
@@ -114,10 +107,89 @@ describe("changeTargetService", () => {
 
       await expect(
         createChangeTarget(ctx, "change-1", {
-          type: "module",
-          selector: { moduleId: "mod-1" },
+          type: "form",
+          selector: { formId: "form-1" },
         }),
       ).rejects.toThrow("Project not found for this change");
+    });
+
+    it("rejects target creation when change is not in Draft status", async () => {
+      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Merged" });
+
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "form",
+          selector: { formId: "form-1" },
+        }),
+      ).rejects.toThrow(/must be "Draft"/);
+    });
+
+    it("rejects invalid target type", async () => {
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "invalid" as any,
+          selector: {},
+        }),
+      ).rejects.toThrow(/Invalid target type/);
+    });
+
+    it("validates selector shape for each type", async () => {
+      // form requires formId
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "form",
+          selector: {},
+        }),
+      ).rejects.toThrow(/formId/);
+
+      // workflow requires workflowDefinitionId
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "workflow",
+          selector: {},
+        }),
+      ).rejects.toThrow(/workflowDefinitionId/);
+
+      // rule requires ruleId
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "rule",
+          selector: {},
+        }),
+      ).rejects.toThrow(/ruleId/);
+
+      // record_type requires recordTypeId
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "record_type",
+          selector: {},
+        }),
+      ).rejects.toThrow(/recordTypeId/);
+
+      // script requires scriptPath
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "script",
+          selector: {},
+        }),
+      ).rejects.toThrow(/scriptPath/);
+
+      // file requires filePath
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "file",
+          selector: {},
+        }),
+      ).rejects.toThrow(/filePath/);
+    });
+
+    it("rejects non-object selector", async () => {
+      await expect(
+        createChangeTarget(ctx, "change-1", {
+          type: "form",
+          selector: "not-an-object" as any,
+        }),
+      ).rejects.toThrow("selector must be a JSON object");
     });
   });
 
