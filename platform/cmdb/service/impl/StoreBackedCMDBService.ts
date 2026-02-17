@@ -3,6 +3,7 @@ import type { GraphStore } from "../../store";
 import type { CMDBService } from "../CMDBService";
 import type { CMDBReadOptions, CMDBWriteOptions, GovernanceContext, TenantContext } from "../types";
 import { CMDBConflict, CMDBInvariantViolation } from "../errors";
+import type { AuditSink, AuditEvent, AuditEventType } from "../../../audit";
 
 function requireTenant(tenant: TenantContext): string {
   if (!tenant?.tenantId) throw new CMDBInvariantViolation("TenantContext.tenantId is required.");
@@ -25,6 +26,27 @@ function translateStoreError(err: unknown): never {
   throw err instanceof Error ? err : new Error(msg);
 }
 
+function requireGovernance(governance?: GovernanceContext): {
+  changeId: string;
+  actorId: string;
+  actorType: "user" | "system" | "agent";
+} {
+  if (!governance?.changeId) {
+    throw new CMDBInvariantViolation("GovernanceContext.changeId is required for write operations.");
+  }
+  if (!governance?.actor?.actorId) {
+    throw new CMDBInvariantViolation("GovernanceContext.actor.actorId is required for write operations.");
+  }
+  if (!governance?.actor?.actorType) {
+    throw new CMDBInvariantViolation("GovernanceContext.actor.actorType is required for write operations.");
+  }
+  return {
+    changeId: governance.changeId,
+    actorId: governance.actor.actorId,
+    actorType: governance.actor.actorType,
+  };
+}
+
 /**
  * Minimal CMDBService implementation backed by a GraphStore.
  *
@@ -34,10 +56,14 @@ function translateStoreError(err: unknown): never {
  * - Tenant explicit everywhere
  * - Direct invariants only
  *
- * GovernanceContext is accepted but not enforced until Step 11A-4.
+ * GovernanceContext is required for all write operations.
+ * Audit events are emitted after successful mutations.
  */
 export class StoreBackedCMDBService implements CMDBService {
-  constructor(private readonly store: GraphStore) {}
+  constructor(
+    private readonly store: GraphStore,
+    private readonly auditSink: AuditSink
+  ) {}
 
   async getNode(tenant: TenantContext, nodeId: string): Promise<CINode | null> {
     const tenantId = requireTenant(tenant);
@@ -54,10 +80,11 @@ export class StoreBackedCMDBService implements CMDBService {
   async upsertNode(
     tenant: TenantContext,
     node: CINode,
-    _governance?: GovernanceContext,
+    governance?: GovernanceContext,
     opts?: CMDBWriteOptions
   ): Promise<CINode> {
     const tenantId = requireTenant(tenant);
+    const gov = requireGovernance(governance);
 
     if (node.tenantId !== tenantId) {
       throw new CMDBInvariantViolation(`Node.tenantId (${node.tenantId}) must match TenantContext.tenantId (${tenantId}).`);
@@ -65,6 +92,7 @@ export class StoreBackedCMDBService implements CMDBService {
 
     try {
       const res = await this.store.upsertNode(tenantId, node, mapWriteOpts(opts));
+      await this.emitAuditEvent(tenantId, gov, "CMDB_NODE_UPSERTED", node.ciId);
       return res.node;
     } catch (e) {
       translateStoreError(e);
@@ -74,12 +102,14 @@ export class StoreBackedCMDBService implements CMDBService {
   async deleteNode(
     tenant: TenantContext,
     nodeId: string,
-    _governance?: GovernanceContext,
+    governance?: GovernanceContext,
     opts?: CMDBWriteOptions
   ): Promise<void> {
     const tenantId = requireTenant(tenant);
+    const gov = requireGovernance(governance);
     try {
       await this.store.deleteNode(tenantId, nodeId, mapWriteOpts(opts));
+      await this.emitAuditEvent(tenantId, gov, "CMDB_NODE_DELETED", nodeId);
     } catch (e) {
       translateStoreError(e);
     }
@@ -100,10 +130,11 @@ export class StoreBackedCMDBService implements CMDBService {
   async upsertEdge(
     tenant: TenantContext,
     edge: CIEdge,
-    _governance?: GovernanceContext,
+    governance?: GovernanceContext,
     opts?: CMDBWriteOptions
   ): Promise<CIEdge> {
     const tenantId = requireTenant(tenant);
+    const gov = requireGovernance(governance);
 
     if (edge.tenantId !== tenantId) {
       throw new CMDBInvariantViolation(`Edge.tenantId (${edge.tenantId}) must match TenantContext.tenantId (${tenantId}).`);
@@ -117,6 +148,7 @@ export class StoreBackedCMDBService implements CMDBService {
 
     try {
       const res = await this.store.upsertEdge(tenantId, edge, mapWriteOpts(opts));
+      await this.emitAuditEvent(tenantId, gov, "CMDB_EDGE_UPSERTED", edge.edgeId);
       return res.edge;
     } catch (e) {
       translateStoreError(e);
@@ -126,14 +158,35 @@ export class StoreBackedCMDBService implements CMDBService {
   async deleteEdge(
     tenant: TenantContext,
     edgeId: string,
-    _governance?: GovernanceContext,
+    governance?: GovernanceContext,
     opts?: CMDBWriteOptions
   ): Promise<void> {
     const tenantId = requireTenant(tenant);
+    const gov = requireGovernance(governance);
     try {
       await this.store.deleteEdge(tenantId, edgeId, mapWriteOpts(opts));
+      await this.emitAuditEvent(tenantId, gov, "CMDB_EDGE_DELETED", edgeId);
     } catch (e) {
       translateStoreError(e);
     }
+  }
+
+  private async emitAuditEvent(
+    tenantId: string,
+    gov: { changeId: string; actorId: string; actorType: "user" | "system" | "agent" },
+    eventType: AuditEventType,
+    entityId: string
+  ): Promise<void> {
+    const event: AuditEvent = {
+      eventId: crypto.randomUUID(),
+      tenantId,
+      changeId: gov.changeId,
+      actorId: gov.actorId,
+      actorType: gov.actorType,
+      eventType,
+      entityId,
+      timestamp: new Date().toISOString(),
+    };
+    await this.auditSink.emit(event);
   }
 }
