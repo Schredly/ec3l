@@ -12,6 +12,7 @@ import { initRunner } from "../runner/init";
 import type { RunnerTelemetrySink, TelemetryEventData } from "../runner/telemetry";
 import { storage } from "./storage";
 import type { InsertExecutionTelemetryEvent } from "@shared/schema";
+import "dotenv/config";
 
 const app = express();
 const httpServer = createServer(app);
