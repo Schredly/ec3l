@@ -125,19 +125,16 @@ initRunner({ telemetrySink: storageTelemetrySink });
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  // host and port must be passed as separate arguments to server.listen().
+  // Combining them (e.g. "0.0.0.0:5000") causes Node to treat it as a
+  // Unix socket path, resulting in ENOTSUP on macOS / EACCES in Docker.
+  const port = Number(process.env.PORT ?? 5000);
+  if (Number.isNaN(port)) {
+    throw new Error(`PORT must be a number, got: "${process.env.PORT}"`);
+  }
+  const host = process.env.HOST ?? "0.0.0.0";
+
+  httpServer.listen(port, host, () => {
+    log(`serving on ${host}:${port}`);
+  });
 })();
