@@ -1,3 +1,7 @@
+// IMPORTANT:
+// Environment variables must be loaded here (process entrypoint).
+// Tooling (drizzle-kit) loads dotenv separately.
+// Do NOT move dotenv loading into db.ts or services.
 import dotenv from "dotenv";
 dotenv.config();
 
