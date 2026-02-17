@@ -152,4 +152,5 @@ initRunner({ telemetrySink: storageTelemetrySink });
   httpServer.listen(port, host, () => {
     log(`serving on ${host}:${port}`);
   });
+
 })();
