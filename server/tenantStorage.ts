@@ -605,6 +605,34 @@ export function getTenantStorage(ctx: TenantContext) {
       return op;
     },
 
+    async getChangePatchOp(id: string): Promise<ChangePatchOp | undefined> {
+      const [op] = await db
+        .select()
+        .from(changePatchOps)
+        .where(
+          and(
+            eq(changePatchOps.id, id),
+            eq(changePatchOps.tenantId, tenantId),
+          ),
+        );
+      return op;
+    },
+
+    async deleteChangePatchOp(id: string): Promise<ChangePatchOp | undefined> {
+      const existing = await this.getChangePatchOp(id);
+      if (!existing) return undefined;
+      const [deleted] = await db
+        .delete(changePatchOps)
+        .where(
+          and(
+            eq(changePatchOps.id, id),
+            eq(changePatchOps.tenantId, tenantId),
+          ),
+        )
+        .returning();
+      return deleted;
+    },
+
     async getChangePatchOpsByChange(changeId: string): Promise<ChangePatchOp[]> {
       const change = await this.getChange(changeId);
       if (!change) return [];

@@ -13,6 +13,25 @@ export class PatchOpServiceError extends Error {
 
 const RECORD_TYPE_OPS = ["set_field", "add_field", "remove_field", "rename_field"];
 
+const ALLOWED_FIELD_TYPES = new Set([
+  "string",
+  "number",
+  "boolean",
+  "reference",
+  "choice",
+  "text",
+  "date",
+  "datetime",
+]);
+
+function validateFieldType(type: string, opType: string): void {
+  if (!ALLOWED_FIELD_TYPES.has(type)) {
+    throw new PatchOpServiceError(
+      `${opType} definition.type "${type}" is invalid — allowed types: ${Array.from(ALLOWED_FIELD_TYPES).join(", ")}`,
+    );
+  }
+}
+
 function validateSetFieldPayload(payload: Record<string, unknown>): void {
   if (!payload.recordType || typeof payload.recordType !== "string") {
     throw new PatchOpServiceError('set_field payload requires a string "recordType"');
@@ -27,6 +46,7 @@ function validateSetFieldPayload(payload: Record<string, unknown>): void {
   if (!def.type || typeof def.type !== "string") {
     throw new PatchOpServiceError('set_field definition requires a string "type"');
   }
+  validateFieldType(def.type, "set_field");
 }
 
 function validateAddFieldPayload(payload: Record<string, unknown>): void {
@@ -43,6 +63,7 @@ function validateAddFieldPayload(payload: Record<string, unknown>): void {
   if (!def.type || typeof def.type !== "string") {
     throw new PatchOpServiceError('add_field definition requires a string "type"');
   }
+  validateFieldType(def.type, "add_field");
 }
 
 function validateRemoveFieldPayload(payload: Record<string, unknown>): void {
@@ -63,6 +84,22 @@ function validateRenameFieldPayload(payload: Record<string, unknown>): void {
   }
   if (!payload.newName || typeof payload.newName !== "string") {
     throw new PatchOpServiceError('rename_field payload requires a string "newName"');
+  }
+}
+
+/** Extract the set of recordType+field keys an op touches. */
+function getAffectedFieldKeys(op: ChangePatchOp): string[] {
+  const p = op.payload as Record<string, unknown>;
+  const rt = (p.recordType as string) || "";
+  switch (op.opType) {
+    case "set_field":
+    case "add_field":
+    case "remove_field":
+      return [`${rt}::${p.field}`];
+    case "rename_field":
+      return [`${rt}::${p.oldName}`, `${rt}::${p.newName}`];
+    default:
+      return [];
   }
 }
 
@@ -131,6 +168,25 @@ export async function createPatchOp(
         404,
       );
     }
+
+    // --- Duplicate field guard ---
+    const newFieldKeys = getAffectedFieldKeys({
+      opType,
+      payload: p,
+    } as ChangePatchOp);
+
+    const existingOps = await ts.getChangePatchOpsByChange(changeId);
+    const existingKeys = new Set(existingOps.flatMap(getAffectedFieldKeys));
+
+    for (const key of newFieldKeys) {
+      if (existingKeys.has(key)) {
+        const [recordType, field] = key.split("::");
+        throw new PatchOpServiceError(
+          `Duplicate: another pending op already targets field "${field}" on record type "${recordType}" in this change`,
+          409,
+        );
+      }
+    }
   }
 
   return ts.createChangePatchOp({
@@ -140,6 +196,39 @@ export async function createPatchOp(
     opType,
     payload: p,
   });
+}
+
+export async function deletePatchOp(
+  ctx: TenantContext,
+  changeId: string,
+  opId: string,
+): Promise<ChangePatchOp> {
+  const ts = getTenantStorage(ctx);
+
+  const change = await ts.getChange(changeId);
+  if (!change) {
+    throw new PatchOpServiceError("Change not found", 404);
+  }
+
+  if (change.status === "Merged") {
+    throw new PatchOpServiceError("Cannot delete ops from a merged change", 400);
+  }
+
+  const op = await ts.getChangePatchOp(opId);
+  if (!op) {
+    throw new PatchOpServiceError("Patch op not found", 404);
+  }
+
+  if (op.changeId !== changeId) {
+    throw new PatchOpServiceError("Patch op does not belong to this change", 400);
+  }
+
+  const deleted = await ts.deleteChangePatchOp(opId);
+  if (!deleted) {
+    throw new PatchOpServiceError("Failed to delete patch op", 500);
+  }
+
+  return deleted;
 }
 
 export async function listPatchOps(

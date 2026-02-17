@@ -228,6 +228,22 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/changes/:id/patch-ops/:opId", async (req, res) => {
+    try {
+      const deleted = await patchOpService.deletePatchOp(
+        req.tenantContext,
+        req.params.id,
+        req.params.opId,
+      );
+      res.json(deleted);
+    } catch (err) {
+      if (err instanceof PatchOpServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   app.get("/api/changes/:id/patch-ops", async (req, res) => {
     try {
       const ops = await patchOpService.listPatchOps(
