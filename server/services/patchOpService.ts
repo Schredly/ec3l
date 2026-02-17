@@ -219,8 +219,16 @@ export async function deletePatchOp(
     throw new PatchOpServiceError("Patch op not found", 404);
   }
 
+  if (op.tenantId !== ctx.tenantId) {
+    throw new PatchOpServiceError("Patch op not found", 404);
+  }
+
   if (op.changeId !== changeId) {
     throw new PatchOpServiceError("Patch op does not belong to this change", 400);
+  }
+
+  if (op.executedAt !== null) {
+    throw new PatchOpServiceError("Cannot delete an executed patch op", 409);
   }
 
   const deleted = await ts.deleteChangePatchOp(opId);

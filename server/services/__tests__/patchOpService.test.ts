@@ -8,6 +8,8 @@ const mockTenantStorage = {
   getRecordTypeByKey: vi.fn(),
   createChangePatchOp: vi.fn(),
   getChangePatchOpsByChange: vi.fn(),
+  getChangePatchOp: vi.fn(),
+  deleteChangePatchOp: vi.fn(),
 };
 
 vi.mock("../../tenantStorage", () => ({
@@ -16,6 +18,7 @@ vi.mock("../../tenantStorage", () => ({
 
 import {
   createPatchOp,
+  deletePatchOp,
   listPatchOps,
   PatchOpServiceError,
 } from "../patchOpService";
@@ -457,6 +460,82 @@ describe("patchOpService", () => {
           newName: "impact",
         }),
       ).rejects.toThrow(/rename_field.*type "record_type"/);
+    });
+  });
+
+  describe("deletePatchOp", () => {
+    it("deletes an unexecuted patch op", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangePatchOp.mockResolvedValue({ ...fakePatchOp, executedAt: null });
+      mockTenantStorage.deleteChangePatchOp.mockResolvedValue(fakePatchOp);
+
+      const result = await deletePatchOp(ctx, "change-1", "po-1");
+      expect(mockTenantStorage.deleteChangePatchOp).toHaveBeenCalledWith("po-1");
+      expect(result).toEqual(fakePatchOp);
+    });
+
+    it("throws 404 when change not found", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(undefined);
+
+      await expect(
+        deletePatchOp(ctx, "no-change", "po-1"),
+      ).rejects.toThrow("Change not found");
+    });
+
+    it("throws 400 when change is merged", async () => {
+      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Merged" });
+
+      await expect(
+        deletePatchOp(ctx, "change-1", "po-1"),
+      ).rejects.toThrow("Cannot delete ops from a merged change");
+    });
+
+    it("throws 404 when patch op not found", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangePatchOp.mockResolvedValue(undefined);
+
+      await expect(
+        deletePatchOp(ctx, "change-1", "no-op"),
+      ).rejects.toThrow("Patch op not found");
+    });
+
+    it("throws 404 when patch op belongs to a different tenant", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangePatchOp.mockResolvedValue({
+        ...fakePatchOp,
+        tenantId: "tenant-b",
+        executedAt: null,
+      });
+
+      await expect(
+        deletePatchOp(ctx, "change-1", "po-1"),
+      ).rejects.toThrow("Patch op not found");
+    });
+
+    it("throws 400 when patch op belongs to a different change", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangePatchOp.mockResolvedValue({
+        ...fakePatchOp,
+        changeId: "other-change",
+        executedAt: null,
+      });
+
+      await expect(
+        deletePatchOp(ctx, "change-1", "po-1"),
+      ).rejects.toThrow("Patch op does not belong to this change");
+    });
+
+    it("throws 409 when patch op has already been executed", async () => {
+      mockTenantStorage.getChange.mockResolvedValue(fakeChange);
+      mockTenantStorage.getChangePatchOp.mockResolvedValue({
+        ...fakePatchOp,
+        executedAt: new Date(),
+      });
+
+      const err = await deletePatchOp(ctx, "change-1", "po-1").catch((e: PatchOpServiceError) => e);
+      expect(err).toBeInstanceOf(PatchOpServiceError);
+      expect(err.message).toBe("Cannot delete an executed patch op");
+      expect(err.statusCode).toBe(409);
     });
   });
 

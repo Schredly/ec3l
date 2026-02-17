@@ -230,12 +230,12 @@ export async function registerRoutes(
 
   app.delete("/api/changes/:id/patch-ops/:opId", async (req, res) => {
     try {
-      const deleted = await patchOpService.deletePatchOp(
+      await patchOpService.deletePatchOp(
         req.tenantContext,
         req.params.id,
         req.params.opId,
       );
-      res.json(deleted);
+      res.status(204).send();
     } catch (err) {
       if (err instanceof PatchOpServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
