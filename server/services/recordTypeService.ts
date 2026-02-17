@@ -11,6 +11,17 @@ export class RecordTypeServiceError extends Error {
   }
 }
 
+const ALLOWED_FIELD_TYPES = new Set([
+  "string",
+  "number",
+  "boolean",
+  "reference",
+  "choice",
+  "text",
+  "date",
+  "datetime",
+]);
+
 function validateSchema(schema: unknown): void {
   if (schema === null || schema === undefined) return;
   if (typeof schema !== "object" || Array.isArray(schema)) {
@@ -31,6 +42,11 @@ function validateSchema(schema: unknown): void {
       }
       if (!f.type || typeof f.type !== "string") {
         throw new RecordTypeServiceError("Each field in schema.fields requires a string \"type\"");
+      }
+      if (!ALLOWED_FIELD_TYPES.has(f.type)) {
+        throw new RecordTypeServiceError(
+          `Invalid field type "${f.type}" — allowed types: ${Array.from(ALLOWED_FIELD_TYPES).join(", ")}`,
+        );
       }
     }
   }
@@ -86,7 +102,7 @@ export async function createRecordType(
     name: data.name,
     description: data.description ?? null,
     baseType: data.baseType ?? null,
-    schema: data.schema ?? null,
+    schema: data.schema ?? { fields: [] },
   });
 }
 

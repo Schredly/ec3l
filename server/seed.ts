@@ -274,12 +274,12 @@ async function seedRecordTypes() {
     description: "A unit of work that can be assigned, tracked, and completed.",
     schema: {
       fields: [
-        { name: "title", type: "string", required: true },
+        { name: "state", type: "choice", required: true, options: ["open", "in_progress", "closed"], default: "open" },
+        { name: "short_description", type: "string", required: true },
         { name: "description", type: "text", required: false },
-        { name: "status", type: "choice", required: true, options: ["open", "in_progress", "done"] },
-        { name: "assignee", type: "string", required: false },
+        { name: "assigned_to", type: "reference", required: false },
         { name: "priority", type: "choice", required: false, options: ["low", "medium", "high", "critical"] },
-        { name: "dueDate", type: "date", required: false },
+        { name: "due_date", type: "date", required: false },
       ],
     },
     status: "active",
@@ -295,9 +295,9 @@ async function seedRecordTypes() {
     schema: {
       fields: [
         { name: "severity", type: "choice", required: true, options: ["sev1", "sev2", "sev3", "sev4"] },
-        { name: "impactedService", type: "string", required: true },
-        { name: "reportedBy", type: "string", required: false },
-        { name: "resolvedAt", type: "datetime", required: false },
+        { name: "impact", type: "choice", required: true, options: ["low", "medium", "high"] },
+        { name: "reported_by", type: "reference", required: false },
+        { name: "resolved_at", type: "datetime", required: false },
       ],
     },
     status: "active",

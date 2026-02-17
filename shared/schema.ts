@@ -429,7 +429,7 @@ export const recordTypes = pgTable("record_types", {
   key: text("key"),
   description: text("description"),
   baseType: text("base_type"),
-  schema: jsonb("schema"),
+  schema: jsonb("schema").notNull().default(sql`'{"fields":[]}'::jsonb`),
   version: integer("version").notNull().default(1),
   status: recordTypeStatusEnum("status").notNull().default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

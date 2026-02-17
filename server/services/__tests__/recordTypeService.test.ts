@@ -172,6 +172,62 @@ describe("recordTypeService", () => {
         createRecordType(ctx, { projectId: "proj-1", key: "task", name: "" }),
       ).rejects.toThrow("name is required");
     });
+
+    it("rejects invalid field type", async () => {
+      mockTenantStorage.getProject.mockResolvedValue(fakeProject);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue(undefined);
+
+      await expect(
+        createRecordType(ctx, {
+          projectId: "proj-1",
+          key: "bad",
+          name: "Bad",
+          schema: { fields: [{ name: "x", type: "unsupported_type" }] },
+        }),
+      ).rejects.toThrow(/Invalid field type "unsupported_type"/);
+    });
+
+    it("accepts all allowed field types", async () => {
+      mockTenantStorage.getProject.mockResolvedValue(fakeProject);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue(undefined);
+      mockTenantStorage.createRecordType.mockResolvedValue(fakeTask);
+
+      await createRecordType(ctx, {
+        projectId: "proj-1",
+        key: "full",
+        name: "Full",
+        schema: {
+          fields: [
+            { name: "a", type: "string" },
+            { name: "b", type: "number" },
+            { name: "c", type: "boolean" },
+            { name: "d", type: "reference" },
+            { name: "e", type: "choice" },
+            { name: "f", type: "text" },
+            { name: "g", type: "date" },
+            { name: "h", type: "datetime" },
+          ],
+        },
+      });
+
+      expect(mockTenantStorage.createRecordType).toHaveBeenCalledOnce();
+    });
+
+    it("defaults schema to { fields: [] } when not provided", async () => {
+      mockTenantStorage.getProject.mockResolvedValue(fakeProject);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue(undefined);
+      mockTenantStorage.createRecordType.mockResolvedValue(fakeTask);
+
+      await createRecordType(ctx, {
+        projectId: "proj-1",
+        key: "minimal",
+        name: "Minimal",
+      });
+
+      expect(mockTenantStorage.createRecordType).toHaveBeenCalledWith(
+        expect.objectContaining({ schema: { fields: [] } }),
+      );
+    });
   });
 
   describe("getRecordType", () => {
