@@ -1,6 +1,5 @@
 import type { TenantContext } from "../tenant";
 import { getTenantStorage } from "../tenantStorage";
-import { storage } from "../storage";
 import type { ChangeRecord, InsertChangeRecord } from "@shared/schema";
 
 export async function getChangesByProject(ctx: TenantContext, projectId: string): Promise<ChangeRecord[]> {
@@ -9,13 +8,13 @@ export async function getChangesByProject(ctx: TenantContext, projectId: string)
 }
 
 export async function getChanges(ctx: TenantContext): Promise<ChangeRecord[]> {
-  void ctx;
-  return storage.getChanges();
+  const ts = getTenantStorage(ctx);
+  return ts.getChanges();
 }
 
 export async function getChange(ctx: TenantContext, id: string): Promise<ChangeRecord | undefined> {
-  void ctx;
-  return storage.getChange(id);
+  const ts = getTenantStorage(ctx);
+  return ts.getChange(id);
 }
 
 export async function createChange(ctx: TenantContext, data: InsertChangeRecord): Promise<ChangeRecord> {
@@ -28,17 +27,17 @@ export async function createChange(ctx: TenantContext, data: InsertChangeRecord)
   const resolved = { ...data };
 
   if (resolved.moduleId) {
-    const mod = await storage.getModule(resolved.moduleId);
+    const mod = await ts.getModule(resolved.moduleId);
     if (!mod) throw new ChangeServiceError("Module not found", 400);
     if (!resolved.modulePath) {
       resolved.modulePath = mod.rootPath;
     }
   } else if (resolved.modulePath) {
-    let mod = await storage.getModuleByProjectAndPath(resolved.projectId, resolved.modulePath);
+    let mod = await ts.getModuleByProjectAndPath(resolved.projectId, resolved.modulePath);
     if (!mod) {
       console.log(`[module-resolve] Auto-creating module for path "${resolved.modulePath}" in project ${resolved.projectId}`);
       const name = resolved.modulePath.split("/").pop() || "default";
-      mod = await storage.createModule({
+      mod = await ts.createModule({
         projectId: resolved.projectId,
         name,
         type: "code",
@@ -51,13 +50,13 @@ export async function createChange(ctx: TenantContext, data: InsertChangeRecord)
   }
 
   if (!resolved.environmentId) {
-    const defaultEnv = await storage.getDefaultEnvironment(resolved.projectId);
+    const defaultEnv = await ts.getDefaultEnvironment(resolved.projectId);
     if (defaultEnv) {
       resolved.environmentId = defaultEnv.id;
     }
   }
 
-  return storage.createChange(resolved);
+  return ts.createChange(resolved);
 }
 
 export async function updateChangeStatus(
@@ -66,8 +65,8 @@ export async function updateChangeStatus(
   status: ChangeRecord["status"],
   branchName?: string
 ): Promise<ChangeRecord | undefined> {
-  void ctx;
-  return storage.updateChangeStatus(id, status, branchName);
+  const ts = getTenantStorage(ctx);
+  return ts.updateChangeStatus(id, status, branchName);
 }
 
 export class ChangeServiceError extends Error {

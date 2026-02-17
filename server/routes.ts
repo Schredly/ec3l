@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertProjectSchema, insertChangeRecordSchema, insertAgentRunSchema, insertModuleOverrideSchema, insertWorkflowDefinitionSchema, insertWorkflowStepSchema } from "@shared/schema";
 import { tenantResolution } from "./middleware/tenant";
+import { getTenantStorage } from "./tenantStorage";
 import { buildModuleExecutionContext } from "./moduleContext";
 import { ModuleBoundaryViolationError } from "./moduleContext";
 import { CapabilityDeniedError } from "./capabilities";
@@ -172,7 +173,7 @@ export async function registerRoutes(
 
     let mod = null;
     if (change.moduleId) {
-      mod = await storage.getModule(change.moduleId);
+      mod = await getTenantStorage(req.tenantContext).getModule(change.moduleId);
     }
 
     const moduleCtx = buildModuleExecutionContext({
@@ -257,7 +258,7 @@ export async function registerRoutes(
 
     let mod = null;
     if (change.moduleId) {
-      mod = await storage.getModule(change.moduleId);
+      mod = await getTenantStorage(req.tenantContext).getModule(change.moduleId);
     }
 
     const moduleCtx = buildModuleExecutionContext({
