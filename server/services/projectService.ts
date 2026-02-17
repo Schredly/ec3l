@@ -1,6 +1,5 @@
 import type { TenantContext } from "../tenant";
 import { getTenantStorage } from "../tenantStorage";
-import { storage } from "../storage";
 import type { Project, InsertProject } from "@shared/schema";
 
 export async function getProjects(ctx: TenantContext): Promise<Project[]> {
@@ -20,10 +19,10 @@ export async function createProject(
   const ts = getTenantStorage(ctx);
   const project = await ts.createProject(input as InsertProject);
 
-  await storage.createModule({ projectId: project.id, name: "default", type: "code", rootPath: "src" });
-  await storage.createEnvironment({ projectId: project.id, name: "dev", isDefault: true });
-  await storage.createEnvironment({ projectId: project.id, name: "test", isDefault: false });
-  await storage.createEnvironment({ projectId: project.id, name: "prod", isDefault: false });
+  await ts.createModule({ projectId: project.id, name: "default", type: "code", rootPath: "src" });
+  await ts.createEnvironment({ projectId: project.id, name: "dev", isDefault: true });
+  await ts.createEnvironment({ projectId: project.id, name: "test", isDefault: false });
+  await ts.createEnvironment({ projectId: project.id, name: "prod", isDefault: false });
 
   return project;
 }

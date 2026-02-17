@@ -1,13 +1,13 @@
 import type { TenantContext } from "../tenant";
-import { storage } from "../storage";
+import { getTenantStorage } from "../tenantStorage";
 import type { Environment } from "@shared/schema";
 
 export async function getEnvironmentsByProject(ctx: TenantContext, projectId: string): Promise<Environment[]> {
-  void ctx;
-  return storage.getEnvironmentsByProject(projectId);
+  const ts = getTenantStorage(ctx);
+  return ts.getEnvironmentsByProject(projectId);
 }
 
 export async function getEnvironment(ctx: TenantContext, id: string): Promise<Environment | undefined> {
-  void ctx;
-  return storage.getEnvironment(id);
+  const ts = getTenantStorage(ctx);
+  return ts.getEnvironment(id);
 }

@@ -1,19 +1,19 @@
 import type { TenantContext } from "../tenant";
 import type { ModuleExecutionContext } from "../moduleContext";
-import { storage } from "../storage";
+import { getTenantStorage } from "../tenantStorage";
 import type { Workspace, ChangeRecord } from "@shared/schema";
 import { getRunnerExecution, buildExecutionRequest } from "../execution";
 
 export async function getWorkspaceByChange(ctx: TenantContext, changeId: string): Promise<Workspace | undefined> {
-  void ctx;
-  return storage.getWorkspaceByChange(changeId);
+  const ts = getTenantStorage(ctx);
+  return ts.getWorkspaceByChange(changeId);
 }
 
 export async function startWorkspace(ctx: TenantContext, change: ChangeRecord, moduleCtx: ModuleExecutionContext): Promise<Workspace | undefined> {
-  void ctx;
+  const ts = getTenantStorage(ctx);
   const runner = getRunnerExecution();
 
-  const workspace = await storage.createWorkspace({
+  const workspace = await ts.createWorkspace({
     changeId: change.id,
     containerId: null,
     previewUrl: null,
@@ -34,14 +34,14 @@ export async function startWorkspace(ctx: TenantContext, change: ChangeRecord, m
   const containerId = result.output.containerId as string | undefined;
   const previewUrl = result.output.previewUrl as string | undefined;
 
-  await storage.updateWorkspaceStatus(workspace.id, "Running", containerId, previewUrl);
+  await ts.updateWorkspaceStatus(workspace.id, "Running", containerId, previewUrl);
   const branchName = `change/${change.id.slice(0, 8)}`;
-  await storage.updateChangeStatus(change.id, "WorkspaceRunning", branchName);
+  await ts.updateChangeStatus(change.id, "WorkspaceRunning", branchName);
 
-  return storage.getWorkspaceByChange(change.id);
+  return ts.getWorkspaceByChange(change.id);
 }
 
 export async function stopWorkspace(ctx: TenantContext, workspaceId: string): Promise<void> {
-  void ctx;
-  await storage.updateWorkspaceStatus(workspaceId, "Stopped");
+  const ts = getTenantStorage(ctx);
+  await ts.updateWorkspaceStatus(workspaceId, "Stopped");
 }

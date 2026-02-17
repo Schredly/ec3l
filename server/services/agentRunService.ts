@@ -2,19 +2,19 @@ import type { TenantContext } from "../tenant";
 import type { ModuleExecutionContext } from "../moduleContext";
 import { ModuleBoundaryViolationError } from "../moduleContext";
 import { CapabilityDeniedError } from "../capabilities";
-import { storage } from "../storage";
+import { getTenantStorage } from "../tenantStorage";
 import { skillRegistry } from "../skills/registry";
 import type { AgentRun, InsertAgentRun, ChangeRecord } from "@shared/schema";
 import { getRunnerExecution, buildExecutionRequest } from "../execution";
 
 export async function getAgentRuns(ctx: TenantContext): Promise<AgentRun[]> {
-  void ctx;
-  return storage.getAgentRuns();
+  const ts = getTenantStorage(ctx);
+  return ts.getAgentRuns();
 }
 
 export async function getAgentRunsByChange(ctx: TenantContext, changeId: string): Promise<AgentRun[]> {
-  void ctx;
-  return storage.getAgentRunsByChange(changeId);
+  const ts = getTenantStorage(ctx);
+  return ts.getAgentRunsByChange(changeId);
 }
 
 export async function createAgentRun(
@@ -23,12 +23,12 @@ export async function createAgentRun(
   change: ChangeRecord,
   moduleCtx: ModuleExecutionContext
 ): Promise<AgentRun> {
-  void ctx;
+  const ts = getTenantStorage(ctx);
   const runner = getRunnerExecution();
   const moduleRootPath = moduleCtx.moduleRootPath || null;
   const moduleId = moduleCtx.moduleId || null;
 
-  let run = await storage.createAgentRun(data);
+  let run = await ts.createAgentRun(data);
 
   const editTarget = change.modulePath || moduleRootPath || "src/index.ts";
   const lintTarget = moduleRootPath || "src";
@@ -65,8 +65,8 @@ export async function createAgentRun(
     if (!taskResult.success) {
       logs.push(`[agent] Boundary check failed for skill "${skill.name}" — ${taskResult.error || "unknown"}`);
       logs.push(`[agent] Execution halted — boundary check failure is terminal`);
-      run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
-      await storage.updateChangeStatus(change.id, "ValidationFailed");
+      run = (await ts.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+      await ts.updateChangeStatus(change.id, "ValidationFailed");
       return run;
     }
 
@@ -96,7 +96,7 @@ export async function createAgentRun(
         logs.push(`[agent] Execution halted — capability denial is terminal`);
         console.error(`[agent-capability-denied] change=${change.id} skill=${skill.name} cap="${err.capability}" module=${moduleId} tenant=${moduleCtx.tenantContext.tenantId}`);
 
-        run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+        run = (await ts.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
         return run;
       }
 
@@ -117,8 +117,8 @@ export async function createAgentRun(
         logs.push(`[agent] Execution halted — module boundary violation is terminal`);
         console.error(`[agent-boundary-violation] change=${change.id} module=${err.moduleId} path="${err.attemptedPath}": ${err.reason}`);
 
-        run = (await storage.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
-        await storage.updateChangeStatus(change.id, "ValidationFailed");
+        run = (await ts.updateAgentRun(run.id, "Failed", JSON.stringify(requestedSkills.map(s => s.name)), JSON.stringify(logs)))!;
+        await ts.updateChangeStatus(change.id, "ValidationFailed");
 
         return run;
       }
@@ -129,10 +129,10 @@ export async function createAgentRun(
   logs.push(`[agent] All skills executed: ${executedSkills.join(", ")}`);
   logs.push(`[agent] Validation passed — marking change as Ready`);
 
-  run = (await storage.updateAgentRun(run.id, "Passed", JSON.stringify(executedSkills), JSON.stringify(logs)))!;
+  run = (await ts.updateAgentRun(run.id, "Passed", JSON.stringify(executedSkills), JSON.stringify(logs)))!;
 
   if (change.status === "WorkspaceRunning") {
-    await storage.updateChangeStatus(change.id, "Ready");
+    await ts.updateChangeStatus(change.id, "Ready");
   }
 
   return run;
