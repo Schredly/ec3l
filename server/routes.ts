@@ -73,7 +73,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/projects", async (req, res) => {
-    const parsed = insertProjectSchema.omit({ tenantId: true }).safeParse(req.body);
+    const parsed = insertProjectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
     const project = await projectService.createProject(req.tenantContext, parsed.data);
@@ -169,7 +169,7 @@ export async function registerRoutes(
   app.post("/api/changes/:id/targets", async (req, res) => {
     try {
       const parsed = insertChangeTargetSchema
-        .omit({ tenantId: true, projectId: true, changeId: true })
+        .omit({ projectId: true, changeId: true })
         .parse(req.body);
       const target = await changeTargetService.createChangeTarget(
         req.tenantContext,
@@ -458,14 +458,14 @@ export async function registerRoutes(
   });
 
   app.post("/api/overrides", async (req, res) => {
-    const parsed = insertModuleOverrideSchema.safeParse({
-      ...req.body,
-      tenantId: req.tenantContext.tenantId,
-    });
+    const parsed = insertModuleOverrideSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
     try {
-      const override = await overrideService.createOverride(req.tenantContext, parsed.data);
+      const override = await overrideService.createOverride(req.tenantContext, {
+        ...parsed.data,
+        tenantId: req.tenantContext.tenantId,
+      });
       res.status(201).json(override);
     } catch (err) {
       if (err instanceof OverridePatchValidationError) {
@@ -575,7 +575,7 @@ export async function registerRoutes(
       if (!projectId) {
         return res.status(400).json({ message: "projectId is required" });
       }
-      const parsed = insertWorkflowDefinitionSchema.omit({ tenantId: true }).parse(data);
+      const parsed = insertWorkflowDefinitionSchema.parse(data);
       const def = await workflowService.createWorkflowDefinition(
         req.tenantContext,
         parsed,
@@ -807,7 +807,7 @@ export async function registerRoutes(
 
   app.post("/api/workflow-triggers", async (req, res) => {
     try {
-      const parsed = insertWorkflowTriggerSchema.omit({ tenantId: true }).parse(req.body);
+      const parsed = insertWorkflowTriggerSchema.parse(req.body);
       const trigger = await triggerService.createTrigger(req.tenantContext, parsed);
       res.status(201).json(trigger);
     } catch (err) {
@@ -961,7 +961,7 @@ export async function registerRoutes(
         const rt = await recordTypeService.createRecordType(req.tenantContext, req.body);
         return res.status(201).json(rt);
       }
-      const parsed = insertRecordTypeSchema.omit({ tenantId: true }).parse(req.body);
+      const parsed = insertRecordTypeSchema.parse(req.body);
       const rt = await formService.createRecordType(req.tenantContext, parsed);
       res.status(201).json(rt);
     } catch (err) {
@@ -1043,7 +1043,7 @@ export async function registerRoutes(
 
   app.post("/api/choice-lists", async (req, res) => {
     try {
-      const parsed = insertChoiceListSchema.omit({ tenantId: true }).parse(req.body);
+      const parsed = insertChoiceListSchema.parse(req.body);
       const cl = await formService.createChoiceList(req.tenantContext, parsed);
       res.status(201).json(cl);
     } catch (err) {
@@ -1101,7 +1101,7 @@ export async function registerRoutes(
 
   app.post("/api/form-definitions", async (req, res) => {
     try {
-      const parsed = insertFormDefinitionSchema.omit({ tenantId: true }).parse(req.body);
+      const parsed = insertFormDefinitionSchema.parse(req.body);
       const fd = await formService.createFormDefinition(req.tenantContext, parsed);
       res.status(201).json(fd);
     } catch (err) {
@@ -1306,7 +1306,7 @@ export async function registerRoutes(
   app.post("/api/rbac/roles", async (req, res) => {
     if (!(await requireRbacAdmin(req, res))) return;
     try {
-      const parsed = insertRbacRoleSchema.omit({ tenantId: true }).parse(req.body);
+      const parsed = insertRbacRoleSchema.parse(req.body);
       const role = await storage.createRbacRole({
         ...parsed,
         tenantId: req.tenantContext.tenantId,
@@ -1412,7 +1412,7 @@ export async function registerRoutes(
   app.post("/api/rbac/policies", async (req, res) => {
     if (!(await requireRbacAdmin(req, res))) return;
     try {
-      const parsed = insertRbacPolicySchema.omit({ tenantId: true }).parse(req.body);
+      const parsed = insertRbacPolicySchema.parse(req.body);
       const role = await storage.getRbacRole(parsed.roleId);
       if (!role || role.tenantId !== req.tenantContext.tenantId) {
         return res.status(400).json({ message: "Role not found or belongs to a different tenant" });

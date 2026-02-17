@@ -31,7 +31,7 @@ import { insertProjectSchema } from "@shared/schema";
 import type { Project } from "@shared/schema";
 import { formatDistanceToNow } from "date-fns";
 
-const formSchema = insertProjectSchema.omit({ tenantId: true }).extend({
+const formSchema = insertProjectSchema.extend({
   name: z.string().min(1, "Name is required"),
   githubRepo: z.string().min(1, "Repository is required"),
 });

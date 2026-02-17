@@ -645,6 +645,7 @@ export const insertTenantSchema = createInsertSchema(tenants).omit({
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
   createdAt: true,
+  tenantId: true,
 });
 
 export const insertModuleSchema = createInsertSchema(modules).omit({
@@ -691,6 +692,7 @@ export const insertInstalledAppSchema = createInsertSchema(installedApps).omit({
   id: true,
   installedAt: true,
   status: true,
+  tenantId: true,
 });
 
 export const insertInstalledModuleSchema = createInsertSchema(installedModules).omit({
@@ -700,6 +702,7 @@ export const insertInstalledModuleSchema = createInsertSchema(installedModules).
 export const insertInstalledAppEventSchema = createInsertSchema(installedAppEvents).omit({
   id: true,
   createdAt: true,
+  tenantId: true,
 });
 
 export const insertModuleOverrideSchema = createInsertSchema(moduleOverrides).omit({
@@ -707,6 +710,7 @@ export const insertModuleOverrideSchema = createInsertSchema(moduleOverrides).om
   createdAt: true,
   status: true,
   changeId: true,
+  tenantId: true,
 });
 
 export const insertWorkflowDefinitionSchema = createInsertSchema(workflowDefinitions).omit({
@@ -714,6 +718,7 @@ export const insertWorkflowDefinitionSchema = createInsertSchema(workflowDefinit
   createdAt: true,
   status: true,
   changeId: true,
+  tenantId: true,
 });
 
 export const insertWorkflowStepSchema = createInsertSchema(workflowSteps).omit({
@@ -728,6 +733,7 @@ export const insertWorkflowExecutionSchema = createInsertSchema(workflowExecutio
   error: true,
   accumulatedInput: true,
   pausedAtStepId: true,
+  tenantId: true,
 });
 
 export const insertWorkflowStepExecutionSchema = createInsertSchema(workflowStepExecutions).omit({
@@ -741,6 +747,7 @@ export const insertWorkflowTriggerSchema = createInsertSchema(workflowTriggers).
   id: true,
   createdAt: true,
   status: true,
+  tenantId: true,
 });
 
 export const insertWorkflowExecutionIntentSchema = createInsertSchema(workflowExecutionIntents).omit({
@@ -750,38 +757,45 @@ export const insertWorkflowExecutionIntentSchema = createInsertSchema(workflowEx
   executionId: true,
   error: true,
   dispatchedAt: true,
+  tenantId: true,
 });
 
 export const insertRecordLockSchema = createInsertSchema(recordLocks).omit({
   id: true,
   createdAt: true,
+  tenantId: true,
 });
 
 export const insertAgentProposalSchema = createInsertSchema(agentProposals).omit({
   id: true,
   createdAt: true,
   status: true,
+  tenantId: true,
 });
 
 export const insertChangeTargetSchema = createInsertSchema(changeTargets).omit({
   id: true,
   createdAt: true,
+  tenantId: true,
 });
 
 export const insertChangePatchOpSchema = createInsertSchema(changePatchOps).omit({
   id: true,
   createdAt: true,
+  tenantId: true,
 });
 
 export const insertRecordTypeSnapshotSchema = createInsertSchema(recordTypeSnapshots).omit({
   id: true,
   createdAt: true,
+  tenantId: true,
 });
 
 export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
   id: true,
   createdAt: true,
   status: true,
+  tenantId: true,
 });
 
 export const insertFieldDefinitionSchema = createInsertSchema(fieldDefinitions).omit({
@@ -792,6 +806,7 @@ export const insertChoiceListSchema = createInsertSchema(choiceLists).omit({
   id: true,
   createdAt: true,
   status: true,
+  tenantId: true,
 });
 
 export const insertChoiceItemSchema = createInsertSchema(choiceItems).omit({
@@ -802,6 +817,7 @@ export const insertFormDefinitionSchema = createInsertSchema(formDefinitions).om
   id: true,
   createdAt: true,
   status: true,
+  tenantId: true,
 });
 
 export const insertFormSectionSchema = createInsertSchema(formSections).omit({
@@ -821,7 +837,7 @@ export const insertFormBehaviorRuleSchema = createInsertSchema(formBehaviorRules
 export type InsertTenant = z.infer<typeof insertTenantSchema>;
 export type Tenant = typeof tenants.$inferSelect;
 
-export type InsertProject = z.infer<typeof insertProjectSchema>;
+export type InsertProject = z.infer<typeof insertProjectSchema> & { tenantId: string };
 export type Project = typeof projects.$inferSelect;
 
 export type InsertModule = z.infer<typeof insertModuleSchema>;
@@ -845,64 +861,64 @@ export type Template = typeof templates.$inferSelect;
 export type InsertTemplateModule = z.infer<typeof insertTemplateModuleSchema>;
 export type TemplateModule = typeof templateModules.$inferSelect;
 
-export type InsertInstalledApp = z.infer<typeof insertInstalledAppSchema>;
+export type InsertInstalledApp = z.infer<typeof insertInstalledAppSchema> & { tenantId: string };
 export type InstalledApp = typeof installedApps.$inferSelect;
 
 export type InsertInstalledModule = z.infer<typeof insertInstalledModuleSchema>;
 export type InstalledModule = typeof installedModules.$inferSelect;
 
-export type InsertInstalledAppEvent = z.infer<typeof insertInstalledAppEventSchema>;
+export type InsertInstalledAppEvent = z.infer<typeof insertInstalledAppEventSchema> & { tenantId: string };
 export type InstalledAppEvent = typeof installedAppEvents.$inferSelect;
 
-export type InsertModuleOverride = z.infer<typeof insertModuleOverrideSchema>;
+export type InsertModuleOverride = z.infer<typeof insertModuleOverrideSchema> & { tenantId: string };
 export type ModuleOverride = typeof moduleOverrides.$inferSelect;
 
-export type InsertWorkflowDefinition = z.infer<typeof insertWorkflowDefinitionSchema>;
+export type InsertWorkflowDefinition = z.infer<typeof insertWorkflowDefinitionSchema> & { tenantId: string };
 export type WorkflowDefinition = typeof workflowDefinitions.$inferSelect;
 
 export type InsertWorkflowStep = z.infer<typeof insertWorkflowStepSchema>;
 export type WorkflowStep = typeof workflowSteps.$inferSelect;
 
-export type InsertWorkflowExecution = z.infer<typeof insertWorkflowExecutionSchema>;
+export type InsertWorkflowExecution = z.infer<typeof insertWorkflowExecutionSchema> & { tenantId: string };
 export type WorkflowExecution = typeof workflowExecutions.$inferSelect;
 
 export type InsertWorkflowStepExecution = z.infer<typeof insertWorkflowStepExecutionSchema>;
 export type WorkflowStepExecution = typeof workflowStepExecutions.$inferSelect;
 
-export type InsertWorkflowTrigger = z.infer<typeof insertWorkflowTriggerSchema>;
+export type InsertWorkflowTrigger = z.infer<typeof insertWorkflowTriggerSchema> & { tenantId: string };
 export type WorkflowTrigger = typeof workflowTriggers.$inferSelect;
 
-export type InsertWorkflowExecutionIntent = z.infer<typeof insertWorkflowExecutionIntentSchema>;
+export type InsertWorkflowExecutionIntent = z.infer<typeof insertWorkflowExecutionIntentSchema> & { tenantId: string };
 export type WorkflowExecutionIntent = typeof workflowExecutionIntents.$inferSelect;
 
-export type InsertAgentProposal = z.infer<typeof insertAgentProposalSchema>;
+export type InsertAgentProposal = z.infer<typeof insertAgentProposalSchema> & { tenantId: string };
 export type AgentProposal = typeof agentProposals.$inferSelect;
 
-export type InsertChangeTarget = z.infer<typeof insertChangeTargetSchema>;
+export type InsertChangeTarget = z.infer<typeof insertChangeTargetSchema> & { tenantId: string };
 export type ChangeTarget = typeof changeTargets.$inferSelect;
 
-export type InsertChangePatchOp = z.infer<typeof insertChangePatchOpSchema>;
+export type InsertChangePatchOp = z.infer<typeof insertChangePatchOpSchema> & { tenantId: string };
 export type ChangePatchOp = typeof changePatchOps.$inferSelect;
 
-export type InsertRecordTypeSnapshot = z.infer<typeof insertRecordTypeSnapshotSchema>;
+export type InsertRecordTypeSnapshot = z.infer<typeof insertRecordTypeSnapshotSchema> & { tenantId: string };
 export type RecordTypeSnapshot = typeof recordTypeSnapshots.$inferSelect;
 
-export type InsertRecordLock = z.infer<typeof insertRecordLockSchema>;
+export type InsertRecordLock = z.infer<typeof insertRecordLockSchema> & { tenantId: string };
 export type RecordLock = typeof recordLocks.$inferSelect;
 
-export type InsertRecordType = z.infer<typeof insertRecordTypeSchema>;
+export type InsertRecordType = z.infer<typeof insertRecordTypeSchema> & { tenantId: string };
 export type RecordType = typeof recordTypes.$inferSelect;
 
 export type InsertFieldDefinition = z.infer<typeof insertFieldDefinitionSchema>;
 export type FieldDefinition = typeof fieldDefinitions.$inferSelect;
 
-export type InsertChoiceList = z.infer<typeof insertChoiceListSchema>;
+export type InsertChoiceList = z.infer<typeof insertChoiceListSchema> & { tenantId: string };
 export type ChoiceList = typeof choiceLists.$inferSelect;
 
 export type InsertChoiceItem = z.infer<typeof insertChoiceItemSchema>;
 export type ChoiceItem = typeof choiceItems.$inferSelect;
 
-export type InsertFormDefinition = z.infer<typeof insertFormDefinitionSchema>;
+export type InsertFormDefinition = z.infer<typeof insertFormDefinitionSchema> & { tenantId: string };
 export type FormDefinition = typeof formDefinitions.$inferSelect;
 
 export type InsertFormSection = z.infer<typeof insertFormSectionSchema>;
@@ -930,19 +946,22 @@ export type ActorIdentity =
 export const insertRbacAuditLogSchema = createInsertSchema(rbacAuditLogs).omit({
   id: true,
   timestamp: true,
+  tenantId: true,
 });
-export type InsertRbacAuditLog = z.infer<typeof insertRbacAuditLogSchema>;
+export type InsertRbacAuditLog = z.infer<typeof insertRbacAuditLogSchema> & { tenantId: string | null };
 
 export const insertRbacRoleSchema = createInsertSchema(rbacRoles).omit({
   id: true,
   status: true,
+  tenantId: true,
 });
-export type InsertRbacRole = z.infer<typeof insertRbacRoleSchema>;
+export type InsertRbacRole = z.infer<typeof insertRbacRoleSchema> & { tenantId: string };
 
 export const insertRbacPolicySchema = createInsertSchema(rbacPolicies).omit({
   id: true,
+  tenantId: true,
 });
-export type InsertRbacPolicy = z.infer<typeof insertRbacPolicySchema>;
+export type InsertRbacPolicy = z.infer<typeof insertRbacPolicySchema> & { tenantId: string };
 
 // --- Execution Telemetry ---
 
@@ -985,9 +1004,10 @@ export const executionTelemetryEvents = pgTable("execution_telemetry_events", {
 export const insertExecutionTelemetryEventSchema = createInsertSchema(executionTelemetryEvents).omit({
   id: true,
   timestamp: true,
+  tenantId: true,
 });
 
-export type InsertExecutionTelemetryEvent = z.infer<typeof insertExecutionTelemetryEventSchema>;
+export type InsertExecutionTelemetryEvent = z.infer<typeof insertExecutionTelemetryEventSchema> & { tenantId: string };
 export type ExecutionTelemetryEvent = typeof executionTelemetryEvents.$inferSelect;
 
 // --- Form Patch Operations (explicit, typed) ---
