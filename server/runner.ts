@@ -1,7 +1,5 @@
 export {
   createRunnerService,
-  enforceModuleBoundary,
-  ModuleBoundaryViolationError,
 } from "../runner/service";
 
 export type {
@@ -9,3 +7,6 @@ export type {
   RunnerInstruction,
   RunnerResult,
 } from "../runner/service";
+
+export { validateModuleBoundaryPath } from "../runner/boundaryGuard";
+export { ModuleBoundaryEscapeError } from "../runner/boundaryErrors";

@@ -279,3 +279,31 @@ describe("Module Boundary Escape Attempts — validateModuleBoundaryPath", () =>
     });
   });
 });
+
+describe("Boundary guard — required acceptance criteria", () => {
+  it("cannot access ../ outside module rootPath", () => {
+    expect(() =>
+      validateModuleBoundaryPath("mod-001", "src/components", "src/components/../../etc/passwd")
+    ).toThrow(ModuleBoundaryEscapeError);
+  });
+
+  it("cannot write without FS_WRITE capability", () => {
+    const mc = makeModuleContext({ capabilities: ["fs:read", "cmd:run"] });
+    const req = makeRequest({
+      moduleExecutionContext: mc,
+      capabilities: ["fs:write"],
+    });
+    expect(() => validateRequestAtBoundary(req)).toThrow(CapabilityNotGrantedError);
+    expect(() => validateRequestAtBoundary(req)).toThrow(/fs:write/);
+  });
+
+  it("cannot run cmd without CMD_RUN capability", () => {
+    const mc = makeModuleContext({ capabilities: ["fs:read"] });
+    const req = makeRequest({
+      moduleExecutionContext: mc,
+      capabilities: ["cmd:run"],
+    });
+    expect(() => validateRequestAtBoundary(req)).toThrow(CapabilityNotGrantedError);
+    expect(() => validateRequestAtBoundary(req)).toThrow(/cmd:run/);
+  });
+});

@@ -1,27 +1,6 @@
-import type { TenantContext, ModuleExecutionContext, Capability } from "@shared/executionTypes";
+import type { ModuleExecutionContext, ExecutionAction, ExecutionRequest, ExecutionResult } from "@shared/executionTypes";
 
-export type ExecutionAction =
-  | "workflow_step"
-  | "agent_task"
-  | "agent_action"
-  | "workspace_start"
-  | "workspace_stop"
-  | "skill_invoke";
-
-export type ExecutionRequest = {
-  tenantContext: TenantContext;
-  moduleExecutionContext: ModuleExecutionContext;
-  requestedAction: ExecutionAction;
-  capabilities: Capability[];
-  inputPayload: Record<string, unknown>;
-};
-
-export type ExecutionResult = {
-  success: boolean;
-  output: Record<string, unknown>;
-  logs: string[];
-  error?: string;
-};
+export type { ExecutionAction, ExecutionRequest, ExecutionResult } from "@shared/executionTypes";
 
 export interface RunnerExecution {
   executeWorkflowStep(request: ExecutionRequest): Promise<ExecutionResult>;

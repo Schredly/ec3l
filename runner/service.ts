@@ -1,20 +1,7 @@
 import { randomBytes } from "crypto";
-import path from "path";
 import type { ModuleExecutionContext } from "@shared/executionTypes";
-
-export class ModuleBoundaryViolationError extends Error {
-  public readonly moduleId: string;
-  public readonly attemptedPath: string;
-  public readonly reason: string;
-
-  constructor(opts: { moduleId: string; attemptedPath: string; reason: string }) {
-    super(`Module boundary violation: ${opts.reason}`);
-    this.name = "ModuleBoundaryViolationError";
-    this.moduleId = opts.moduleId;
-    this.attemptedPath = opts.attemptedPath;
-    this.reason = opts.reason;
-  }
-}
+import { validateModuleBoundaryPath } from "./boundaryGuard";
+import { ModuleBoundaryEscapeError } from "./boundaryErrors";
 
 export interface RunnerInstruction {
   workspaceId: string;
@@ -30,41 +17,6 @@ export interface RunnerResult {
   failureReason?: string;
 }
 
-export function enforceModuleBoundary(moduleCtx: ModuleExecutionContext, requestedPath: string): void {
-  const moduleRootPath = moduleCtx.moduleRootPath;
-  const normalized = path.posix.normalize(requestedPath);
-
-  if (path.posix.isAbsolute(normalized)) {
-    throw new ModuleBoundaryViolationError({
-      moduleId: moduleCtx.moduleId,
-      attemptedPath: requestedPath,
-      reason: `Absolute path "${requestedPath}" is not allowed — paths must be relative to module root.`,
-    });
-  }
-
-  if (normalized.startsWith("..") || normalized.includes("/../") || normalized === "..") {
-    throw new ModuleBoundaryViolationError({
-      moduleId: moduleCtx.moduleId,
-      attemptedPath: requestedPath,
-      reason: `Path "${requestedPath}" contains path traversal — denied.`,
-    });
-  }
-
-  const normalizedRoot = path.posix.normalize(moduleRootPath).replace(/^\/+/, "").replace(/\/+$/, "");
-  const normalizedReq = normalized.replace(/^\/+/, "").replace(/\/+$/, "");
-
-  const resolved = path.posix.resolve(normalizedReq);
-  const resolvedRoot = path.posix.resolve(normalizedRoot);
-
-  if (!resolved.startsWith(resolvedRoot + "/") && resolved !== resolvedRoot) {
-    throw new ModuleBoundaryViolationError({
-      moduleId: moduleCtx.moduleId,
-      attemptedPath: requestedPath,
-      reason: `Path "${requestedPath}" resolves outside module scope "${moduleRootPath}" — denied.`,
-    });
-  }
-}
-
 export interface IRunnerService {
   startWorkspace(workspaceId: string, moduleCtx: ModuleExecutionContext): Promise<RunnerResult>;
   runCommand(instruction: RunnerInstruction, moduleCtx: ModuleExecutionContext): Promise<RunnerResult>;
@@ -76,10 +28,10 @@ export interface IRunnerService {
 class SimulatedRunnerService implements IRunnerService {
   validateFilePath(filePath: string, moduleCtx: ModuleExecutionContext): { valid: boolean; reason?: string } {
     try {
-      enforceModuleBoundary(moduleCtx, filePath);
+      validateModuleBoundaryPath(moduleCtx.moduleId, moduleCtx.moduleRootPath, filePath);
       return { valid: true };
     } catch (err) {
-      if (err instanceof ModuleBoundaryViolationError) {
+      if (err instanceof ModuleBoundaryEscapeError) {
         return { valid: false, reason: err.reason };
       }
       throw err;
@@ -103,12 +55,12 @@ class SimulatedRunnerService implements IRunnerService {
 
   async runCommand(instruction: RunnerInstruction, moduleCtx: ModuleExecutionContext): Promise<RunnerResult> {
     if (moduleCtx.moduleRootPath && instruction.targetPath) {
-      enforceModuleBoundary(moduleCtx, instruction.targetPath);
+      validateModuleBoundaryPath(moduleCtx.moduleId, moduleCtx.moduleRootPath, instruction.targetPath);
     } else if (moduleCtx.moduleRootPath) {
       const commandParts = instruction.command.split(" ");
       const targetPath = commandParts[commandParts.length - 1];
       if (targetPath && targetPath.includes("/")) {
-        enforceModuleBoundary(moduleCtx, targetPath);
+        validateModuleBoundaryPath(moduleCtx.moduleId, moduleCtx.moduleRootPath, targetPath);
       }
     }
 

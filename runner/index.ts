@@ -26,9 +26,8 @@ export {
 export { configureRunnerTelemetry, generateExecutionId, emitExecutionStarted, emitExecutionCompleted, emitExecutionFailed } from "./telemetry";
 export type { RunnerTelemetrySink, TelemetryEventData } from "./telemetry";
 
-export { createRunnerService, enforceModuleBoundary } from "./service";
+export { createRunnerService } from "./service";
 export type { IRunnerService, RunnerInstruction, RunnerResult } from "./service";
-export { ModuleBoundaryViolationError } from "./service";
 
 export { createRunnerHttpServer } from "./server";
 

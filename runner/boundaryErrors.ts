@@ -47,6 +47,7 @@ export class ModuleBoundaryEscapeError extends RunnerBoundaryError {
   public readonly moduleId: string;
   public readonly moduleRootPath: string;
   public readonly attemptedPath: string;
+  public readonly reason: string;
 
   constructor(opts: { moduleId: string; moduleRootPath: string; attemptedPath: string; reason: string }) {
     super(
@@ -57,6 +58,7 @@ export class ModuleBoundaryEscapeError extends RunnerBoundaryError {
     this.moduleId = opts.moduleId;
     this.moduleRootPath = opts.moduleRootPath;
     this.attemptedPath = opts.attemptedPath;
+    this.reason = opts.reason;
   }
 }
 
