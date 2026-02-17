@@ -62,6 +62,10 @@ const mockTenantStorage = {
   // Change Patch Ops
   createChangePatchOp: vi.fn(),
   getChangePatchOpsByChange: vi.fn(),
+  // Record Types
+  createRecordType: vi.fn(),
+  getRecordTypeByKey: vi.fn(),
+  listRecordTypes: vi.fn(),
 };
 
 vi.mock("../../tenantStorage", () => ({

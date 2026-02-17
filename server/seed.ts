@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "./db";
-import { tenants, projects, modules, changeRecords, workspaces, agentRuns, environments, templates, templateModules } from "@shared/schema";
+import { tenants, projects, modules, changeRecords, workspaces, agentRuns, environments, templates, templateModules, recordTypes } from "@shared/schema";
 import { log } from "./index";
 
 async function ensureDefaultTenant() {
@@ -18,6 +18,7 @@ async function ensureDefaultTenant() {
 export async function seedDatabase() {
   await ensureDefaultTenant();
   await seedTemplates();
+  await seedRecordTypes();
 
   const existingProjects = await db.select().from(projects);
   if (existingProjects.length > 0) {
@@ -248,4 +249,59 @@ async function seedTemplates() {
   ]);
 
   log("Templates seeded successfully");
+}
+
+async function seedRecordTypes() {
+  const [defaultTenant] = await db.select().from(tenants).where(eq(tenants.slug, "default"));
+  if (!defaultTenant) return;
+
+  const [defaultProject] = await db.select().from(projects).where(eq(projects.tenantId, defaultTenant.id));
+  if (!defaultProject) return;
+
+  const [existingTask] = await db
+    .select()
+    .from(recordTypes)
+    .where(and(eq(recordTypes.tenantId, defaultTenant.id), eq(recordTypes.key, "task")));
+  if (existingTask) return;
+
+  log("Seeding record types...");
+
+  await db.insert(recordTypes).values({
+    tenantId: defaultTenant.id,
+    projectId: defaultProject.id,
+    name: "Task",
+    key: "task",
+    description: "A unit of work that can be assigned, tracked, and completed.",
+    schema: {
+      fields: [
+        { name: "title", type: "string", required: true },
+        { name: "description", type: "text", required: false },
+        { name: "status", type: "choice", required: true, options: ["open", "in_progress", "done"] },
+        { name: "assignee", type: "string", required: false },
+        { name: "priority", type: "choice", required: false, options: ["low", "medium", "high", "critical"] },
+        { name: "dueDate", type: "date", required: false },
+      ],
+    },
+    status: "active",
+  });
+
+  await db.insert(recordTypes).values({
+    tenantId: defaultTenant.id,
+    projectId: defaultProject.id,
+    name: "Incident",
+    key: "incident",
+    baseType: "task",
+    description: "An unplanned interruption or reduction in quality of a service. Inherits from task.",
+    schema: {
+      fields: [
+        { name: "severity", type: "choice", required: true, options: ["sev1", "sev2", "sev3", "sev4"] },
+        { name: "impactedService", type: "string", required: true },
+        { name: "reportedBy", type: "string", required: false },
+        { name: "resolvedAt", type: "datetime", required: false },
+      ],
+    },
+    status: "active",
+  });
+
+  log("Record types seeded successfully");
 }

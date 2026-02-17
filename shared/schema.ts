@@ -423,13 +423,18 @@ export const workflowExecutionIntents = pgTable("workflow_execution_intents", {
 export const recordTypes = pgTable("record_types", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").references(() => projects.id),
   name: text("name").notNull(),
+  key: text("key"),
   description: text("description"),
+  baseType: text("base_type"),
+  schema: jsonb("schema"),
   version: integer("version").notNull().default(1),
   status: recordTypeStatusEnum("status").notNull().default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   unique("uq_record_types_tenant_name").on(table.tenantId, table.name),
+  unique("uq_record_types_tenant_project_key").on(table.tenantId, table.projectId, table.key),
 ]);
 
 // Record Locks — metadata-level lock for records marked readOnly by workflow steps

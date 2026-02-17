@@ -40,6 +40,8 @@ import * as agentProposalService from "./services/agentProposalService";
 import { AgentProposalError } from "./services/agentProposalService";
 import * as changeTargetService from "./services/changeTargetService";
 import { ChangeTargetServiceError } from "./services/changeTargetService";
+import * as recordTypeService from "./services/recordTypeService";
+import { RecordTypeServiceError } from "./services/recordTypeService";
 import * as patchOpService from "./services/patchOpService";
 import { PatchOpServiceError } from "./services/patchOpService";
 import { insertChangeTargetSchema } from "@shared/schema";
@@ -924,10 +926,21 @@ export async function registerRoutes(
   // --- Record Types ---
   app.get("/api/record-types", async (req, res) => {
     try {
-      const types = await formService.getRecordTypesByTenant(req.tenantContext);
+      const types = await recordTypeService.listRecordTypes(req.tenantContext);
       res.json(types);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/record-types/by-key/:key", async (req, res) => {
+    try {
+      const rt = await recordTypeService.getRecordType(req.tenantContext, req.params.key);
+      if (!rt) return res.status(404).json({ message: "Record type not found" });
+      res.json(rt);
+    } catch (err) {
+      if (err instanceof RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -945,11 +958,19 @@ export async function registerRoutes(
 
   app.post("/api/record-types", async (req, res) => {
     try {
+      if (req.body.key && req.body.projectId) {
+        const rt = await recordTypeService.createRecordType(req.tenantContext, req.body);
+        return res.status(201).json(rt);
+      }
       const parsed = insertRecordTypeSchema.omit({ tenantId: true }).parse(req.body);
       const rt = await formService.createRecordType(req.tenantContext, parsed);
       res.status(201).json(rt);
     } catch (err) {
+      if (err instanceof RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
       if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof Error && err.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid record type data", errors: err });
+      }
       throw err;
     }
   });

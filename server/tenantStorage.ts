@@ -44,6 +44,9 @@ import {
   changePatchOps,
   type ChangePatchOp,
   type InsertChangePatchOp,
+  recordTypes,
+  type RecordType,
+  type InsertRecordType,
 } from "@shared/schema";
 import type { TenantContext } from "./tenant";
 
@@ -612,6 +615,37 @@ export function getTenantStorage(ctx: TenantContext) {
           ),
         )
         .orderBy(desc(changePatchOps.createdAt));
+    },
+
+    // --- Record Types (tenant-scoped) ---
+
+    async createRecordType(data: InsertRecordType): Promise<RecordType> {
+      const [rt] = await db
+        .insert(recordTypes)
+        .values({ ...data, tenantId })
+        .returning();
+      return rt;
+    },
+
+    async getRecordTypeByKey(key: string): Promise<RecordType | undefined> {
+      const [rt] = await db
+        .select()
+        .from(recordTypes)
+        .where(
+          and(
+            eq(recordTypes.tenantId, tenantId),
+            eq(recordTypes.key, key),
+          ),
+        );
+      return rt;
+    },
+
+    async listRecordTypes(): Promise<RecordType[]> {
+      return db
+        .select()
+        .from(recordTypes)
+        .where(eq(recordTypes.tenantId, tenantId))
+        .orderBy(desc(recordTypes.createdAt));
     },
   };
 }
