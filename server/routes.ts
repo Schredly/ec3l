@@ -73,11 +73,10 @@ export async function registerRoutes(
   });
 
   app.post("/api/projects", async (req, res) => {
-    const parsed = insertProjectSchema.safeParse(req.body);
+    const parsed = insertProjectSchema.omit({ tenantId: true }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
-    const { tenantId: _ignored, ...rest } = parsed.data;
-    const project = await projectService.createProject(req.tenantContext, rest);
+    const project = await projectService.createProject(req.tenantContext, parsed.data);
     res.status(201).json(project);
   });
 
