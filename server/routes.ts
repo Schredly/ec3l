@@ -45,6 +45,7 @@ import { RecordTypeServiceError } from "./services/recordTypeService";
 import * as patchOpService from "./services/patchOpService";
 import { PatchOpServiceError } from "./services/patchOpService";
 import { insertChangeTargetSchema } from "@shared/schema";
+import { executePatchOps, PatchOpExecutionError } from "./executors/patchOpExecutor";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -253,6 +254,28 @@ export async function registerRoutes(
       res.json(ops);
     } catch (err) {
       if (err instanceof PatchOpServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // Execute patch operations for a change
+  app.post("/api/changes/:id/execute", async (req, res) => {
+    try {
+      const change = await changeService.getChange(req.tenantContext, req.params.id);
+      if (!change) return res.status(404).json({ message: "Change not found" });
+
+      const result = await executePatchOps(req.tenantContext, req.params.id);
+      if (!result.success) {
+        return res.status(422).json({ message: result.error, ...result });
+      }
+      res.json(result);
+    } catch (err) {
+      if (err instanceof PatchOpExecutionError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ChangeServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
