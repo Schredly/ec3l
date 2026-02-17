@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
 
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set");
+  throw new Error("DATABASE_URL must be set at process startup");
 }
 
 export const pool = new pg.Pool({
