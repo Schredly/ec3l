@@ -11,14 +11,14 @@ export class PatchOpExecutionError extends Error {
   }
 }
 
-interface FieldDefinition {
+export interface FieldDefinition {
   name: string;
   type: string;
   required?: boolean;
   [key: string]: unknown;
 }
 
-interface RecordTypeSchema {
+export interface RecordTypeSchema {
   fields: FieldDefinition[];
   [key: string]: unknown;
 }
@@ -29,12 +29,24 @@ interface SetFieldPayload {
   definition: { type: string; [key: string]: unknown };
 }
 
-interface AppliedOp {
-  patchOpId: string;
-  recordTypeId: string;
-  recordTypeKey: string;
-  previousSchema: unknown;
+interface AddFieldPayload {
+  recordType: string;
+  field: string;
+  definition: { type: string; [key: string]: unknown };
 }
+
+interface RemoveFieldPayload {
+  recordType: string;
+  field: string;
+}
+
+interface RenameFieldPayload {
+  recordType: string;
+  oldName: string;
+  newName: string;
+}
+
+const RECORD_TYPE_OPS = ["set_field", "add_field", "remove_field", "rename_field"];
 
 function logExec(changeId: string, message: string): void {
   console.log(`[patch-op-executor] change=${changeId} ${message}`);
@@ -76,109 +88,119 @@ async function ensureSnapshot(
   snapshotted.add(recordTypeKey);
 }
 
-async function executeSetField(
-  ts: ReturnType<typeof getTenantStorage>,
-  op: ChangePatchOp,
-  changeId: string,
-  snapshotted: Set<string>,
-): Promise<AppliedOp> {
-  const payload = op.payload as unknown as SetFieldPayload;
+// --- Pure transform functions ---
 
-  const rt = await ts.getRecordTypeByKey(payload.recordType);
-  if (!rt) {
-    throw new PatchOpExecutionError(
-      `Record type "${payload.recordType}" not found`,
-      404,
-    );
+function normalizeSchema(raw: unknown): RecordTypeSchema {
+  if (raw && typeof raw === "object") {
+    const schema = { ...(raw as object) } as RecordTypeSchema;
+    if (!Array.isArray(schema.fields)) schema.fields = [];
+    return schema;
   }
+  return { fields: [] };
+}
 
-  const previousSchema = rt.schema ?? { fields: [] };
-
-  // Snapshot once per recordType per change
-  await ensureSnapshot(
-    ts,
-    changeId,
-    payload.recordType,
-    rt.projectId!,
-    previousSchema,
-    snapshotted,
-  );
-
-  const schema = (
-    rt.schema && typeof rt.schema === "object" ? { ...rt.schema as object } : { fields: [] }
-  ) as RecordTypeSchema;
-
-  if (!Array.isArray(schema.fields)) {
-    schema.fields = [];
-  }
-
-  // Protect required baseType fields from being removed or having required=false
-  if (rt.baseType) {
-    const requiredBaseFields = await resolveBaseTypeFields(ts, rt.baseType);
-    const baseFieldNames = new Set(requiredBaseFields.map((f) => f.name));
-    if (baseFieldNames.has(payload.field)) {
-      const def = payload.definition;
-      if (def.required === false) {
-        throw new PatchOpExecutionError(
-          `Cannot weaken required baseType field "${payload.field}" inherited from "${rt.baseType}"`,
-          400,
-        );
-      }
+export function applySetField(
+  schema: RecordTypeSchema,
+  payload: SetFieldPayload,
+  protectedFields: Set<string>,
+): RecordTypeSchema {
+  if (protectedFields.has(payload.field)) {
+    if (payload.definition.required === false) {
+      throw new PatchOpExecutionError(
+        `Cannot weaken required baseType field "${payload.field}"`,
+      );
     }
   }
 
-  const existingIndex = schema.fields.findIndex(
-    (f) => f.name === payload.field,
-  );
+  const fields = [...schema.fields];
+  const existingIndex = fields.findIndex((f) => f.name === payload.field);
 
   if (existingIndex >= 0) {
-    schema.fields[existingIndex] = {
-      name: payload.field,
-      ...payload.definition,
-    };
+    fields[existingIndex] = { name: payload.field, ...payload.definition };
   } else {
-    schema.fields.push({
-      name: payload.field,
-      ...payload.definition,
-    });
+    fields.push({ name: payload.field, ...payload.definition });
   }
 
-  const updated = await ts.updateRecordTypeSchema(rt.id, schema);
-  if (!updated) {
-    throw new PatchOpExecutionError(
-      `Failed to update record type "${payload.recordType}"`,
-      500,
-    );
+  return { ...schema, fields };
+}
+
+export function applyAddField(
+  schema: RecordTypeSchema,
+  payload: AddFieldPayload,
+): RecordTypeSchema {
+  const exists = schema.fields.some((f) => f.name === payload.field);
+  if (exists) {
+    throw new PatchOpExecutionError(`Field already exists: "${payload.field}"`);
   }
-
-  await ts.updateChangePatchOpSnapshot(op.id, previousSchema);
-
-  logExec(changeId, `applied set_field "${payload.field}" on "${payload.recordType}" (op=${op.id})`);
 
   return {
-    patchOpId: op.id,
-    recordTypeId: rt.id,
-    recordTypeKey: payload.recordType,
-    previousSchema,
+    ...schema,
+    fields: [...schema.fields, { name: payload.field, ...payload.definition }],
   };
 }
 
-async function rollback(
-  ts: ReturnType<typeof getTenantStorage>,
-  applied: AppliedOp[],
-  changeId: string,
-): Promise<void> {
-  for (let i = applied.length - 1; i >= 0; i--) {
-    const { recordTypeId, recordTypeKey, previousSchema } = applied[i];
-    await ts.updateRecordTypeSchema(recordTypeId, previousSchema);
-    logExec(changeId, `rollback "${recordTypeKey}" (rt=${recordTypeId})`);
+export function applyRemoveField(
+  schema: RecordTypeSchema,
+  payload: RemoveFieldPayload,
+  protectedFields: Set<string>,
+): RecordTypeSchema {
+  if (protectedFields.has(payload.field)) {
+    throw new PatchOpExecutionError(
+      `Cannot remove required baseType field "${payload.field}"`,
+    );
   }
+
+  const exists = schema.fields.some((f) => f.name === payload.field);
+  if (!exists) {
+    throw new PatchOpExecutionError(`Field does not exist: "${payload.field}"`);
+  }
+
+  return {
+    ...schema,
+    fields: schema.fields.filter((f) => f.name !== payload.field),
+  };
 }
+
+export function applyRenameField(
+  schema: RecordTypeSchema,
+  payload: RenameFieldPayload,
+  protectedFields: Set<string>,
+): RecordTypeSchema {
+  if (protectedFields.has(payload.oldName)) {
+    throw new PatchOpExecutionError(
+      `Cannot rename required baseType field "${payload.oldName}"`,
+    );
+  }
+
+  const oldIndex = schema.fields.findIndex((f) => f.name === payload.oldName);
+  if (oldIndex < 0) {
+    throw new PatchOpExecutionError(`Field does not exist: "${payload.oldName}"`);
+  }
+
+  const newExists = schema.fields.some((f) => f.name === payload.newName);
+  if (newExists) {
+    throw new PatchOpExecutionError(`Field already exists: "${payload.newName}"`);
+  }
+
+  const fields = [...schema.fields];
+  fields[oldIndex] = { ...fields[oldIndex], name: payload.newName };
+
+  return { ...schema, fields };
+}
+
+// --- Execution ---
 
 export interface ExecutionResult {
   success: boolean;
   appliedCount: number;
   error?: string;
+}
+
+interface CachedRecordType {
+  rt: { id: string; projectId: string; baseType: string | null; [key: string]: unknown };
+  originalSchema: RecordTypeSchema;
+  currentSchema: RecordTypeSchema;
+  protectedFields: Set<string>;
 }
 
 export async function executeChange(
@@ -209,30 +231,99 @@ export async function executeChange(
 
   logExec(changeId, `executing ${ops.length} patch op(s)`);
 
-  // Track which recordType keys have been snapshotted for dedup
-  const snapshotted = new Set<string>();
-  const applied: AppliedOp[] = [];
+  // --- Phase 1: Load ---
+  // Cache record types by key; validates targets upfront
+  const cache = new Map<string, CachedRecordType>();
 
   for (const op of ops) {
-    try {
-      if (op.opType === "set_field") {
-        // Verify target is record_type
-        const target: ChangeTarget | undefined = await ts.getChangeTarget(op.targetId);
-        if (!target || target.type !== "record_type") {
-          throw new PatchOpExecutionError(
-            `Patch op ${op.id} target must be type "record_type"`,
-            400,
-          );
-        }
-        const result = await executeSetField(ts, op, changeId, snapshotted);
-        applied.push(result);
+    if (!RECORD_TYPE_OPS.includes(op.opType)) continue;
+
+    const target: ChangeTarget | undefined = await ts.getChangeTarget(op.targetId);
+    if (!target || target.type !== "record_type") {
+      throw new PatchOpExecutionError(
+        `Patch op ${op.id} target must be type "record_type"`,
+        400,
+      );
+    }
+
+    const payload = op.payload as Record<string, unknown>;
+    const recordTypeKey = (payload.recordType as string) || "";
+
+    if (!cache.has(recordTypeKey)) {
+      const rt = await ts.getRecordTypeByKey(recordTypeKey);
+      if (!rt) {
+        return {
+          success: false,
+          appliedCount: 0,
+          error: `Patch op ${op.id} (${op.opType}) failed: Record type "${recordTypeKey}" not found`,
+        };
       }
-      // Other opTypes can be added here in the future
+
+      const schema = normalizeSchema(rt.schema);
+      const baseFields = await resolveBaseTypeFields(ts, rt.baseType);
+      const protectedFields = new Set(baseFields.map((f) => f.name));
+
+      cache.set(recordTypeKey, {
+        rt: rt as CachedRecordType["rt"],
+        originalSchema: schema,
+        currentSchema: schema,
+        protectedFields,
+      });
+    }
+  }
+
+  // --- Phase 2: Transform (in memory) ---
+  // Track per-op previous schemas for snapshot stamping
+  const opSnapshots: Array<{ op: ChangePatchOp; previousSchema: RecordTypeSchema; recordTypeKey: string }> = [];
+
+  for (const op of ops) {
+    if (!RECORD_TYPE_OPS.includes(op.opType)) continue;
+
+    const payload = op.payload as Record<string, unknown>;
+    const recordTypeKey = (payload.recordType as string) || "";
+    const entry = cache.get(recordTypeKey)!;
+    const previousSchema = entry.currentSchema;
+
+    try {
+      let nextSchema: RecordTypeSchema;
+
+      switch (op.opType) {
+        case "set_field":
+          nextSchema = applySetField(
+            entry.currentSchema,
+            payload as unknown as SetFieldPayload,
+            entry.protectedFields,
+          );
+          break;
+        case "add_field":
+          nextSchema = applyAddField(
+            entry.currentSchema,
+            payload as unknown as AddFieldPayload,
+          );
+          break;
+        case "remove_field":
+          nextSchema = applyRemoveField(
+            entry.currentSchema,
+            payload as unknown as RemoveFieldPayload,
+            entry.protectedFields,
+          );
+          break;
+        case "rename_field":
+          nextSchema = applyRenameField(
+            entry.currentSchema,
+            payload as unknown as RenameFieldPayload,
+            entry.protectedFields,
+          );
+          break;
+        default:
+          throw new PatchOpExecutionError(`Unknown record type op: "${op.opType}"`);
+      }
+
+      entry.currentSchema = nextSchema;
+      opSnapshots.push({ op, previousSchema, recordTypeKey });
     } catch (err) {
       logExec(changeId, `FAILED at op ${op.id} (${op.opType}): ${err instanceof Error ? err.message : "unknown"}`);
-      await rollback(ts, applied, changeId);
-      const message =
-        err instanceof Error ? err.message : "Unknown execution error";
+      const message = err instanceof Error ? err.message : "Unknown execution error";
       return {
         success: false,
         appliedCount: 0,
@@ -241,8 +332,40 @@ export async function executeChange(
     }
   }
 
-  logExec(changeId, `completed — ${applied.length} op(s) applied`);
-  return { success: true, appliedCount: applied.length };
+  // --- Phase 3: Persist ---
+  const snapshotted = new Set<string>();
+
+  const cacheKeys = Array.from(cache.keys());
+  for (const recordTypeKey of cacheKeys) {
+    const entry = cache.get(recordTypeKey)!;
+    // Only persist if schema actually changed
+    if (entry.currentSchema === entry.originalSchema) continue;
+
+    await ensureSnapshot(
+      ts,
+      changeId,
+      recordTypeKey,
+      entry.rt.projectId!,
+      entry.originalSchema,
+      snapshotted,
+    );
+
+    const updated = await ts.updateRecordTypeSchema(entry.rt.id, entry.currentSchema);
+    if (!updated) {
+      throw new PatchOpExecutionError(
+        `Failed to update record type "${recordTypeKey}"`,
+        500,
+      );
+    }
+  }
+
+  for (const { op, previousSchema, recordTypeKey } of opSnapshots) {
+    await ts.updateChangePatchOpSnapshot(op.id, previousSchema);
+    logExec(changeId, `applied ${op.opType} on "${recordTypeKey}" (op=${op.id})`);
+  }
+
+  logExec(changeId, `completed — ${opSnapshots.length} op(s) applied`);
+  return { success: true, appliedCount: opSnapshots.length };
 }
 
 // Keep backward-compatible alias
