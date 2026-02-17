@@ -1,4 +1,3 @@
-import type { Request } from "express";
 export type { TenantContext } from "@shared/executionTypes";
 import type { TenantContext } from "@shared/executionTypes";
 
@@ -9,12 +8,14 @@ export class TenantResolutionError extends Error {
   }
 }
 
-export function resolveTenantContext(req: Request): TenantContext {
-  const tenantId = req.headers["x-tenant-id"] as string | undefined;
-  if (!tenantId) {
-    throw new TenantResolutionError();
-  }
-  const userId = req.headers["x-user-id"] as string | undefined;
-  const agentId = req.headers["x-agent-id"] as string | undefined;
-  return { tenantId, userId, agentId, source: "header" };
+/**
+ * Build a TenantContext for non-HTTP callers (e.g. background jobs, tests).
+ * For HTTP requests, use the tenantResolution middleware instead — it
+ * resolves the x-tenant-id slug to the tenant UUID automatically.
+ */
+export function buildTenantContext(
+  tenantId: string,
+  opts: { userId?: string; agentId?: string } = {},
+): TenantContext {
+  return { tenantId, userId: opts.userId, agentId: opts.agentId, source: "system" };
 }
