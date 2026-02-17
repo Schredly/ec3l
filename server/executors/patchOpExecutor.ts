@@ -1,6 +1,6 @@
 import type { TenantContext } from "../tenant";
 import { getTenantStorage } from "../tenantStorage";
-import type { ChangePatchOp } from "@shared/schema";
+import type { ChangePatchOp, ChangeTarget } from "@shared/schema";
 
 export class PatchOpExecutionError extends Error {
   public readonly statusCode: number;
@@ -14,6 +14,7 @@ export class PatchOpExecutionError extends Error {
 interface FieldDefinition {
   name: string;
   type: string;
+  required?: boolean;
   [key: string]: unknown;
 }
 
@@ -31,12 +32,55 @@ interface SetFieldPayload {
 interface AppliedOp {
   patchOpId: string;
   recordTypeId: string;
+  recordTypeKey: string;
   previousSchema: unknown;
+}
+
+function logExec(changeId: string, message: string): void {
+  console.log(`[patch-op-executor] change=${changeId} ${message}`);
+}
+
+async function resolveBaseTypeFields(
+  ts: ReturnType<typeof getTenantStorage>,
+  baseTypeKey: string | null,
+): Promise<FieldDefinition[]> {
+  if (!baseTypeKey) return [];
+  const baseRt = await ts.getRecordTypeByKey(baseTypeKey);
+  if (!baseRt) return [];
+  const schema = baseRt.schema as RecordTypeSchema | null;
+  if (!schema || !Array.isArray(schema.fields)) return [];
+  return schema.fields.filter((f) => f.required === true);
+}
+
+async function ensureSnapshot(
+  ts: ReturnType<typeof getTenantStorage>,
+  changeId: string,
+  recordTypeKey: string,
+  projectId: string,
+  schema: unknown,
+  snapshotted: Set<string>,
+): Promise<void> {
+  if (snapshotted.has(recordTypeKey)) return;
+  const existing = await ts.getSnapshotByChangeAndKey(changeId, recordTypeKey);
+  if (existing) {
+    snapshotted.add(recordTypeKey);
+    return;
+  }
+  await ts.createRecordTypeSnapshot({
+    tenantId: "", // overridden by storage
+    projectId,
+    recordTypeKey,
+    changeId,
+    schema: schema ?? { fields: [] },
+  });
+  snapshotted.add(recordTypeKey);
 }
 
 async function executeSetField(
   ts: ReturnType<typeof getTenantStorage>,
   op: ChangePatchOp,
+  changeId: string,
+  snapshotted: Set<string>,
 ): Promise<AppliedOp> {
   const payload = op.payload as unknown as SetFieldPayload;
 
@@ -49,12 +93,38 @@ async function executeSetField(
   }
 
   const previousSchema = rt.schema ?? { fields: [] };
+
+  // Snapshot once per recordType per change
+  await ensureSnapshot(
+    ts,
+    changeId,
+    payload.recordType,
+    rt.projectId!,
+    previousSchema,
+    snapshotted,
+  );
+
   const schema = (
     rt.schema && typeof rt.schema === "object" ? { ...rt.schema as object } : { fields: [] }
   ) as RecordTypeSchema;
 
   if (!Array.isArray(schema.fields)) {
     schema.fields = [];
+  }
+
+  // Protect required baseType fields from being removed or having required=false
+  if (rt.baseType) {
+    const requiredBaseFields = await resolveBaseTypeFields(ts, rt.baseType);
+    const baseFieldNames = new Set(requiredBaseFields.map((f) => f.name));
+    if (baseFieldNames.has(payload.field)) {
+      const def = payload.definition;
+      if (def.required === false) {
+        throw new PatchOpExecutionError(
+          `Cannot weaken required baseType field "${payload.field}" inherited from "${rt.baseType}"`,
+          400,
+        );
+      }
+    }
   }
 
   const existingIndex = schema.fields.findIndex(
@@ -83,9 +153,12 @@ async function executeSetField(
 
   await ts.updateChangePatchOpSnapshot(op.id, previousSchema);
 
+  logExec(changeId, `applied set_field "${payload.field}" on "${payload.recordType}" (op=${op.id})`);
+
   return {
     patchOpId: op.id,
     recordTypeId: rt.id,
+    recordTypeKey: payload.recordType,
     previousSchema,
   };
 }
@@ -93,10 +166,12 @@ async function executeSetField(
 async function rollback(
   ts: ReturnType<typeof getTenantStorage>,
   applied: AppliedOp[],
+  changeId: string,
 ): Promise<void> {
   for (let i = applied.length - 1; i >= 0; i--) {
-    const { recordTypeId, previousSchema } = applied[i];
+    const { recordTypeId, recordTypeKey, previousSchema } = applied[i];
     await ts.updateRecordTypeSchema(recordTypeId, previousSchema);
+    logExec(changeId, `rollback "${recordTypeKey}" (rt=${recordTypeId})`);
   }
 }
 
@@ -106,28 +181,56 @@ export interface ExecutionResult {
   error?: string;
 }
 
-export async function executePatchOps(
+export async function executeChange(
   ctx: TenantContext,
   changeId: string,
 ): Promise<ExecutionResult> {
   const ts = getTenantStorage(ctx);
 
-  const ops = await ts.getChangePatchOpsByChange(changeId);
-  if (ops.length === 0) {
-    return { success: true, appliedCount: 0 };
+  // Guard: change must exist and be in Implementing state
+  const change = await ts.getChange(changeId);
+  if (!change) {
+    throw new PatchOpExecutionError("Change not found", 404);
+  }
+  if (change.status !== "Implementing") {
+    throw new PatchOpExecutionError(
+      `Change must be in "Implementing" state, got "${change.status}"`,
+      409,
+    );
   }
 
+  const ops = await ts.getChangePatchOpsByChange(changeId);
+  if (ops.length === 0) {
+    throw new PatchOpExecutionError(
+      "No patch ops to execute for this change",
+      400,
+    );
+  }
+
+  logExec(changeId, `executing ${ops.length} patch op(s)`);
+
+  // Track which recordType keys have been snapshotted for dedup
+  const snapshotted = new Set<string>();
   const applied: AppliedOp[] = [];
 
   for (const op of ops) {
     try {
       if (op.opType === "set_field") {
-        const result = await executeSetField(ts, op);
+        // Verify target is record_type
+        const target: ChangeTarget | undefined = await ts.getChangeTarget(op.targetId);
+        if (!target || target.type !== "record_type") {
+          throw new PatchOpExecutionError(
+            `Patch op ${op.id} target must be type "record_type"`,
+            400,
+          );
+        }
+        const result = await executeSetField(ts, op, changeId, snapshotted);
         applied.push(result);
       }
       // Other opTypes can be added here in the future
     } catch (err) {
-      await rollback(ts, applied);
+      logExec(changeId, `FAILED at op ${op.id} (${op.opType}): ${err instanceof Error ? err.message : "unknown"}`);
+      await rollback(ts, applied, changeId);
       const message =
         err instanceof Error ? err.message : "Unknown execution error";
       return {
@@ -138,5 +241,9 @@ export async function executePatchOps(
     }
   }
 
+  logExec(changeId, `completed — ${applied.length} op(s) applied`);
   return { success: true, appliedCount: applied.length };
 }
+
+// Keep backward-compatible alias
+export const executePatchOps = executeChange;

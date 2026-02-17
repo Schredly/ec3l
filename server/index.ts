@@ -128,11 +128,26 @@ initRunner({ telemetrySink: storageTelemetrySink });
   // host and port must be passed as separate arguments to server.listen().
   // Combining them (e.g. "0.0.0.0:5000") causes Node to treat it as a
   // Unix socket path, resulting in ENOTSUP on macOS / EACCES in Docker.
+  //
+  // Override with: PORT=5001 npm run dev
   const port = Number(process.env.PORT ?? 5000);
   if (Number.isNaN(port)) {
     throw new Error(`PORT must be a number, got: "${process.env.PORT}"`);
   }
   const host = process.env.HOST ?? "0.0.0.0";
+
+  httpServer.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(
+        `\n[fatal] Port ${port} is already in use.\n` +
+        `  Fix: PORT=${port + 1} npm run dev\n` +
+        `  Or kill the process using port ${port}:\n` +
+        `    lsof -ti :${port} | xargs kill\n`,
+      );
+      process.exit(1);
+    }
+    throw err;
+  });
 
   httpServer.listen(port, host, () => {
     log(`serving on ${host}:${port}`);

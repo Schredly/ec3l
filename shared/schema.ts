@@ -499,6 +499,19 @@ export const changePatchOps = pgTable("change_patch_ops", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Record Type Snapshots — stores pre-change schema for rollback
+export const recordTypeSnapshots = pgTable("record_type_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  recordTypeKey: text("record_type_key").notNull(),
+  changeId: varchar("change_id").notNull().references(() => changeRecords.id),
+  schema: jsonb("schema").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("uq_rt_snapshot_change_key").on(table.changeId, table.recordTypeKey),
+]);
+
 export const choiceLists = pgTable("choice_lists", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
@@ -760,6 +773,11 @@ export const insertChangePatchOpSchema = createInsertSchema(changePatchOps).omit
   createdAt: true,
 });
 
+export const insertRecordTypeSnapshotSchema = createInsertSchema(recordTypeSnapshots).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
   id: true,
   createdAt: true,
@@ -865,6 +883,9 @@ export type ChangeTarget = typeof changeTargets.$inferSelect;
 
 export type InsertChangePatchOp = z.infer<typeof insertChangePatchOpSchema>;
 export type ChangePatchOp = typeof changePatchOps.$inferSelect;
+
+export type InsertRecordTypeSnapshot = z.infer<typeof insertRecordTypeSnapshotSchema>;
+export type RecordTypeSnapshot = typeof recordTypeSnapshots.$inferSelect;
 
 export type InsertRecordLock = z.infer<typeof insertRecordLockSchema>;
 export type RecordLock = typeof recordLocks.$inferSelect;

@@ -47,6 +47,9 @@ import {
   recordTypes,
   type RecordType,
   type InsertRecordType,
+  recordTypeSnapshots,
+  type RecordTypeSnapshot,
+  type InsertRecordTypeSnapshot,
 } from "@shared/schema";
 import type { TenantContext } from "./tenant";
 
@@ -687,6 +690,46 @@ export function getTenantStorage(ctx: TenantContext) {
         .where(eq(changePatchOps.id, id))
         .returning();
       return updated;
+    },
+
+    // --- Record Type Snapshots (tenant-scoped) ---
+
+    async createRecordTypeSnapshot(data: InsertRecordTypeSnapshot): Promise<RecordTypeSnapshot> {
+      const [snap] = await db
+        .insert(recordTypeSnapshots)
+        .values({ ...data, tenantId })
+        .returning();
+      return snap;
+    },
+
+    async getSnapshotsByChange(changeId: string): Promise<RecordTypeSnapshot[]> {
+      return db
+        .select()
+        .from(recordTypeSnapshots)
+        .where(
+          and(
+            eq(recordTypeSnapshots.changeId, changeId),
+            eq(recordTypeSnapshots.tenantId, tenantId),
+          ),
+        )
+        .orderBy(desc(recordTypeSnapshots.createdAt));
+    },
+
+    async getSnapshotByChangeAndKey(
+      changeId: string,
+      recordTypeKey: string,
+    ): Promise<RecordTypeSnapshot | undefined> {
+      const [snap] = await db
+        .select()
+        .from(recordTypeSnapshots)
+        .where(
+          and(
+            eq(recordTypeSnapshots.changeId, changeId),
+            eq(recordTypeSnapshots.recordTypeKey, recordTypeKey),
+            eq(recordTypeSnapshots.tenantId, tenantId),
+          ),
+        );
+      return snap;
     },
   };
 }
