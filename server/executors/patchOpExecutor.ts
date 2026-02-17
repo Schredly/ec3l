@@ -215,6 +215,11 @@ export async function executeChange(
     throw new PatchOpExecutionError("Change not found", 404);
   }
 
+  const changeProjectId = change.projectId;
+  if (!changeProjectId) {
+    throw new PatchOpExecutionError("Change is missing projectId", 400);
+  }
+
   const ops = await ts.getChangePatchOpsByChange(changeId);
   if (ops.length === 0) {
     return { success: true, appliedCount: 0 };
@@ -248,6 +253,13 @@ export async function executeChange(
           appliedCount: 0,
           error: `Patch op ${op.id} (${op.opType}) failed: Record type "${recordTypeKey}" not found`,
         };
+      }
+
+      if (rt.projectId !== changeProjectId) {
+        throw new PatchOpExecutionError(
+          `Record type "${recordTypeKey}" belongs to project "${rt.projectId ?? "null"}" but change belongs to project "${changeProjectId}"`,
+          400,
+        );
       }
 
       const schema = normalizeSchema(rt.schema);
@@ -336,7 +348,7 @@ export async function executeChange(
       ts,
       changeId,
       recordTypeKey,
-      entry.rt.projectId!,
+      changeProjectId,
       entry.originalSchema,
       snapshotted,
     );

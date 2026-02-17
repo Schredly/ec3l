@@ -293,6 +293,40 @@ describe("patchOpExecutor", () => {
       const result = await executeChange(ctx, "change-1");
       expect(result).toEqual({ success: true, appliedCount: 0 });
     });
+
+    it("throws if change has no projectId", async () => {
+      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, projectId: null });
+
+      await expect(executeChange(ctx, "change-1")).rejects.toThrow("Change is missing projectId");
+    });
+
+    it("throws if record type projectId does not match change projectId", async () => {
+      setupDefaults();
+      const op = makeSetFieldOp();
+      mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([op]);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue({
+        ...fakeRecordType,
+        projectId: "proj-other",
+      });
+
+      await expect(executeChange(ctx, "change-1")).rejects.toThrow(
+        /belongs to project "proj-other" but change belongs to project "proj-1"/,
+      );
+    });
+
+    it("throws if record type has null projectId", async () => {
+      setupDefaults();
+      const op = makeSetFieldOp();
+      mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([op]);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue({
+        ...fakeRecordType,
+        projectId: null,
+      });
+
+      await expect(executeChange(ctx, "change-1")).rejects.toThrow(
+        /belongs to project "null" but change belongs to project "proj-1"/,
+      );
+    });
   });
 
   describe("executeChange", () => {
@@ -325,6 +359,25 @@ describe("patchOpExecutor", () => {
               expect.objectContaining({ name: "status" }),
             ]),
           }),
+        }),
+      );
+    });
+
+    it("snapshot inherits projectId from change, not from record type", async () => {
+      setupDefaults();
+      const op = makeSetFieldOp();
+      mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([op]);
+      mockTenantStorage.getRecordTypeByKey.mockResolvedValue(fakeRecordType);
+      mockTenantStorage.updateRecordTypeSchema.mockImplementation(
+        async (_id: string, schema: unknown) => ({ ...fakeRecordType, schema }),
+      );
+      mockTenantStorage.updateChangePatchOpSnapshot.mockResolvedValue(op);
+
+      await executeChange(ctx, "change-1");
+
+      expect(mockTenantStorage.createRecordTypeSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "proj-1",
         }),
       );
     });
