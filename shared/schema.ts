@@ -480,6 +480,17 @@ export const changeTargets = pgTable("change_targets", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Change Patch Operations — structured output for targeted vibe coding
+export const changePatchOps = pgTable("change_patch_ops", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  changeId: varchar("change_id").notNull().references(() => changeRecords.id),
+  targetId: varchar("target_id").notNull().references(() => changeTargets.id),
+  opType: text("op_type").notNull(),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const choiceLists = pgTable("choice_lists", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
@@ -736,6 +747,11 @@ export const insertChangeTargetSchema = createInsertSchema(changeTargets).omit({
   createdAt: true,
 });
 
+export const insertChangePatchOpSchema = createInsertSchema(changePatchOps).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
   id: true,
   createdAt: true,
@@ -838,6 +854,9 @@ export type AgentProposal = typeof agentProposals.$inferSelect;
 
 export type InsertChangeTarget = z.infer<typeof insertChangeTargetSchema>;
 export type ChangeTarget = typeof changeTargets.$inferSelect;
+
+export type InsertChangePatchOp = z.infer<typeof insertChangePatchOpSchema>;
+export type ChangePatchOp = typeof changePatchOps.$inferSelect;
 
 export type InsertRecordLock = z.infer<typeof insertRecordLockSchema>;
 export type RecordLock = typeof recordLocks.$inferSelect;

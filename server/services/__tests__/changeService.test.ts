@@ -59,6 +59,9 @@ const mockTenantStorage = {
   createChangeTarget: vi.fn(),
   getChangeTargetsByChange: vi.fn(),
   getChangeTarget: vi.fn(),
+  // Change Patch Ops
+  createChangePatchOp: vi.fn(),
+  getChangePatchOpsByChange: vi.fn(),
 };
 
 vi.mock("../../tenantStorage", () => ({
