@@ -151,6 +151,7 @@ describe("patchOpService", () => {
       mockTenantStorage.getChange.mockResolvedValue(fakeChange);
       mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
       mockTenantStorage.getRecordTypeByKey.mockResolvedValue({ id: "rt-1", key: "incident" });
+      mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([]);
       const expected = {
         ...fakePatchOp,
         targetId: "ct-rt",
@@ -263,6 +264,7 @@ describe("patchOpService", () => {
       mockTenantStorage.getChange.mockResolvedValue(fakeChange);
       mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
       mockTenantStorage.getRecordTypeByKey.mockResolvedValue({ id: "rt-1", key: "incident" });
+      mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([]);
       const expected = {
         ...fakePatchOp,
         targetId: "ct-rt",
@@ -335,6 +337,7 @@ describe("patchOpService", () => {
       mockTenantStorage.getChange.mockResolvedValue(fakeChange);
       mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
       mockTenantStorage.getRecordTypeByKey.mockResolvedValue({ id: "rt-1", key: "incident" });
+      mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([]);
       const expected = {
         ...fakePatchOp,
         targetId: "ct-rt",
@@ -390,6 +393,7 @@ describe("patchOpService", () => {
       mockTenantStorage.getChange.mockResolvedValue(fakeChange);
       mockTenantStorage.getChangeTarget.mockResolvedValue(fakeRecordTypeTarget);
       mockTenantStorage.getRecordTypeByKey.mockResolvedValue({ id: "rt-1", key: "incident" });
+      mockTenantStorage.getChangePatchOpsByChange.mockResolvedValue([]);
       const expected = {
         ...fakePatchOp,
         targetId: "ct-rt",
