@@ -1,9 +1,8 @@
 // IMPORTANT:
-// Environment variables must be loaded here (process entrypoint).
-// Tooling (drizzle-kit) loads dotenv separately.
+// Environment variables are loaded via -r dotenv/config in the dev script (package.json).
+// This runs before any ESM module is evaluated, ensuring DATABASE_URL is set
+// before db.ts is imported. Tooling (drizzle-kit) loads dotenv separately.
 // Do NOT move dotenv loading into db.ts or services.
-import dotenv from "dotenv";
-dotenv.config();
 
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
