@@ -1,4 +1,4 @@
-import { storage } from "../storage";
+import { getTenantStorage } from "../tenantStorage";
 import type { TenantContext } from "../tenant";
 import type { AgentProposal, InsertAgentProposal, ActorIdentity } from "@shared/schema";
 import { formPatchOperationsSchema } from "@shared/schema";
@@ -28,6 +28,7 @@ export async function createProposal(
   ctx: TenantContext,
   input: ProposalInput,
 ): Promise<AgentProposal> {
+  const ts = getTenantStorage(ctx);
   const actor = agentActor(input.agentId);
 
   if (input.proposalType === "form_patch") {
@@ -47,7 +48,7 @@ export async function createProposal(
       );
     }
 
-    const change = await storage.createChange({
+    const change = await ts.createChange({
       projectId: input.projectId,
       title: `[Agent Proposal] ${input.summary || input.proposalType}`,
       description: `Proposed by agent ${input.agentId}: ${input.proposalType} targeting ${input.targetRef}`,
@@ -58,7 +59,7 @@ export async function createProposal(
     });
     changeId = change.id;
   } else {
-    const existing = await storage.getChange(changeId);
+    const existing = await ts.getChange(changeId);
     if (!existing) {
       throw new AgentProposalError("Change not found", 404);
     }
@@ -79,14 +80,14 @@ export async function createProposal(
     summary: input.summary ?? null,
   };
 
-  const proposal = await storage.createAgentProposal(data);
+  const proposal = await ts.createAgentProposal(data);
 
-  const agentRun = await storage.createAgentRun({
+  const agentRun = await ts.createAgentRun({
     changeId,
     intent: `agent_proposal:${input.proposalType}`,
   });
 
-  await storage.updateAgentRun(
+  await ts.updateAgentRun(
     agentRun.id,
     "Passed",
     JSON.stringify([input.proposalType]),
@@ -109,22 +110,23 @@ export async function getProposalsByChange(
   ctx: TenantContext,
   changeId: string,
 ): Promise<AgentProposal[]> {
-  void ctx;
-  return storage.getAgentProposalsByChange(changeId);
+  const ts = getTenantStorage(ctx);
+  return ts.getAgentProposalsByChange(changeId);
 }
 
 export async function getProposalsByTenant(
   ctx: TenantContext,
 ): Promise<AgentProposal[]> {
-  return storage.getAgentProposalsByTenant(ctx.tenantId);
+  const ts = getTenantStorage(ctx);
+  return ts.getAgentProposalsByTenant();
 }
 
 export async function getProposal(
   ctx: TenantContext,
   id: string,
 ): Promise<AgentProposal | undefined> {
-  void ctx;
-  return storage.getAgentProposal(id);
+  const ts = getTenantStorage(ctx);
+  return ts.getAgentProposal(id);
 }
 
 export async function submitProposal(
@@ -132,11 +134,9 @@ export async function submitProposal(
   id: string,
   actor: ActorIdentity,
 ): Promise<AgentProposal> {
-  const proposal = await storage.getAgentProposal(id);
+  const ts = getTenantStorage(ctx);
+  const proposal = await ts.getAgentProposal(id);
   if (!proposal) throw new AgentProposalError("Proposal not found", 404);
-  if (proposal.tenantId !== ctx.tenantId) {
-    throw new AgentProposalError("Proposal not found", 404);
-  }
   if (proposal.status !== "draft") {
     throw new AgentProposalError(
       `Cannot submit a proposal in status "${proposal.status}"`,
@@ -150,7 +150,7 @@ export async function submitProposal(
     );
   }
 
-  const updated = await storage.updateAgentProposalStatus(id, "submitted");
+  const updated = await ts.updateAgentProposalStatus(id, "submitted");
   if (!updated) throw new AgentProposalError("Failed to update proposal", 500);
   return updated;
 }
@@ -161,11 +161,9 @@ export async function reviewProposal(
   decision: "accepted" | "rejected",
   actor: ActorIdentity,
 ): Promise<AgentProposal> {
-  const proposal = await storage.getAgentProposal(id);
+  const ts = getTenantStorage(ctx);
+  const proposal = await ts.getAgentProposal(id);
   if (!proposal) throw new AgentProposalError("Proposal not found", 404);
-  if (proposal.tenantId !== ctx.tenantId) {
-    throw new AgentProposalError("Proposal not found", 404);
-  }
   if (proposal.status !== "submitted") {
     throw new AgentProposalError(
       `Cannot review a proposal in status "${proposal.status}". Must be "submitted".`,
@@ -181,7 +179,7 @@ export async function reviewProposal(
 
   await authorize(ctx, actor, PERMISSIONS.CHANGE_APPROVE, "change", proposal.changeId);
 
-  const updated = await storage.updateAgentProposalStatus(id, decision);
+  const updated = await ts.updateAgentProposalStatus(id, decision);
   if (!updated) throw new AgentProposalError("Failed to update proposal", 500);
   return updated;
 }

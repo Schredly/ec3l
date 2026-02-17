@@ -2,6 +2,7 @@ import type { TenantContext } from "../tenant";
 import type { SystemContext } from "../systemContext";
 import type { ModuleExecutionContext } from "../moduleContext";
 import { storage } from "../storage";
+import { getTenantStorage } from "../tenantStorage";
 import { resumeWorkflowExecution as engineResumeWorkflow, validateDecisionSteps, WorkflowExecutionError } from "./workflowEngine";
 import { dispatchIntent } from "./intentDispatcher";
 import type {
@@ -27,22 +28,19 @@ export async function createWorkflowDefinition(
   projectId: string,
   moduleId?: string,
 ): Promise<WorkflowDefinition> {
-  const project = await storage.getProject(projectId);
+  const ts = getTenantStorage(ctx);
+  const project = await ts.getProject(projectId);
   if (!project) {
     throw new WorkflowServiceError("Project not found", 404);
   }
 
-  if (project.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Project does not belong to this tenant", 403);
-  }
-
   let modulePath = "src/workflows";
   if (moduleId) {
-    const mod = await storage.getModule(moduleId);
+    const mod = await ts.getModule(moduleId);
     if (mod) modulePath = mod.rootPath;
   }
 
-  const change = await storage.createChange({
+  const change = await ts.createChange({
     projectId,
     title: `Workflow: ${data.name}`,
     description: `Workflow definition "${data.name}" (trigger: ${data.triggerType})`,
@@ -50,47 +48,39 @@ export async function createWorkflowDefinition(
     modulePath,
   });
 
-  const wf = await storage.createWorkflowDefinition({
+  const wf = await ts.createWorkflowDefinition({
     ...data,
     tenantId: ctx.tenantId,
   });
 
-  await storage.updateWorkflowDefinitionChangeId(wf.id, change.id);
-  const updated = await storage.getWorkflowDefinition(wf.id);
+  await ts.updateWorkflowDefinitionChangeId(wf.id, change.id);
+  const updated = await ts.getWorkflowDefinition(wf.id);
   return updated!;
 }
 
 export async function getWorkflowDefinitions(
   ctx: TenantContext,
 ): Promise<WorkflowDefinition[]> {
-  return storage.getWorkflowDefinitionsByTenant(ctx.tenantId);
+  const ts = getTenantStorage(ctx);
+  return ts.getWorkflowDefinitionsByTenant();
 }
 
 export async function getWorkflowDefinition(
   ctx: TenantContext,
   id: string,
 ): Promise<WorkflowDefinition | undefined> {
-  const wf = await storage.getWorkflowDefinition(id);
-  if (!wf) return undefined;
-
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow definition does not belong to this tenant", 403);
-  }
-
-  return wf;
+  const ts = getTenantStorage(ctx);
+  return ts.getWorkflowDefinition(id);
 }
 
 export async function activateWorkflowDefinition(
   ctx: TenantContext,
   id: string,
 ): Promise<WorkflowDefinition> {
-  const wf = await storage.getWorkflowDefinition(id);
+  const ts = getTenantStorage(ctx);
+  const wf = await ts.getWorkflowDefinition(id);
   if (!wf) {
     throw new WorkflowServiceError("Workflow definition not found", 404);
-  }
-
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow definition does not belong to this tenant", 403);
   }
 
   if (wf.status !== "draft") {
@@ -101,7 +91,7 @@ export async function activateWorkflowDefinition(
   }
 
   if (wf.changeId) {
-    const change = await storage.getChange(wf.changeId);
+    const change = await ts.getChange(wf.changeId);
     if (!change) {
       throw new WorkflowServiceError("Linked change record not found", 400);
     }
@@ -113,7 +103,7 @@ export async function activateWorkflowDefinition(
     }
   }
 
-  const steps = await storage.getWorkflowStepsByDefinition(id);
+  const steps = await ts.getWorkflowStepsByDefinition(id);
   if (steps.length === 0) {
     throw new WorkflowServiceError("Cannot activate workflow with no steps", 400);
   }
@@ -126,7 +116,7 @@ export async function activateWorkflowDefinition(
     );
   }
 
-  const updated = await storage.updateWorkflowDefinitionStatus(id, "active");
+  const updated = await ts.updateWorkflowDefinitionStatus(id, "active");
   return updated!;
 }
 
@@ -134,20 +124,17 @@ export async function retireWorkflowDefinition(
   ctx: TenantContext,
   id: string,
 ): Promise<WorkflowDefinition> {
-  const wf = await storage.getWorkflowDefinition(id);
+  const ts = getTenantStorage(ctx);
+  const wf = await ts.getWorkflowDefinition(id);
   if (!wf) {
     throw new WorkflowServiceError("Workflow definition not found", 404);
-  }
-
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow definition does not belong to this tenant", 403);
   }
 
   if (wf.status === "retired") {
     return wf;
   }
 
-  const updated = await storage.updateWorkflowDefinitionStatus(id, "retired");
+  const updated = await ts.updateWorkflowDefinitionStatus(id, "retired");
   return updated!;
 }
 
@@ -156,13 +143,10 @@ export async function addWorkflowStep(
   workflowDefinitionId: string,
   data: Omit<InsertWorkflowStep, "workflowDefinitionId">,
 ): Promise<WorkflowStep> {
-  const wf = await storage.getWorkflowDefinition(workflowDefinitionId);
+  const ts = getTenantStorage(ctx);
+  const wf = await ts.getWorkflowDefinition(workflowDefinitionId);
   if (!wf) {
     throw new WorkflowServiceError("Workflow definition not found", 404);
-  }
-
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow definition does not belong to this tenant", 403);
   }
 
   if (wf.status !== "draft") {
@@ -172,7 +156,7 @@ export async function addWorkflowStep(
     );
   }
 
-  const step = await storage.createWorkflowStep({
+  const step = await ts.createWorkflowStep({
     ...data,
     workflowDefinitionId,
   });
@@ -183,16 +167,13 @@ export async function getWorkflowSteps(
   ctx: TenantContext,
   workflowDefinitionId: string,
 ): Promise<WorkflowStep[]> {
-  const wf = await storage.getWorkflowDefinition(workflowDefinitionId);
+  const ts = getTenantStorage(ctx);
+  const wf = await ts.getWorkflowDefinition(workflowDefinitionId);
   if (!wf) {
     throw new WorkflowServiceError("Workflow definition not found", 404);
   }
 
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow definition does not belong to this tenant", 403);
-  }
-
-  return storage.getWorkflowStepsByDefinition(workflowDefinitionId);
+  return ts.getWorkflowStepsByDefinition(workflowDefinitionId);
 }
 
 export async function executeWorkflow(
@@ -201,13 +182,10 @@ export async function executeWorkflow(
   workflowDefinitionId: string,
   input: Record<string, unknown>,
 ): Promise<WorkflowExecution> {
-  const wf = await storage.getWorkflowDefinition(workflowDefinitionId);
+  const ts = getTenantStorage(ctx);
+  const wf = await ts.getWorkflowDefinition(workflowDefinitionId);
   if (!wf) {
     throw new WorkflowServiceError("Workflow definition not found", 404);
-  }
-
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow definition does not belong to this tenant", 403);
   }
 
   if (wf.status !== "active") {
@@ -218,7 +196,7 @@ export async function executeWorkflow(
   }
 
   const idempotencyKey = `api:${ctx.tenantId}:${workflowDefinitionId}:${new Date().toISOString()}`;
-  const intent = await storage.createWorkflowExecutionIntent({
+  const intent = await ts.createWorkflowExecutionIntent({
     tenantId: ctx.tenantId,
     workflowDefinitionId,
     triggerType: "manual",
@@ -236,7 +214,7 @@ export async function executeWorkflow(
     throw new WorkflowServiceError("Intent dispatched but no execution created", 500);
   }
 
-  const execution = await storage.getWorkflowExecution(dispatched.executionId);
+  const execution = await ts.getWorkflowExecution(dispatched.executionId);
   if (!execution) {
     throw new WorkflowServiceError("Execution not found after dispatch", 500);
   }
@@ -251,13 +229,10 @@ export async function resumeWorkflowExecution(
   stepExecutionId: string,
   outcome: { approved: boolean; resolvedBy?: string },
 ): Promise<WorkflowExecution> {
-  const exec = await storage.getWorkflowExecution(workflowExecutionId);
+  const ts = getTenantStorage(ctx);
+  const exec = await ts.getWorkflowExecution(workflowExecutionId);
   if (!exec) {
     throw new WorkflowServiceError("Workflow execution not found", 404);
-  }
-
-  if (exec.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow execution does not belong to this tenant", 403);
   }
 
   try {
@@ -273,37 +248,29 @@ export async function resumeWorkflowExecution(
 export async function getWorkflowExecutions(
   ctx: TenantContext,
 ): Promise<WorkflowExecution[]> {
-  return storage.getWorkflowExecutionsByTenant(ctx.tenantId);
+  const ts = getTenantStorage(ctx);
+  return ts.getWorkflowExecutionsByTenant();
 }
 
 export async function getWorkflowExecution(
   ctx: TenantContext,
   id: string,
 ): Promise<WorkflowExecution | undefined> {
-  const exec = await storage.getWorkflowExecution(id);
-  if (!exec) return undefined;
-
-  if (exec.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow execution does not belong to this tenant", 403);
-  }
-
-  return exec;
+  const ts = getTenantStorage(ctx);
+  return ts.getWorkflowExecution(id);
 }
 
 export async function getWorkflowExecutionSteps(
   ctx: TenantContext,
   executionId: string,
 ) {
-  const exec = await storage.getWorkflowExecution(executionId);
+  const ts = getTenantStorage(ctx);
+  const exec = await ts.getWorkflowExecution(executionId);
   if (!exec) {
     throw new WorkflowServiceError("Workflow execution not found", 404);
   }
 
-  if (exec.tenantId !== ctx.tenantId) {
-    throw new WorkflowServiceError("Workflow execution does not belong to this tenant", 403);
-  }
-
-  return storage.getWorkflowStepExecutionsByExecution(executionId);
+  return ts.getWorkflowStepExecutionsByExecution(executionId);
 }
 
 export async function systemInspectWorkflows(

@@ -38,6 +38,11 @@ import type { ActorIdentity } from "@shared/schema";
 import { assertNotAgent, AgentGuardError } from "./services/agentGuardService";
 import * as agentProposalService from "./services/agentProposalService";
 import { AgentProposalError } from "./services/agentProposalService";
+import * as changeTargetService from "./services/changeTargetService";
+import { ChangeTargetServiceError } from "./services/changeTargetService";
+import * as patchOpService from "./services/patchOpService";
+import { PatchOpServiceError } from "./services/patchOpService";
+import { insertChangeTargetSchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -157,6 +162,84 @@ export async function registerRoutes(
   app.get("/api/changes/:id/agent-runs", async (req, res) => {
     const runs = await agentRunService.getAgentRunsByChange(req.tenantContext, req.params.id);
     res.json(runs);
+  });
+
+  // Change Targets
+  app.post("/api/changes/:id/targets", async (req, res) => {
+    try {
+      const parsed = insertChangeTargetSchema
+        .omit({ tenantId: true, projectId: true, changeId: true })
+        .parse(req.body);
+      const target = await changeTargetService.createChangeTarget(
+        req.tenantContext,
+        req.params.id,
+        parsed,
+      );
+      res.status(201).json(target);
+    } catch (err) {
+      if (err instanceof ChangeTargetServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof Error && err.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid change target data", errors: err });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/changes/:id/targets", async (req, res) => {
+    try {
+      const targets = await changeTargetService.listChangeTargets(
+        req.tenantContext,
+        req.params.id,
+      );
+      res.json(targets);
+    } catch (err) {
+      if (err instanceof ChangeTargetServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // Change Patch Operations
+  app.post("/api/changes/:id/patch-ops", async (req, res) => {
+    try {
+      const { targetId, opType, payload } = req.body;
+      if (!targetId) return res.status(400).json({ message: "targetId is required" });
+      if (!opType) return res.status(400).json({ message: "opType is required" });
+      if (payload === undefined || payload === null) {
+        return res.status(400).json({ message: "payload is required" });
+      }
+      const op = await patchOpService.createPatchOp(
+        req.tenantContext,
+        req.params.id,
+        targetId,
+        opType,
+        payload,
+      );
+      res.status(201).json(op);
+    } catch (err) {
+      if (err instanceof PatchOpServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/changes/:id/patch-ops", async (req, res) => {
+    try {
+      const ops = await patchOpService.listPatchOps(
+        req.tenantContext,
+        req.params.id,
+      );
+      res.json(ops);
+    } catch (err) {
+      if (err instanceof PatchOpServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
   });
 
   // Start workspace — control plane delegates to runner service

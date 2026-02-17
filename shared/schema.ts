@@ -460,6 +460,37 @@ export const agentProposals = pgTable("agent_proposals", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Change Targets — constrain a change to specific scopes beyond modulePath
+export const changeTargetTypeEnum = pgEnum("change_target_type", [
+  "module",
+  "record_type",
+  "workflow",
+  "form",
+  "field",
+  "file",
+]);
+
+export const changeTargets = pgTable("change_targets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  changeId: varchar("change_id").notNull().references(() => changeRecords.id),
+  type: changeTargetTypeEnum("type").notNull(),
+  selector: jsonb("selector").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Change Patch Operations — structured output for targeted vibe coding
+export const changePatchOps = pgTable("change_patch_ops", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  changeId: varchar("change_id").notNull().references(() => changeRecords.id),
+  targetId: varchar("target_id").notNull().references(() => changeTargets.id),
+  opType: text("op_type").notNull(),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const choiceLists = pgTable("choice_lists", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
@@ -711,6 +742,16 @@ export const insertAgentProposalSchema = createInsertSchema(agentProposals).omit
   status: true,
 });
 
+export const insertChangeTargetSchema = createInsertSchema(changeTargets).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertChangePatchOpSchema = createInsertSchema(changePatchOps).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
   id: true,
   createdAt: true,
@@ -810,6 +851,12 @@ export type WorkflowExecutionIntent = typeof workflowExecutionIntents.$inferSele
 
 export type InsertAgentProposal = z.infer<typeof insertAgentProposalSchema>;
 export type AgentProposal = typeof agentProposals.$inferSelect;
+
+export type InsertChangeTarget = z.infer<typeof insertChangeTargetSchema>;
+export type ChangeTarget = typeof changeTargets.$inferSelect;
+
+export type InsertChangePatchOp = z.infer<typeof insertChangePatchOpSchema>;
+export type ChangePatchOp = typeof changePatchOps.$inferSelect;
 
 export type InsertRecordLock = z.infer<typeof insertRecordLockSchema>;
 export type RecordLock = typeof recordLocks.$inferSelect;

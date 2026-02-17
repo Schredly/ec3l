@@ -27,6 +27,41 @@ const mockTenantStorage = {
   getWorkspaceByChange: vi.fn(),
   createWorkspace: vi.fn(),
   updateWorkspaceStatus: vi.fn(),
+  // Agent Proposals
+  createAgentProposal: vi.fn(),
+  getAgentProposal: vi.fn(),
+  getAgentProposalsByChange: vi.fn(),
+  getAgentProposalsByTenant: vi.fn(),
+  updateAgentProposalStatus: vi.fn(),
+  // Workflow Definitions
+  createWorkflowDefinition: vi.fn(),
+  getWorkflowDefinition: vi.fn(),
+  getWorkflowDefinitionsByTenant: vi.fn(),
+  updateWorkflowDefinitionStatus: vi.fn(),
+  updateWorkflowDefinitionChangeId: vi.fn(),
+  // Workflow Steps
+  createWorkflowStep: vi.fn(),
+  getWorkflowStepsByDefinition: vi.fn(),
+  // Workflow Executions
+  getWorkflowExecution: vi.fn(),
+  getWorkflowExecutionsByTenant: vi.fn(),
+  getWorkflowStepExecutionsByExecution: vi.fn(),
+  // Workflow Execution Intents
+  createWorkflowExecutionIntent: vi.fn(),
+  // Workflow Triggers
+  createWorkflowTrigger: vi.fn(),
+  getWorkflowTrigger: vi.fn(),
+  getWorkflowTriggersByTenant: vi.fn(),
+  getWorkflowTriggersByDefinition: vi.fn(),
+  updateWorkflowTriggerStatus: vi.fn(),
+  getActiveTriggersByTenantAndType: vi.fn(),
+  // Change Targets
+  createChangeTarget: vi.fn(),
+  getChangeTargetsByChange: vi.fn(),
+  getChangeTarget: vi.fn(),
+  // Change Patch Ops
+  createChangePatchOp: vi.fn(),
+  getChangePatchOpsByChange: vi.fn(),
 };
 
 vi.mock("../../tenantStorage", () => ({

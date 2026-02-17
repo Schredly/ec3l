@@ -1,5 +1,5 @@
 import type { TenantContext } from "../tenant";
-import { storage } from "../storage";
+import { getTenantStorage } from "../tenantStorage";
 import type {
   WorkflowTrigger,
   InsertWorkflowTrigger,
@@ -19,12 +19,10 @@ export async function createTrigger(
   ctx: TenantContext,
   data: Omit<InsertWorkflowTrigger, "tenantId">,
 ): Promise<WorkflowTrigger> {
-  const wf = await storage.getWorkflowDefinition(data.workflowDefinitionId);
+  const ts = getTenantStorage(ctx);
+  const wf = await ts.getWorkflowDefinition(data.workflowDefinitionId);
   if (!wf) {
     throw new TriggerServiceError("Workflow definition not found", 404);
-  }
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new TriggerServiceError("Workflow definition does not belong to this tenant", 403);
   }
 
   if (data.triggerType === "record_event") {
@@ -41,7 +39,7 @@ export async function createTrigger(
     }
   }
 
-  return storage.createWorkflowTrigger({
+  return ts.createWorkflowTrigger({
     ...data,
     tenantId: ctx.tenantId,
   });
@@ -50,47 +48,40 @@ export async function createTrigger(
 export async function getTriggersByTenant(
   ctx: TenantContext,
 ): Promise<WorkflowTrigger[]> {
-  return storage.getWorkflowTriggersByTenant(ctx.tenantId);
+  const ts = getTenantStorage(ctx);
+  return ts.getWorkflowTriggersByTenant();
 }
 
 export async function getTrigger(
   ctx: TenantContext,
   id: string,
 ): Promise<WorkflowTrigger | undefined> {
-  const trigger = await storage.getWorkflowTrigger(id);
-  if (!trigger) return undefined;
-  if (trigger.tenantId !== ctx.tenantId) {
-    throw new TriggerServiceError("Trigger does not belong to this tenant", 403);
-  }
-  return trigger;
+  const ts = getTenantStorage(ctx);
+  return ts.getWorkflowTrigger(id);
 }
 
 export async function getTriggersByDefinition(
   ctx: TenantContext,
   workflowDefinitionId: string,
 ): Promise<WorkflowTrigger[]> {
-  const wf = await storage.getWorkflowDefinition(workflowDefinitionId);
+  const ts = getTenantStorage(ctx);
+  const wf = await ts.getWorkflowDefinition(workflowDefinitionId);
   if (!wf) {
     throw new TriggerServiceError("Workflow definition not found", 404);
   }
-  if (wf.tenantId !== ctx.tenantId) {
-    throw new TriggerServiceError("Workflow definition does not belong to this tenant", 403);
-  }
-  return storage.getWorkflowTriggersByDefinition(workflowDefinitionId);
+  return ts.getWorkflowTriggersByDefinition(workflowDefinitionId);
 }
 
 export async function disableTrigger(
   ctx: TenantContext,
   id: string,
 ): Promise<WorkflowTrigger> {
-  const trigger = await storage.getWorkflowTrigger(id);
+  const ts = getTenantStorage(ctx);
+  const trigger = await ts.getWorkflowTrigger(id);
   if (!trigger) {
     throw new TriggerServiceError("Trigger not found", 404);
   }
-  if (trigger.tenantId !== ctx.tenantId) {
-    throw new TriggerServiceError("Trigger does not belong to this tenant", 403);
-  }
-  const updated = await storage.updateWorkflowTriggerStatus(id, "disabled");
+  const updated = await ts.updateWorkflowTriggerStatus(id, "disabled");
   return updated!;
 }
 
@@ -98,14 +89,12 @@ export async function enableTrigger(
   ctx: TenantContext,
   id: string,
 ): Promise<WorkflowTrigger> {
-  const trigger = await storage.getWorkflowTrigger(id);
+  const ts = getTenantStorage(ctx);
+  const trigger = await ts.getWorkflowTrigger(id);
   if (!trigger) {
     throw new TriggerServiceError("Trigger not found", 404);
   }
-  if (trigger.tenantId !== ctx.tenantId) {
-    throw new TriggerServiceError("Trigger does not belong to this tenant", 403);
-  }
-  const updated = await storage.updateWorkflowTriggerStatus(id, "active");
+  const updated = await ts.updateWorkflowTriggerStatus(id, "active");
   return updated!;
 }
 
@@ -114,12 +103,10 @@ export async function fireManualTrigger(
   triggerId: string,
   payload: Record<string, unknown> = {},
 ): Promise<WorkflowExecutionIntent> {
-  const trigger = await storage.getWorkflowTrigger(triggerId);
+  const ts = getTenantStorage(ctx);
+  const trigger = await ts.getWorkflowTrigger(triggerId);
   if (!trigger) {
     throw new TriggerServiceError("Trigger not found", 404);
-  }
-  if (trigger.tenantId !== ctx.tenantId) {
-    throw new TriggerServiceError("Trigger does not belong to this tenant", 403);
   }
   if (trigger.triggerType !== "manual") {
     throw new TriggerServiceError("Only manual triggers can be fired via this endpoint");
@@ -128,7 +115,7 @@ export async function fireManualTrigger(
     throw new TriggerServiceError("Trigger is disabled");
   }
 
-  const wf = await storage.getWorkflowDefinition(trigger.workflowDefinitionId);
+  const wf = await ts.getWorkflowDefinition(trigger.workflowDefinitionId);
   if (!wf || wf.status !== "active") {
     throw new TriggerServiceError("Workflow definition is not active");
   }
@@ -136,7 +123,7 @@ export async function fireManualTrigger(
   const firedAt = new Date().toISOString();
   const idempotencyKey = `manual:${trigger.id}:${trigger.workflowDefinitionId}:${firedAt}`;
 
-  return storage.createWorkflowExecutionIntent({
+  return ts.createWorkflowExecutionIntent({
     tenantId: ctx.tenantId,
     workflowDefinitionId: trigger.workflowDefinitionId,
     triggerType: "manual",
@@ -151,12 +138,13 @@ export async function emitRecordEvent(
   recordType: string,
   recordData: Record<string, unknown>,
 ): Promise<WorkflowExecutionIntent[]> {
+  const ts = getTenantStorage(ctx);
   const supportedEvents = ["record.created", "record.updated"];
   if (!supportedEvents.includes(event)) {
     throw new TriggerServiceError(`Unsupported record event: ${event}. Supported: ${supportedEvents.join(", ")}`);
   }
 
-  const activeTriggers = await storage.getActiveTriggersByTenantAndType(ctx.tenantId, "record_event");
+  const activeTriggers = await ts.getActiveTriggersByTenantAndType("record_event");
 
   const matchedIntents: WorkflowExecutionIntent[] = [];
 
@@ -178,14 +166,14 @@ export async function emitRecordEvent(
       if (!match) continue;
     }
 
-    const wf = await storage.getWorkflowDefinition(trigger.workflowDefinitionId);
+    const wf = await ts.getWorkflowDefinition(trigger.workflowDefinitionId);
     if (!wf || wf.status !== "active") continue;
 
     const matchedAt = new Date().toISOString();
     const recordDataKey = JSON.stringify(recordData, Object.keys(recordData).sort());
     const idempotencyKey = `record_event:${trigger.id}:${trigger.workflowDefinitionId}:${event}:${recordType}:${recordDataKey}`;
 
-    const intent = await storage.createWorkflowExecutionIntent({
+    const intent = await ts.createWorkflowExecutionIntent({
       tenantId: ctx.tenantId,
       workflowDefinitionId: trigger.workflowDefinitionId,
       triggerType: "record_event",

@@ -1,4 +1,4 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, asc } from "drizzle-orm";
 import { db } from "./db";
 import {
   projects,
@@ -7,6 +7,13 @@ import {
   environments,
   agentRuns,
   workspaces,
+  agentProposals,
+  workflowDefinitions,
+  workflowSteps,
+  workflowExecutions,
+  workflowStepExecutions,
+  workflowTriggers,
+  workflowExecutionIntents,
   type Project,
   type InsertProject,
   type ChangeRecord,
@@ -19,6 +26,24 @@ import {
   type InsertAgentRun,
   type Workspace,
   type InsertWorkspace,
+  type AgentProposal,
+  type InsertAgentProposal,
+  type WorkflowDefinition,
+  type InsertWorkflowDefinition,
+  type WorkflowStep,
+  type InsertWorkflowStep,
+  type WorkflowExecution,
+  type WorkflowStepExecution,
+  type WorkflowTrigger,
+  type InsertWorkflowTrigger,
+  type WorkflowExecutionIntent,
+  type InsertWorkflowExecutionIntent,
+  changeTargets,
+  type ChangeTarget,
+  type InsertChangeTarget,
+  changePatchOps,
+  type ChangePatchOp,
+  type InsertChangePatchOp,
 } from "@shared/schema";
 import type { TenantContext } from "./tenant";
 
@@ -292,6 +317,300 @@ export function getTenantStorage(ctx: TenantContext) {
         .where(eq(workspaces.id, id))
         .returning();
       return workspace;
+    },
+
+    // --- Agent Proposals (tenant-scoped) ---
+
+    async createAgentProposal(data: InsertAgentProposal): Promise<AgentProposal> {
+      const [item] = await db
+        .insert(agentProposals)
+        .values({ ...data, tenantId })
+        .returning();
+      return item;
+    },
+
+    async getAgentProposal(id: string): Promise<AgentProposal | undefined> {
+      const [item] = await db
+        .select()
+        .from(agentProposals)
+        .where(and(eq(agentProposals.id, id), eq(agentProposals.tenantId, tenantId)));
+      return item;
+    },
+
+    async getAgentProposalsByChange(changeId: string): Promise<AgentProposal[]> {
+      const change = await this.getChange(changeId);
+      if (!change) return [];
+      return db
+        .select()
+        .from(agentProposals)
+        .where(and(eq(agentProposals.changeId, changeId), eq(agentProposals.tenantId, tenantId)))
+        .orderBy(desc(agentProposals.createdAt));
+    },
+
+    async getAgentProposalsByTenant(): Promise<AgentProposal[]> {
+      return db
+        .select()
+        .from(agentProposals)
+        .where(eq(agentProposals.tenantId, tenantId))
+        .orderBy(desc(agentProposals.createdAt));
+    },
+
+    async updateAgentProposalStatus(
+      id: string,
+      status: AgentProposal["status"],
+    ): Promise<AgentProposal | undefined> {
+      const existing = await this.getAgentProposal(id);
+      if (!existing) return undefined;
+      const [item] = await db
+        .update(agentProposals)
+        .set({ status })
+        .where(eq(agentProposals.id, id))
+        .returning();
+      return item;
+    },
+
+    // --- Workflow Definitions (tenant-scoped) ---
+
+    async createWorkflowDefinition(data: InsertWorkflowDefinition): Promise<WorkflowDefinition> {
+      const [wf] = await db
+        .insert(workflowDefinitions)
+        .values({ ...data, tenantId })
+        .returning();
+      return wf;
+    },
+
+    async getWorkflowDefinition(id: string): Promise<WorkflowDefinition | undefined> {
+      const [wf] = await db
+        .select()
+        .from(workflowDefinitions)
+        .where(and(eq(workflowDefinitions.id, id), eq(workflowDefinitions.tenantId, tenantId)));
+      return wf;
+    },
+
+    async getWorkflowDefinitionsByTenant(): Promise<WorkflowDefinition[]> {
+      return db
+        .select()
+        .from(workflowDefinitions)
+        .where(eq(workflowDefinitions.tenantId, tenantId))
+        .orderBy(desc(workflowDefinitions.createdAt));
+    },
+
+    async updateWorkflowDefinitionStatus(
+      id: string,
+      status: WorkflowDefinition["status"],
+    ): Promise<WorkflowDefinition | undefined> {
+      const existing = await this.getWorkflowDefinition(id);
+      if (!existing) return undefined;
+      const [wf] = await db
+        .update(workflowDefinitions)
+        .set({ status })
+        .where(eq(workflowDefinitions.id, id))
+        .returning();
+      return wf;
+    },
+
+    async updateWorkflowDefinitionChangeId(
+      id: string,
+      changeId: string,
+    ): Promise<WorkflowDefinition | undefined> {
+      const existing = await this.getWorkflowDefinition(id);
+      if (!existing) return undefined;
+      const [wf] = await db
+        .update(workflowDefinitions)
+        .set({ changeId })
+        .where(eq(workflowDefinitions.id, id))
+        .returning();
+      return wf;
+    },
+
+    // --- Workflow Steps (tenant-scoped via definition) ---
+
+    async createWorkflowStep(data: InsertWorkflowStep): Promise<WorkflowStep> {
+      const def = await this.getWorkflowDefinition(data.workflowDefinitionId);
+      if (!def) throw new Error("Workflow definition not found or does not belong to tenant");
+      const [step] = await db.insert(workflowSteps).values(data).returning();
+      return step;
+    },
+
+    async getWorkflowStepsByDefinition(defId: string): Promise<WorkflowStep[]> {
+      const def = await this.getWorkflowDefinition(defId);
+      if (!def) return [];
+      return db
+        .select()
+        .from(workflowSteps)
+        .where(eq(workflowSteps.workflowDefinitionId, defId))
+        .orderBy(asc(workflowSteps.orderIndex));
+    },
+
+    // --- Workflow Executions (tenant-scoped) ---
+
+    async getWorkflowExecution(id: string): Promise<WorkflowExecution | undefined> {
+      const [exec] = await db
+        .select()
+        .from(workflowExecutions)
+        .where(and(eq(workflowExecutions.id, id), eq(workflowExecutions.tenantId, tenantId)));
+      return exec;
+    },
+
+    async getWorkflowExecutionsByTenant(): Promise<WorkflowExecution[]> {
+      return db
+        .select()
+        .from(workflowExecutions)
+        .where(eq(workflowExecutions.tenantId, tenantId))
+        .orderBy(desc(workflowExecutions.startedAt));
+    },
+
+    async getWorkflowStepExecutionsByExecution(execId: string): Promise<WorkflowStepExecution[]> {
+      const exec = await this.getWorkflowExecution(execId);
+      if (!exec) return [];
+      return db
+        .select()
+        .from(workflowStepExecutions)
+        .where(eq(workflowStepExecutions.workflowExecutionId, execId));
+    },
+
+    // --- Workflow Execution Intents (tenant-scoped) ---
+
+    async createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent> {
+      if (data.idempotencyKey) {
+        const [existing] = await db
+          .select()
+          .from(workflowExecutionIntents)
+          .where(eq(workflowExecutionIntents.idempotencyKey, data.idempotencyKey));
+        if (existing) return existing;
+      }
+      const [intent] = await db
+        .insert(workflowExecutionIntents)
+        .values({ ...data, tenantId })
+        .returning();
+      return intent;
+    },
+
+    // --- Workflow Triggers (tenant-scoped) ---
+
+    async createWorkflowTrigger(data: InsertWorkflowTrigger): Promise<WorkflowTrigger> {
+      const [trigger] = await db
+        .insert(workflowTriggers)
+        .values({ ...data, tenantId })
+        .returning();
+      return trigger;
+    },
+
+    async getWorkflowTrigger(id: string): Promise<WorkflowTrigger | undefined> {
+      const [trigger] = await db
+        .select()
+        .from(workflowTriggers)
+        .where(and(eq(workflowTriggers.id, id), eq(workflowTriggers.tenantId, tenantId)));
+      return trigger;
+    },
+
+    async getWorkflowTriggersByTenant(): Promise<WorkflowTrigger[]> {
+      return db
+        .select()
+        .from(workflowTriggers)
+        .where(eq(workflowTriggers.tenantId, tenantId))
+        .orderBy(desc(workflowTriggers.createdAt));
+    },
+
+    async getWorkflowTriggersByDefinition(defId: string): Promise<WorkflowTrigger[]> {
+      const def = await this.getWorkflowDefinition(defId);
+      if (!def) return [];
+      return db
+        .select()
+        .from(workflowTriggers)
+        .where(eq(workflowTriggers.workflowDefinitionId, defId))
+        .orderBy(desc(workflowTriggers.createdAt));
+    },
+
+    async updateWorkflowTriggerStatus(
+      id: string,
+      status: WorkflowTrigger["status"],
+    ): Promise<WorkflowTrigger | undefined> {
+      const existing = await this.getWorkflowTrigger(id);
+      if (!existing) return undefined;
+      const [trigger] = await db
+        .update(workflowTriggers)
+        .set({ status })
+        .where(eq(workflowTriggers.id, id))
+        .returning();
+      return trigger;
+    },
+
+    async getActiveTriggersByTenantAndType(triggerType: string): Promise<WorkflowTrigger[]> {
+      return db
+        .select()
+        .from(workflowTriggers)
+        .where(
+          and(
+            eq(workflowTriggers.tenantId, tenantId),
+            eq(workflowTriggers.triggerType, triggerType as any),
+            eq(workflowTriggers.status, "active"),
+          ),
+        )
+        .orderBy(desc(workflowTriggers.createdAt));
+    },
+
+    // --- Change Targets (tenant-scoped) ---
+
+    async createChangeTarget(data: InsertChangeTarget): Promise<ChangeTarget> {
+      const [target] = await db
+        .insert(changeTargets)
+        .values({ ...data, tenantId })
+        .returning();
+      return target;
+    },
+
+    async getChangeTargetsByChange(changeId: string): Promise<ChangeTarget[]> {
+      const change = await this.getChange(changeId);
+      if (!change) return [];
+      return db
+        .select()
+        .from(changeTargets)
+        .where(
+          and(
+            eq(changeTargets.changeId, changeId),
+            eq(changeTargets.tenantId, tenantId),
+          ),
+        )
+        .orderBy(desc(changeTargets.createdAt));
+    },
+
+    async getChangeTarget(id: string): Promise<ChangeTarget | undefined> {
+      const [target] = await db
+        .select()
+        .from(changeTargets)
+        .where(
+          and(
+            eq(changeTargets.id, id),
+            eq(changeTargets.tenantId, tenantId),
+          ),
+        );
+      return target;
+    },
+
+    // --- Change Patch Operations (tenant-scoped) ---
+
+    async createChangePatchOp(data: InsertChangePatchOp): Promise<ChangePatchOp> {
+      const [op] = await db
+        .insert(changePatchOps)
+        .values({ ...data, tenantId })
+        .returning();
+      return op;
+    },
+
+    async getChangePatchOpsByChange(changeId: string): Promise<ChangePatchOp[]> {
+      const change = await this.getChange(changeId);
+      if (!change) return [];
+      return db
+        .select()
+        .from(changePatchOps)
+        .where(
+          and(
+            eq(changePatchOps.changeId, changeId),
+            eq(changePatchOps.tenantId, tenantId),
+          ),
+        )
+        .orderBy(desc(changePatchOps.createdAt));
     },
   };
 }
