@@ -1,6 +1,7 @@
 import type { TenantContext } from "../tenant";
 import { getTenantStorage } from "../tenantStorage";
 import type { ChangePatchOp, ChangeTarget } from "@shared/schema";
+import { emitTelemetry, buildTelemetryParams } from "../services/telemetryService";
 
 export class PatchOpExecutionError extends Error {
   public readonly statusCode: number;
@@ -242,6 +243,13 @@ export async function executeChange(
 
   logExec(changeId, `executing ${ops.length} patch op(s)`);
 
+  emitTelemetry(buildTelemetryParams(ctx, {
+    eventType: "execution_started",
+    executionType: "task",
+    executionId: changeId,
+    status: "started",
+  }));
+
   // --- Phase 1: Load ---
   // Cache record types by key; validates targets upfront
   const cache = new Map<string, CachedRecordType>();
@@ -263,6 +271,13 @@ export async function executeChange(
     if (!cache.has(recordTypeKey)) {
       const rt = await ts.getRecordTypeByKey(recordTypeKey);
       if (!rt) {
+        emitTelemetry(buildTelemetryParams(ctx, {
+          eventType: "execution_failed",
+          executionType: "task",
+          executionId: changeId,
+          status: "failed",
+          errorMessage: `Record type "${recordTypeKey}" not found`,
+        }));
         return {
           success: false,
           appliedCount: 0,
@@ -342,6 +357,13 @@ export async function executeChange(
     } catch (err) {
       logExec(changeId, `FAILED at op ${op.id} (${op.opType}): ${err instanceof Error ? err.message : "unknown"}`);
       const message = err instanceof Error ? err.message : "Unknown execution error";
+      emitTelemetry(buildTelemetryParams(ctx, {
+        eventType: "execution_failed",
+        executionType: "task",
+        executionId: changeId,
+        status: "failed",
+        errorMessage: message,
+      }));
       return {
         success: false,
         appliedCount: 0,
@@ -383,6 +405,14 @@ export async function executeChange(
   }
 
   logExec(changeId, `completed — ${opSnapshots.length} op(s) applied`);
+
+  emitTelemetry(buildTelemetryParams(ctx, {
+    eventType: "execution_completed",
+    executionType: "task",
+    executionId: changeId,
+    status: "completed",
+  }));
+
   return { success: true, appliedCount: opSnapshots.length };
 }
 

@@ -17,6 +17,11 @@ vi.mock("../tenantStorage", () => ({
   getTenantStorage: () => mockTenantStorage,
 }));
 
+vi.mock("../services/telemetryService", () => ({
+  emitTelemetry: vi.fn(),
+  buildTelemetryParams: vi.fn(() => ({})),
+}));
+
 // Executor is one level up from __tests__, so import from executors/
 import { executeChange, PatchOpExecutionError } from "../executors/patchOpExecutor";
 

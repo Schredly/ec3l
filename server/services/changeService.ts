@@ -2,6 +2,7 @@ import type { TenantContext } from "../tenant";
 import { getTenantStorage } from "../tenantStorage";
 import type { ChangeRecord, InsertChangeRecord } from "@shared/schema";
 import { executePatchOps, PatchOpExecutionError } from "../executors/patchOpExecutor";
+import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
 
 /**
  * Deterministic Change lifecycle.
@@ -144,6 +145,13 @@ export async function updateChangeStatus(
       }
       throw err;
     }
+
+    emitTelemetry(buildTelemetryParams(ctx, {
+      eventType: "execution_completed",
+      executionType: "task",
+      executionId: id,
+      status: "merged",
+    }));
 
     return ts.updateChangeStatus(id, "Merged", branchName);
   }

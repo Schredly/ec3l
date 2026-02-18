@@ -17,6 +17,11 @@ vi.mock("../../tenantStorage", () => ({
   getTenantStorage: () => mockTenantStorage,
 }));
 
+vi.mock("../../services/telemetryService", () => ({
+  emitTelemetry: vi.fn(),
+  buildTelemetryParams: vi.fn(() => ({})),
+}));
+
 import {
   executeChange,
   PatchOpExecutionError,

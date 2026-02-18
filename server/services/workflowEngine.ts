@@ -4,6 +4,7 @@ import { storage } from "../storage";
 import type { WorkflowStep, WorkflowExecution, WorkflowStepExecution } from "@shared/schema";
 import { checkRecordLock } from "./formService";
 import { getRunnerExecution, buildExecutionRequest } from "../execution";
+import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
 
 export class WorkflowExecutionError extends Error {
   public readonly statusCode: number;
@@ -294,6 +295,15 @@ export async function executeWorkflow(
     input,
   });
 
+  emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
+    eventType: "execution_started",
+    executionType: "workflow_step",
+    executionId: execution.id,
+    moduleId: moduleCtx.moduleId,
+    workflowId: workflowDefinitionId,
+    status: "started",
+  }));
+
   return runStepsFromIndex(execution, steps, { ...input }, 0, moduleCtx);
 }
 
@@ -412,6 +422,15 @@ async function runStepsFromIndex(
 
       if (stepExec.status === "failed") {
         const errorMsg = `Step "${step.stepType}" (order ${step.orderIndex}) failed`;
+        emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
+          eventType: "execution_failed",
+          executionType: "workflow_step",
+          executionId: execution.id,
+          moduleId: moduleCtx.moduleId,
+          workflowId: execution.workflowDefinitionId,
+          status: "failed",
+          errorMessage: errorMsg,
+        }));
         await storage.updateWorkflowExecutionStatus(execution.id, "failed", errorMsg);
         const failed = await storage.getWorkflowExecution(execution.id);
         return failed!;
@@ -482,10 +501,27 @@ async function runStepsFromIndex(
     }
 
     await storage.completeWorkflowExecution(execution.id);
+    emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
+      eventType: "execution_completed",
+      executionType: "workflow_step",
+      executionId: execution.id,
+      moduleId: moduleCtx.moduleId,
+      workflowId: execution.workflowDefinitionId,
+      status: "completed",
+    }));
     const completed = await storage.getWorkflowExecution(execution.id);
     return completed!;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown execution error";
+    emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
+      eventType: "execution_failed",
+      executionType: "workflow_step",
+      executionId: execution.id,
+      moduleId: moduleCtx.moduleId,
+      workflowId: execution.workflowDefinitionId,
+      status: "failed",
+      errorMessage: errorMsg,
+    }));
     await storage.updateWorkflowExecutionStatus(execution.id, "failed", errorMsg);
     const failed = await storage.getWorkflowExecution(execution.id);
     return failed!;
