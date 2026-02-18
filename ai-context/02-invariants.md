@@ -89,18 +89,18 @@ When a record-type patch op is created, `patchOpService` should verify that the 
 
 ---
 
-## Project Scoping Enforcement Gaps
+## Enforcement Gaps (All Resolved)
 
-The following invariants are documented but not yet enforced. They represent hardening work.
+All previously documented gaps have been resolved. This section is retained for historical reference.
 
 | Gap | Current Behavior | Required Behavior | Enforcement Point |
 |-----|-----------------|-------------------|-------------------|
 | ~~P6~~ | ~~Base type resolved tenant-wide~~ | ~~Must match project~~ | **RESOLVED** — `recordTypeService.ts` |
 | ~~P7~~ | ~~Cross-project check deferred to execution~~ | ~~Fail-fast at op creation~~ | **RESOLVED** — `patchOpService.ts` |
-| `record_types.key` nullable at DB | Service enforces non-empty, DB allows NULL | Add `NOT NULL` constraint | `shared/schema.ts` |
-| Op creation on Merged changes | No status guard on `createPatchOp` | Block if change is Merged/Ready | `patchOpService.ts` |
+| ~~`record_types.key` nullable at DB~~ | ~~Service enforces non-empty, DB allows NULL~~ | ~~Add `NOT NULL` constraint~~ | **RESOLVED** — `shared/schema.ts` + migration `0003` |
+| ~~Op creation on Merged changes~~ | ~~No status guard on `createPatchOp`~~ | ~~Block if change is Merged/Ready~~ | **RESOLVED** — `patchOpService.ts` |
 
-These gaps do not currently cause data corruption because the executor catches them, but they allow invalid state to persist in the database until execution time.
+All gaps were closed without data corruption. Service-layer guards were already in place; the work above hardened them at the DB and creation-time layers.
 
 ---
 

@@ -473,7 +473,7 @@ export const recordTypes = pgTable("record_types", {
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
   projectId: varchar("project_id").notNull().references(() => projects.id),
   name: text("name").notNull(),
-  key: text("key"),
+  key: text("key").notNull(),
   description: text("description"),
   baseType: text("base_type"),
   schema: jsonb("schema").notNull().default(sql`'{"fields":[]}'::jsonb`),
