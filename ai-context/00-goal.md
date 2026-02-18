@@ -61,7 +61,7 @@ Every feature in the platform composes from these primitives. There are no speci
 - **Auditable** — every mutation has a change record, a snapshot, and a patch op trail.
 - **Deterministic** — the same set of patch ops applied to the same base schema produces the same result.
 - **Reversible** — snapshots capture pre-execution state for every affected record type.
-- **Enforceable** — invariants (tenant isolation, project scoping, immutability after execution) are structural, not policy-based.
+- **Enforceable** — invariants (tenant isolation, project scoping, immutability after execution) are structural, not policy-based. Base-type inheritance (P6) and patch op targets (P7) are validated for project and tenant consistency at creation time.
 
 ## Design Philosophy
 
