@@ -106,6 +106,8 @@ import {
   type InsertAgentProposal,
   type ExecutionTelemetryEvent,
   type InsertExecutionTelemetryEvent,
+  changeEvents,
+  type ChangeEvent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -293,6 +295,8 @@ export interface IStorage {
 
   createExecutionTelemetryEvent(data: InsertExecutionTelemetryEvent): Promise<ExecutionTelemetryEvent>;
   getExecutionTelemetryEvents(tenantId: string, opts?: { from?: Date; to?: Date; limit?: number }): Promise<ExecutionTelemetryEvent[]>;
+
+  getChangeEvents(tenantId: string, limit?: number): Promise<ChangeEvent[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1114,6 +1118,13 @@ export class DatabaseStorage implements IStorage {
       .where(and(...conditions))
       .orderBy(desc(executionTelemetryEvents.timestamp))
       .limit(opts?.limit ?? 500);
+  }
+
+  async getChangeEvents(tenantId: string, limit = 100): Promise<ChangeEvent[]> {
+    return db.select().from(changeEvents)
+      .where(eq(changeEvents.tenantId, tenantId))
+      .orderBy(desc(changeEvents.createdAt))
+      .limit(limit);
   }
 }
 

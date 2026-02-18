@@ -39,6 +39,7 @@ import type { ActorIdentity } from "@shared/schema";
 import { assertNotAgent, AgentGuardError } from "./services/agentGuardService";
 import * as agentProposalService from "./services/agentProposalService";
 import { AgentProposalError } from "./services/agentProposalService";
+import * as auditFeedService from "./services/auditFeedService";
 import * as changeTargetService from "./services/changeTargetService";
 import { ChangeTargetServiceError } from "./services/changeTargetService";
 import * as recordTypeService from "./services/recordTypeService";
@@ -1950,6 +1951,12 @@ export async function registerRoutes(
       }
       throw err;
     }
+  });
+
+  app.get("/api/audit-feed", async (req, res) => {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const feed = await auditFeedService.getAuditFeed(req.tenantContext, { limit });
+    res.json(feed);
   });
 
   startScheduler();
