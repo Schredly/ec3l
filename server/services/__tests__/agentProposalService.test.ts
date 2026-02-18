@@ -18,6 +18,12 @@ vi.mock("../../tenantStorage", () => ({
   getTenantStorage: () => mockTenantStorage,
 }));
 
+vi.mock("@shared/schema", () => ({
+  formPatchOperationsSchema: {
+    safeParse: (val: unknown) => ({ success: true, data: val }),
+  },
+}));
+
 vi.mock("../rbacService", () => ({
   agentActor: (id: string) => ({ actorType: "agent", actorId: id }),
   authorize: vi.fn().mockResolvedValue(undefined),
