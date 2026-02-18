@@ -1,5 +1,16 @@
 # 00 — Goal
 
+## North Star
+
+Build a ServiceNow-class enterprise control plane that:
+
+- Treats metadata changes as first-class, auditable units
+- Is stateless, deterministic, and safe by default
+- Enables agent-driven development ("vibe coding") without sacrificing governance
+- Scales from CLI → UI → AI agents using the same primitives
+
+This system prioritizes **correctness, auditability, and execution safety** over UI convenience.
+
 ## Mission
 
 EC3L is a **stateless, multi-tenant control plane** for managing structured metadata changes across enterprise environments. It provides deterministic, auditable, and reversible mutation of platform primitives — record types, workflows, forms, and configuration — through a change-management discipline inspired by ServiceNow but rebuilt for clarity.
@@ -27,6 +38,11 @@ EC3L replaces this with:
 | Multi-tenancy | Instance isolation | Shared infrastructure, tenant-scoped at query layer |
 | Execution | Implicit on promote | Explicit execute or merge with 3-phase engine |
 | Rollback | Manual XML revert | Snapshot-based (schema before mutation is persisted) |
+| Configuration | Mutable in place | Explicit, versioned, immutable after merge |
+| Interface | UI-driven, form-coupled | API-first, agent-friendly |
+| State reasoning | Hidden dependencies | Transparent state machine with enforced invariants |
+
+This platform treats configuration like source code, not form input.
 
 ## Why Primitives Matter
 
@@ -53,3 +69,16 @@ Every feature in the platform composes from these primitives. There are no speci
 2. **No trust.** Tenant IDs come from server-side resolution, never from client bodies. Executed changes are immutable.
 3. **No ambiguity.** Patch ops declare exactly what they change. Duplicate detection prevents conflicting ops in the same change.
 4. **No coupling.** The control plane (metadata management) is separated from the execution layer (runner) and the presentation layer (client).
+
+## Planned Extensions (Guardrails — Do Not Implement)
+
+The following are recognized future surface area. None are implemented. All must compose from the core pipeline: **Change → Target → PatchOp → Execute**.
+
+- Task / subtask execution graphs
+- CMDB-style relationship modeling
+- Workflow engines built on patch ops
+- Agent-driven authoring (Replit-like UX)
+- AI chat as a change author, never an executor
+- External system sync (Git, Terraform, CI/CD)
+
+Do not build any of these prematurely. When the time comes, they will reuse existing primitives.

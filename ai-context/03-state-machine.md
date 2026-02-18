@@ -75,6 +75,19 @@
 
 ## Execution Semantics
 
+### Execute vs Merge — Critical Distinction
+
+These two endpoints invoke the same 3-phase engine but have fundamentally different roles:
+
+| | `/execute` | `/merge` |
+|---|-----------|----------|
+| Purpose | Testing, validation, pre-merge dry runs | Production application of the change |
+| Status change | None | → `Merged` (success) or → `ValidationFailed` (failure) |
+| Terminal? | No | Yes — `Merged` is immutable |
+| When to use | During development, before approval | After approval, as the final lifecycle step |
+
+Future UX may hide `/execute` behind merge/approval flows, but execution semantics must remain unchanged. `/merge` is always the authoritative lifecycle transition.
+
 ### On Merge (Primary Path)
 
 When `POST /api/changes/:id/merge` is called:
