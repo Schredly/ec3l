@@ -116,8 +116,7 @@ export async function updateChangeStatus(
   if (!change) return undefined;
 
   // Enforce deterministic state machine
-  //assertTransitionAllowed(change.status, nextStatus);
-  console.log("STATE TRANSITION:", change.status, "→", nextStatus);
+  assertTransitionAllowed(change.status, nextStatus);
 
   // Merging is special: it MUST execute PatchOps as the merge action.
   if (nextStatus === "Merged") {
