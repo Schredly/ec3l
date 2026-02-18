@@ -103,27 +103,67 @@ When `POST /api/changes/:id/merge` is called:
 
 ## Patch Op Lifecycle Within a Change
 
+### Sub-States
+
+A patch op exists in one of three states, determined by its column values:
+
+| State | `executed_at` | `previous_snapshot` | Meaning |
+|-------|--------------|---------------------|---------|
+| **Pending** | `NULL` | `NULL` | Staged, awaiting execution. Mutable (can be deleted). |
+| **Executed** | Timestamp | Schema JSON | Successfully applied. Immutable. Cannot be deleted or re-stamped. |
+| **Failed** | `NULL` | `NULL` | Transform phase rejected this op. Change status → `ValidationFailed`. Op remains pending for retry. |
+
 ```
-┌──────────┐   POST /patch-ops    ┌──────────┐
-│  (none)  │ ──────────────────►  │  Staged  │
-└──────────┘                      └────┬─────┘
+┌──────────┐   POST /patch-ops    ┌─────────┐
+│  (none)  │ ──────────────────►  │ Pending │
+└──────────┘                      └────┬────┘
                                        │
-                          ┌────────────┼────────────┐
-                          │            │            │
-                    DELETE /patch-ops   │     POST /merge or /execute
-                          │            │            │
-                          ▼            │            ▼
-                    ┌──────────┐       │     ┌───────────┐
-                    │ Deleted  │       │     │ Executed  │
-                    └──────────┘       │     └───────────┘
-                                       │         │
-                                       │    Cannot delete (409)
-                                       │    Cannot re-execute
-                                       │    previous_snapshot stamped
-                                       │    executed_at stamped
-                                       │
-                              (still staged, not yet executed)
+                    ┌──────────────────┼──────────────────┐
+                    │                  │                  │
+              DELETE /patch-ops   POST /merge         POST /execute
+                    │              or /execute         (transform fails)
+                    ▼                  │                  │
+              ┌─────────┐             ▼                  ▼
+              │ Deleted │       ┌──────────┐       ┌────────┐
+              └─────────┘       │ Executed │       │ Failed │
+                                └──────────┘       └────┬───┘
+                                     │                  │
+                                Cannot delete (409)     │
+                                Cannot re-stamp         │
+                                Audit trail locked      │
+                                                        │
+                                            Op stays Pending.
+                                            Change → ValidationFailed.
+                                            Fix and retry via new /merge or /execute.
 ```
+
+### Failure Semantics
+
+When the executor rejects an op during Phase 2 (Transform):
+
+1. **Zero database writes occur.** The all-or-nothing invariant (E4) means no ops are persisted, no snapshots are written, no schemas are mutated.
+2. **The change status transitions to `ValidationFailed`** (if triggered via `/merge`). Via `/execute`, status is unchanged.
+3. **All ops remain in `Pending` state.** The failed op is not marked — it stays alongside its siblings, ready for correction.
+4. **The error message identifies the failing op.** The executor returns `{ success: false, error: "..." }` with a human-readable description of the constraint violation.
+
+### Retry vs Fork
+
+| Strategy | When to use | Mechanism |
+|----------|------------|-----------|
+| **Retry in place** | The failure is correctable (e.g., wrong field type, missing field). | Delete the bad op, create a corrected op, re-execute. |
+| **Fork to new change** | The failure reveals a design conflict that requires rethinking multiple ops. | Create a new change with a clean op set. The original change can be abandoned (left in `ValidationFailed`). |
+
+There is no "rollback" operation. Pending ops can be deleted and recreated. Executed ops are permanent. If a change partially needs to be undone after merge, the correct approach is a **new change** with compensating ops (e.g., `remove_field` to undo an `add_field`).
+
+### Why Immutability — No Silent Rollback
+
+Executed patch ops are immutable for three reasons:
+
+1. **Audit integrity.** The `previous_snapshot` on an executed op is the authoritative record of what the schema looked like before this mutation. Deleting or modifying it destroys the audit chain.
+2. **Deterministic replay.** Given a sequence of changes with their executed ops, the system can reconstruct any point-in-time schema state. Mutable ops make replay non-deterministic.
+3. **Cross-change safety.** Subsequent changes may have been authored against the schema produced by this op. Silently rolling back the op would invalidate those downstream changes without warning.
+
+The only way to reverse a mutation is forward: create a new change with inverse ops.
 
 ### Patch Op Guards
 

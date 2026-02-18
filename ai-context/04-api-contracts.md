@@ -264,17 +264,29 @@ List all tenants. No tenant header required.
 
 ### DELETE /api/changes/:id/patch-ops/:opId
 
+Deletes a **pending** patch op from a change. Executed ops and ops on merged changes cannot be deleted.
+
 **Response 204:** No content (success).
 
-**Error responses:**
+**Error responses (evaluated in order):**
 
-| Condition | Status | Body |
-|-----------|--------|------|
-| Change not found | 404 | `{ "error": "Change not found" }` |
-| Change is Merged | 400 | `{ "error": "Cannot delete patch ops from a merged change" }` |
-| Op not found or wrong tenant | 404 | `{ "error": "Patch op not found" }` |
-| Op belongs to different change | 400 | `{ "error": "Patch op does not belong to this change" }` |
-| Op already executed | 409 | `{ "error": "Cannot delete an executed patch op" }` |
+| # | Condition | Status | Body | Rationale |
+|---|-----------|--------|------|-----------|
+| 1 | Change not found | 404 | `{ "error": "Change not found" }` | Tenant-scoped lookup failed. |
+| 2 | Change is Merged | 400 | `{ "error": "Cannot delete patch ops from a merged change" }` | Immutability invariant (E1). |
+| 3 | Op not found or wrong tenant | 404 | `{ "error": "Patch op not found" }` | Returns 404 (not 403) to prevent tenant information leakage (T5). |
+| 4 | Op belongs to different change | 400 | `{ "error": "Patch op does not belong to this change" }` | Ownership mismatch. |
+| 5 | Op already executed | 409 | `{ "error": "Cannot delete an executed patch op" }` | Audit trail preservation (E3). |
+
+**DELETE rules summary:**
+
+| Op state | Change state | DELETE allowed? |
+|----------|-------------|----------------|
+| Pending | Draft | Yes |
+| Pending | Implementing / WorkspaceRunning / ValidationFailed | Yes |
+| Pending | Ready | Yes (no status guard beyond Merged) |
+| Pending | Merged | No (400) |
+| Executed | Any | No (409) |
 
 ---
 
@@ -282,7 +294,7 @@ List all tenants. No tenant header required.
 
 ### POST /api/changes/:id/execute
 
-Executes all patch ops for the change without changing the change status. Useful for testing execution independently of the merge flow.
+Executes all patch ops for the change **without changing the change status**. This is a testing/validation hook, not a production transition. See `POST /merge` for the authoritative lifecycle endpoint.
 
 **Request:** Empty body.
 
@@ -301,10 +313,22 @@ Executes all patch ops for the change without changing the change status. Useful
 }
 ```
 
+The 422 response means the Transform phase (Phase 2) rejected one or more ops. **Zero database writes occurred.** All ops remain in `Pending` state.
+
 **Response 404:**
 ```json
 { "error": "Change not found" }
 ```
+
+**Idempotency behavior:**
+
+| Scenario | Behavior |
+|----------|----------|
+| First call, all ops pending | Executes all ops. Stamps `executed_at` + `previous_snapshot`. Creates snapshots. Returns `appliedCount`. |
+| Second call, ops already executed | Re-applies transforms against current schema. Re-stamps ops. Snapshot creation is idempotent (skipped if exists). Schema writes produce same result. **Known gap:** ops are re-stamped with a new `executed_at` timestamp. |
+| Call after `/merge` succeeded | Same behavior as second call. **Known gap:** no status guard blocks execution of a Merged change via `/execute`. |
+
+> **Hardening TODO:** The executor should skip ops where `executed_at IS NOT NULL`, and the `/execute` endpoint should reject changes in `Merged` status.
 
 ### POST /api/changes/:id/merge
 
@@ -498,4 +522,36 @@ Cause: Duplicate field targeting within a single change.
 ```json
 { "error": "Execution failed: ..." }
 ```
-Cause: Patch op validation failed during the transform phase.
+Cause: Patch op validation failed during the transform phase. Zero database writes occurred.
+
+---
+
+## Error Code Semantics Reference
+
+The platform uses HTTP status codes with specific, consistent meaning:
+
+| Code | Meaning in EC3L | When to use |
+|------|-----------------|-------------|
+| **400** | Structural request error or business rule violation | Missing fields, invalid types, ownership mismatch, change is Merged |
+| **401** | Missing identity | No `x-tenant-id` header |
+| **403** | Authorization denied | RBAC check failed, agent guard triggered |
+| **404** | Entity not found (or hidden) | Unknown tenant slug, missing change/op/target. Also used instead of 403 when masking cross-tenant access attempts (T5). |
+| **409** | State conflict | Duplicate patch op for same field, delete of executed op, record type key already exists |
+| **422** | Execution failure | Transform phase rejected an op. All-or-nothing — zero writes occurred. The change status may transition to `ValidationFailed`. |
+
+### 409 vs 422 — Key Distinction
+
+- **409 (Conflict):** The request is structurally valid but conflicts with existing state. The caller should resolve the conflict (delete the duplicate, use a different key) and retry.
+- **422 (Unprocessable):** The execution engine evaluated the ops and found a semantic violation (protected field, field not found, type mismatch). The caller should fix the op's payload or rethink the change.
+
+### Idempotency Expectations
+
+| Endpoint | Idempotent? | Notes |
+|----------|-------------|-------|
+| `GET *` | Yes | Read-only. |
+| `POST /changes` | No | Creates a new change each call. |
+| `POST /changes/:id/targets` | No | Creates a new target each call. |
+| `POST /changes/:id/patch-ops` | No | Creates a new op each call. Duplicate guard prevents same-field conflicts (409). |
+| `DELETE /changes/:id/patch-ops/:opId` | Yes | First call returns 204. Subsequent calls return 404 (op already deleted). |
+| `POST /changes/:id/execute` | Partially | Snapshots are idempotent. Schema writes are convergent. Op timestamps are re-stamped (known gap). |
+| `POST /changes/:id/merge` | No | First call merges. Second call attempts re-execution on an already-Merged change (known gap). |

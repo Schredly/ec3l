@@ -151,6 +151,71 @@ Tenant slug "acme"
 
 Alternatively, `POST /api/changes/:id/execute` runs the execution pipeline without changing the change status.
 
+## Snapshot Model
+
+### Why Snapshots Exist
+
+Snapshots are the audit backbone of the execution layer. Every time a change executes, each affected record type gets a snapshot of its schema **before mutation**. This serves three purposes:
+
+1. **Rollback analysis.** Given a snapshot, an operator can see exactly what the schema looked like before a change was applied and reason about whether a compensating change is needed.
+2. **Deterministic replay.** The snapshot chain across changes provides a point-in-time history of every record type's schema evolution. Given the initial schema and the ordered set of snapshots, the system can reconstruct any intermediate state.
+3. **Conflict detection (future).** When two changes target the same record type, snapshots enable detection of concurrent mutations — the second change's snapshot will differ from the first change's post-execution schema.
+
+### When Snapshots Are Created
+
+Snapshots are created during **Phase 3 (Persist)** of the execution engine, specifically by `ensureSnapshot()`:
+
+```
+Phase 2 succeeds for ALL ops
+  │
+  ▼ Phase 3 begins
+  │
+  ├─ For each modified record type:
+  │   ├─ ensureSnapshot(tenantId, projectId, recordTypeKey, changeId, originalSchema)
+  │   │   ├─ SELECT FROM record_type_snapshots WHERE changeId AND recordTypeKey AND tenantId
+  │   │   ├─ If exists → skip (idempotent)
+  │   │   └─ If not → INSERT snapshot with original schema
+  │   │
+  │   └─ updateRecordTypeSchema(rt.id, mutatedSchema)
+  │
+  └─ For each op: stamp previous_snapshot + executed_at
+```
+
+Snapshots are **never** created during Phase 1 (Load) or Phase 2 (Transform). They are only written after all in-memory transforms succeed, ensuring the snapshot is always paired with a successful mutation.
+
+### Snapshot Scope
+
+Every snapshot is scoped by four dimensions:
+
+| Dimension | Column | Source |
+|-----------|--------|--------|
+| Tenant | `tenant_id` | Inherited from the tenant context (closure in `getTenantStorage`) |
+| Project | `project_id` | Inherited from `change.projectId`, **not** from the record type |
+| Change | `change_id` | The change that triggered this execution |
+| Record Type | `record_type_key` | The key of the record type being snapshotted |
+
+The unique constraint `(change_id, record_type_key)` guarantees at most one snapshot per record type per change. This makes `ensureSnapshot()` idempotent — repeated execution of the same change will not create duplicate snapshots.
+
+### How Snapshots Differ from ServiceNow Update Sets
+
+| Concern | ServiceNow Update Set | EC3L Snapshot |
+|---------|----------------------|---------------|
+| Granularity | Entire record XML blob (all fields, all metadata) | Schema-only JSON (field definitions at point-in-time) |
+| When captured | On "insert to update set" (manual or automatic) | Automatically during execution, before mutation |
+| Scope | Per-instance, per-update-set | Per-tenant, per-project, per-change, per-record-type |
+| Idempotency | Not guaranteed — duplicates possible | Guaranteed by unique constraint |
+| Mutability | Can be modified before promotion | Immutable once written |
+| Provenance | Tied to the update set | Tied to the change (inherits change's project_id) |
+
+### Performance Characteristics
+
+Snapshots use **copy-on-write semantics**, not deep cloning:
+
+- The `originalSchema` captured at Phase 1 (Load) is the raw JSONB value read from the database.
+- During Phase 2 (Transform), each op creates a **new object** for the mutated schema — the original reference is never modified.
+- At Phase 3 (Persist), the original reference is written as the snapshot. No serialization/deserialization overhead beyond the initial read.
+- Snapshot size is proportional to the number of fields on the record type, not to the number of ops in the change. A record type with 50 fields produces the same size snapshot whether 1 or 20 ops target it.
+
 ## Separation of Concerns
 
 | Layer | Responsibility | Location |

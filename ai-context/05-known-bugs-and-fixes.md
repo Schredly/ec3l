@@ -141,6 +141,36 @@ Critical side effects (like execution) should be coupled to the state transition
 
 ---
 
+## Permanent Fix: null project_id in record_type_snapshots
+
+**Bug reference:** Bug 1 (snapshot project_id) and Bug 2 (nullable record type project_id).
+
+**Error:** `null value in column "project_id" of relation "record_type_snapshots" violates not-null constraint`
+
+**Root cause chain:**
+1. `record_types.project_id` was nullable → record types could exist without a project.
+2. `ensureSnapshot()` derived `projectId` from the record type, not the change.
+3. If `rt.projectId` was null, the snapshot INSERT would fail with a NOT NULL violation on `record_type_snapshots.project_id`.
+
+**Fixes applied (both required):**
+1. **Schema fix (commit `69327e4`):** `record_types.project_id` is now `NOT NULL`. No record type can exist without a project.
+2. **Provenance fix (commit `49aded2`):** `ensureSnapshot()` now derives `projectId` from `change.projectId`, not from the record type. Even if a future bug allows a record type to have a mismatched project, the snapshot will always carry the change's project context.
+
+**Why this cannot recur:**
+- `record_types.project_id` has a DB-level NOT NULL constraint.
+- `record_type_snapshots.project_id` has a DB-level NOT NULL constraint.
+- The executor validates `rt.projectId === change.projectId` in Phase 1, aborting before any writes if mismatched.
+- `ensureSnapshot()` uses `change.projectId` as the source of truth, never `rt.projectId`.
+
+**Regression test recommendations:**
+
+1. **Unit test:** `patchOpExecutor.test.ts` — assert that `ensureSnapshot` receives `change.projectId`, not `rt.projectId`. Already exists: test "snapshot inherits projectId from change, not from record type".
+2. **Unit test:** `patchOpExecutor.test.ts` — assert that execution aborts (400) when `rt.projectId !== change.projectId`. Already exists.
+3. **Integration test (curl):** Create a record type in project A, create a change in project B, add a target + op referencing the record type, execute. Expected: 400 or 422 failure, zero snapshots created.
+4. **Schema test:** Verify `record_types.project_id` and `record_type_snapshots.project_id` both have NOT NULL constraints in `shared/schema.ts`.
+
+---
+
 ## Summary
 
 | Bug | Root Cause Category | Fix Category |
@@ -151,3 +181,4 @@ Critical side effects (like execution) should be coupled to the state transition
 | Executed op deletion | Missing guard on delete path | Multi-condition guard chain |
 | Test failures after guard | Mock drift from interface | Mock synchronization |
 | Merge without execution | Decoupled side effect | Coupled execution to state transition |
+| **null project_id in snapshots** | **Nullable FK + wrong derivation** | **NOT NULL constraint + provenance fix + cross-project guard** |
