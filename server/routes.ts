@@ -135,7 +135,7 @@ export async function registerRoutes(
       const updated = await changeService.updateChangeStatus(req.tenantContext, req.params.id, status);
       if (!updated) return res.status(404).json({ message: "Change not found" });
       res.json(updated);
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
@@ -144,6 +144,9 @@ export async function registerRoutes(
       }
       if (err instanceof ChangeServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err.message?.startsWith("Missing actor identity") || err.message?.startsWith("Missing user identity")) {
+        return res.status(401).json({ message: err.message });
       }
       throw err;
     }

@@ -135,6 +135,10 @@ export async function authorize(
   resourceType?: string,
   resourceId?: string,
 ): Promise<void> {
+  if (!permission) {
+    throw new Error(`rbacService.authorize called with invalid permission: ${JSON.stringify(permission)}`);
+  }
+
   if (isSystemContext(ctx)) {
     if (actor.actorType !== "system") {
       const tenantId = (ctx as any).tenantId ?? null;
@@ -225,7 +229,7 @@ export async function authorize(
 
 export function actorFromContext(ctx: TenantContext): ActorIdentity {
   if (!ctx.userId) {
-    throw new RbacDeniedError("unknown", undefined, undefined);
+    throw new Error("Missing user identity: provide x-user-id header");
   }
   return { actorType: "user", actorId: ctx.userId };
 }
@@ -237,7 +241,7 @@ export function resolveActorFromContext(ctx: TenantContext): ActorIdentity {
   if (ctx.userId) {
     return { actorType: "user", actorId: ctx.userId };
   }
-  throw new RbacDeniedError("unknown", undefined, undefined);
+  throw new Error("Missing actor identity: provide x-user-id or x-agent-id header");
 }
 
 export function agentActor(agentId: string): ActorIdentity {
