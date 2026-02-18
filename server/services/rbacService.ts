@@ -135,7 +135,8 @@ export async function authorize(
   resourceType?: string,
   resourceId?: string,
 ): Promise<void> {
-  if (!permission) {
+  const VALID_PERMISSIONS: ReadonlySet<string> = new Set(Object.values(PERMISSIONS));
+  if (typeof permission !== "string" || !VALID_PERMISSIONS.has(permission)) {
     throw new Error(`rbacService.authorize called with invalid permission: ${JSON.stringify(permission)}`);
   }
 
