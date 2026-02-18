@@ -16,6 +16,7 @@ import * as workspaceService from "./services/workspaceService";
 import * as agentRunService from "./services/agentRunService";
 import * as moduleService from "./services/moduleService";
 import * as environmentService from "./services/environmentService";
+import { ReleaseServiceError } from "./services/environmentService";
 import * as templateService from "./services/templateService";
 import * as installService from "./services/installService";
 import { InstallServiceError } from "./services/installService";
@@ -440,6 +441,38 @@ export async function registerRoutes(
     const env = await environmentService.getEnvironment(req.tenantContext, req.params.id);
     if (!env) return res.status(404).json({ message: "Environment not found" });
     res.json(env);
+  });
+
+  // Environment Release Snapshot
+  app.post("/api/environments/:id/release", async (req, res) => {
+    try {
+      const actor = resolveActorFromContext(req.tenantContext);
+      await rbacService.authorize(
+        req.tenantContext,
+        actor,
+        PERMISSIONS.ENVIRONMENT_RELEASE_CREATE,
+      );
+      const release = await environmentService.createReleaseSnapshot(
+        req.tenantContext,
+        req.params.id,
+        actor,
+      );
+      res.status(201).json(release);
+    } catch (err: any) {
+      if (err instanceof ReleaseServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof RbacDeniedError) {
+        return res.status(403).json({ message: err.message, permission: err.permission });
+      }
+      if (
+        err.message?.startsWith("Missing actor identity") ||
+        err.message?.startsWith("Missing user identity")
+      ) {
+        return res.status(401).json({ message: err.message });
+      }
+      throw err;
+    }
   });
 
   // Templates (read-only, system context)

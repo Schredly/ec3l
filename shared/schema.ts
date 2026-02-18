@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, pgEnum, boolean, integer, jsonb, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, pgEnum, boolean, integer, jsonb, unique, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -301,15 +301,23 @@ export const environments = pgTable("environments", {
 
 
 // Phase 4b: Environment Promotion (Release + Deployment)
-// Release = immutable pointer to a merged Change
+// Release = immutable snapshot of one or many merged Changes for an Environment
 export const environmentReleases = pgTable("environment_releases", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   projectId: varchar("project_id").notNull().references(() => projects.id),
-  sourceChangeId: varchar("source_change_id").notNull().references(() => changeRecords.id),
-  sourceEnvironmentId: varchar("source_environment_id").references(() => environments.id),
+  environmentId: varchar("environment_id").notNull().references(() => environments.id),
+  createdBy: varchar("created_by"),
   status: environmentReleaseStatusEnum("status").notNull().default("created"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Join table: release → changes (1:N)
+export const environmentReleaseChanges = pgTable("environment_release_changes", {
+  releaseId: varchar("release_id").notNull().references(() => environmentReleases.id),
+  changeId: varchar("change_id").notNull().references(() => changeRecords.id),
+}, (table) => [
+  primaryKey({ columns: [table.releaseId, table.changeId] }),
+]);
 
 // Deployment = "environment head" pointer update (history preserved)
 export const environmentDeployments = pgTable("environment_deployments", {
@@ -738,6 +746,8 @@ export const insertEnvironmentReleaseSchema = createInsertSchema(environmentRele
   status: true,
 });
 
+export const insertEnvironmentReleaseChangeSchema = createInsertSchema(environmentReleaseChanges);
+
 export const insertEnvironmentDeploymentSchema = createInsertSchema(environmentDeployments).omit({
   id: true,
   createdAt: true,
@@ -922,6 +932,9 @@ export type Environment = typeof environments.$inferSelect;
 
 export type InsertEnvironmentRelease = z.infer<typeof insertEnvironmentReleaseSchema>;
 export type EnvironmentRelease = typeof environmentReleases.$inferSelect;
+
+export type InsertEnvironmentReleaseChange = z.infer<typeof insertEnvironmentReleaseChangeSchema>;
+export type EnvironmentReleaseChange = typeof environmentReleaseChanges.$inferSelect;
 
 export type InsertEnvironmentDeployment = z.infer<typeof insertEnvironmentDeploymentSchema>;
 export type EnvironmentDeployment = typeof environmentDeployments.$inferSelect;

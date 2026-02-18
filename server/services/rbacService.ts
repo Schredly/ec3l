@@ -31,6 +31,7 @@ export const PERMISSIONS = {
   OVERRIDE_ACTIVATE: "override.activate",
   CHANGE_APPROVE: "change.approve",
   ADMIN_VIEW: "admin.view",
+  ENVIRONMENT_RELEASE_CREATE: "environment.release_create",
 } as const;
 
 export type PermissionName = typeof PERMISSIONS[keyof typeof PERMISSIONS];
@@ -43,6 +44,7 @@ const ALL_PERMISSIONS: { name: string; description: string }[] = [
   { name: PERMISSIONS.OVERRIDE_ACTIVATE, description: "Activate module overrides" },
   { name: PERMISSIONS.CHANGE_APPROVE, description: "Approve changes (transition to Ready/Merged)" },
   { name: PERMISSIONS.ADMIN_VIEW, description: "View the Admin Console" },
+  { name: PERMISSIONS.ENVIRONMENT_RELEASE_CREATE, description: "Create environment release snapshots" },
 ];
 
 const DEFAULT_ROLES: { name: string; description: string; permissions: string[] }[] = [

@@ -1,4 +1,4 @@
-import { eq, desc, and, asc } from "drizzle-orm";
+import { eq, desc, and, asc, notInArray } from "drizzle-orm";
 import { db } from "./db";
 import {
   projects,
@@ -50,6 +50,10 @@ import {
   recordTypeSnapshots,
   type RecordTypeSnapshot,
   type InsertRecordTypeSnapshot,
+  environmentReleases,
+  environmentReleaseChanges,
+  type EnvironmentRelease,
+  type InsertEnvironmentRelease,
 } from "@shared/schema";
 import type { TenantContext } from "./tenant";
 
@@ -758,6 +762,59 @@ export function getTenantStorage(ctx: TenantContext) {
           ),
         );
       return snap;
+    },
+
+    // --- Environment Releases (tenant-scoped via project) ---
+
+    async getEligibleChangesForRelease(environmentId: string): Promise<ChangeRecord[]> {
+      // Step 1: get IDs of changes already included in any release for this environment
+      const releasedRows = await db
+        .select({ changeId: environmentReleaseChanges.changeId })
+        .from(environmentReleaseChanges)
+        .innerJoin(
+          environmentReleases,
+          eq(environmentReleaseChanges.releaseId, environmentReleases.id),
+        )
+        .where(eq(environmentReleases.environmentId, environmentId));
+
+      const releasedIds = releasedRows.map((r) => r.changeId);
+
+      // Step 2: find merged changes for this environment not yet released
+      const conditions = [
+        eq(changeRecords.status, "Merged"),
+        eq(changeRecords.environmentId, environmentId),
+        eq(projects.tenantId, tenantId),
+      ];
+
+      if (releasedIds.length > 0) {
+        conditions.push(notInArray(changeRecords.id, releasedIds));
+      }
+
+      const rows = await db
+        .select({ change: changeRecords })
+        .from(changeRecords)
+        .innerJoin(projects, eq(changeRecords.projectId, projects.id))
+        .where(and(...conditions));
+
+      return rows.map((r) => r.change);
+    },
+
+    async createEnvironmentRelease(data: InsertEnvironmentRelease): Promise<EnvironmentRelease> {
+      const [release] = await db
+        .insert(environmentReleases)
+        .values(data)
+        .returning();
+      return release;
+    },
+
+    async createEnvironmentReleaseChanges(
+      releaseId: string,
+      changeIds: string[],
+    ): Promise<void> {
+      if (changeIds.length === 0) return;
+      await db
+        .insert(environmentReleaseChanges)
+        .values(changeIds.map((changeId) => ({ releaseId, changeId })));
     },
   };
 }
