@@ -220,9 +220,24 @@ export async function executeChange(
     throw new PatchOpExecutionError("Change is missing projectId", 400);
   }
 
+  if (change.status === "Merged") {
+    throw new PatchOpExecutionError(
+      "Cannot execute patch ops on merged change",
+      400,
+    );
+  }
+
   const ops = await ts.getChangePatchOpsByChange(changeId);
   if (ops.length === 0) {
     return { success: true, appliedCount: 0 };
+  }
+
+  const alreadyExecuted = ops.some((op) => op.executedAt !== null);
+  if (alreadyExecuted) {
+    throw new PatchOpExecutionError(
+      "Patch operations already executed",
+      400,
+    );
   }
 
   logExec(changeId, `executing ${ops.length} patch op(s)`);

@@ -118,6 +118,11 @@ export async function updateChangeStatus(
   // Enforce deterministic state machine
   assertTransitionAllowed(change.status, nextStatus);
 
+  // Idempotent: already in the requested status — no-op.
+  if (change.status === nextStatus) {
+    return change;
+  }
+
   // Merging is special: it MUST execute PatchOps as the merge action.
   if (nextStatus === "Merged") {
     try {

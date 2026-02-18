@@ -92,8 +92,8 @@ Future UX may hide `/execute` behind merge/approval flows, but execution semanti
 - Snapshots inherit `project_id` from the change, not the record type.
 
 ### Execution
-- Executed changes are immutable.
-- Cannot execute a change twice.
+- Executed changes are immutable (enforced in `patchOpExecutor`, `changeService`, `patchOpService`).
+- Cannot execute a change twice (enforced in `patchOpExecutor` — rejects if any op has `executedAt` set).
 - Executed patch ops cannot be deleted (409).
 - Execution is all-or-nothing (atomic).
 - Execution is deterministic (same inputs → same outputs).

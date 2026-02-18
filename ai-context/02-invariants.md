@@ -39,9 +39,11 @@ Each target type (`form`, `workflow`, `rule`, `record_type`, `script`, `file`) r
 
 **E1. Executed changes are immutable.**
 Once a change reaches `Merged` status, it cannot be modified. No targets can be added. No patch ops can be added or deleted. Status cannot be changed.
+> **Enforced** in `patchOpExecutor.executeChange` (rejects `change.status === "Merged"` before loading ops), `changeService.ts`, and `patchOpService.ts`.
 
 **E2. A change cannot be executed twice.**
 The merge flow is idempotent in effect — snapshot creation checks for existing snapshots — but re-execution of an already-merged change is blocked at the service layer.
+> **Enforced** in `patchOpExecutor.executeChange` (rejects if any op has `executedAt !== null` before Phase 1 begins) and `changeService.ts`.
 
 **E3. Executed patch ops cannot be deleted.**
 If `executed_at IS NOT NULL` on a patch op, deletion returns 409 Conflict. This preserves the audit trail.
@@ -150,8 +152,8 @@ Actors with `actorType: "system"` are not subject to permission checks. This is 
 | D7 | Snapshot + executed_at atomic | patchOpExecutor.ts |
 | D8 | Field types constrained | patchOpService.ts |
 | D9 | Typed target selectors | changeTargetService.ts |
-| E1 | Executed changes immutable | changeService.ts, patchOpService.ts |
-| E2 | No double execution | changeService.ts |
+| E1 | Executed changes immutable | patchOpExecutor.ts, changeService.ts, patchOpService.ts |
+| E2 | No double execution | patchOpExecutor.ts, changeService.ts |
 | E3 | No deleting executed ops | patchOpService.ts |
 | E4 | All-or-nothing execution | patchOpExecutor.ts |
 | E5 | Deterministic transforms | patchOpExecutor.ts |
