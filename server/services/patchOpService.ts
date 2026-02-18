@@ -87,17 +87,18 @@ function validateRenameFieldPayload(payload: Record<string, unknown>): void {
   }
 }
 
-/** Extract the set of recordType+field keys an op touches. */
 function getAffectedFieldKeys(op: ChangePatchOp): string[] {
-  const p = op.payload as Record<string, unknown>;
-  const rt = (p.recordType as string) || "";
+  const payload = (op.payload ?? {}) as Record<string, unknown>;
+  const rt = String(payload.recordType ?? "");
   switch (op.opType) {
     case "set_field":
     case "add_field":
     case "remove_field":
-      return [`${rt}::${p.field}`];
+      return rt && payload.field ? [`${rt}::${String(payload.field)}`] : [];
     case "rename_field":
-      return [`${rt}::${p.oldName}`, `${rt}::${p.newName}`];
+      return rt && payload.oldName
+        ? [`${rt}::${String(payload.oldName)}`]
+        : [];
     default:
       return [];
   }
@@ -115,6 +116,21 @@ export async function createPatchOp(
   const change = await ts.getChange(changeId);
   if (!change) {
     throw new PatchOpServiceError("Change not found", 404);
+  }
+
+  // Control-plane invariant: PatchOps are only allowed while the change is mutable.
+  // Once validating/ready/merged, the patch set must be frozen for deterministic execution.
+  const MUTABLE_STATUSES: ReadonlySet<string> = new Set([
+    "Draft",
+    "Implementing",
+    "WorkspaceRunning",
+    "ValidationFailed",
+  ]);
+  if (!MUTABLE_STATUSES.has(change.status)) {
+    throw new PatchOpServiceError(
+      `Cannot add patch ops to a change in status "${change.status}"`,
+      409,
+    );
   }
 
   const target = await ts.getChangeTarget(targetId);
@@ -210,8 +226,12 @@ export async function deletePatchOp(
     throw new PatchOpServiceError("Change not found", 404);
   }
 
-  if (change.status === "Merged") {
-    throw new PatchOpServiceError("Cannot delete ops from a merged change", 400);
+  const IMMUTABLE_STATUSES: ReadonlySet<string> = new Set(["Validating", "Ready", "Merged"]);
+  if (IMMUTABLE_STATUSES.has(change.status)) {
+    throw new PatchOpServiceError(
+      `Cannot delete ops from a change in status "${change.status}"`,
+      409,
+    );
   }
 
   const op = await ts.getChangePatchOp(opId);
@@ -227,22 +247,9 @@ export async function deletePatchOp(
     throw new PatchOpServiceError("Patch op does not belong to this change", 400);
   }
 
-  if (op.executedAt !== null) {
-    throw new PatchOpServiceError("Cannot delete an executed patch op", 409);
-  }
-
   const deleted = await ts.deleteChangePatchOp(opId);
   if (!deleted) {
-    throw new PatchOpServiceError("Failed to delete patch op", 500);
+    throw new PatchOpServiceError("Patch op not found", 404);
   }
-
   return deleted;
-}
-
-export async function listPatchOps(
-  ctx: TenantContext,
-  changeId: string,
-): Promise<ChangePatchOp[]> {
-  const ts = getTenantStorage(ctx);
-  return ts.getChangePatchOpsByChange(changeId);
 }

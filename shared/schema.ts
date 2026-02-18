@@ -13,6 +13,22 @@ export const changeStatusEnum = pgEnum("change_status", [
   "Merged",
 ]);
 
+
+export const changeEventTypeEnum = pgEnum("change_event_type", [
+  "change_status_changed",
+  "change_target_added",
+  "change_target_deleted",
+  "patch_op_added",
+  "patch_op_deleted",
+  "environment_release_created",
+  "environment_deployed",
+]);
+
+export const environmentReleaseStatusEnum = pgEnum("environment_release_status", [
+  "created",
+]);
+
+
 export const workspaceStatusEnum = pgEnum("workspace_status", [
   "Pending",
   "Running",
@@ -283,6 +299,29 @@ export const environments = pgTable("environments", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+
+// Phase 4b: Environment Promotion (Release + Deployment)
+// Release = immutable pointer to a merged Change
+export const environmentReleases = pgTable("environment_releases", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  sourceChangeId: varchar("source_change_id").notNull().references(() => changeRecords.id),
+  sourceEnvironmentId: varchar("source_environment_id").references(() => environments.id),
+  status: environmentReleaseStatusEnum("status").notNull().default("created"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Deployment = "environment head" pointer update (history preserved)
+export const environmentDeployments = pgTable("environment_deployments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  environmentId: varchar("environment_id").notNull().references(() => environments.id),
+  releaseId: varchar("release_id").notNull().references(() => environmentReleases.id),
+  promotedFromReleaseId: varchar("promoted_from_release_id").references(() => environmentReleases.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
 // Phase 5: Template
 export const templates = pgTable("templates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -499,6 +538,19 @@ export const changePatchOps = pgTable("change_patch_ops", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+
+// Change Events — append-only audit stream (DB triggers should own writes)
+export const changeEvents = pgTable("change_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  changeId: varchar("change_id").references(() => changeRecords.id),
+  eventType: changeEventTypeEnum("event_type").notNull(),
+  payload: jsonb("payload"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
 // Record Type Snapshots — stores pre-change schema for rollback
 export const recordTypeSnapshots = pgTable("record_type_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -679,6 +731,19 @@ export const insertEnvironmentSchema = createInsertSchema(environments).omit({
   createdAt: true,
 });
 
+
+export const insertEnvironmentReleaseSchema = createInsertSchema(environmentReleases).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+});
+
+export const insertEnvironmentDeploymentSchema = createInsertSchema(environmentDeployments).omit({
+  id: true,
+  createdAt: true,
+});
+
+
 export const insertTemplateSchema = createInsertSchema(templates).omit({
   id: true,
   createdAt: true,
@@ -854,6 +919,14 @@ export type AgentRun = typeof agentRuns.$inferSelect;
 
 export type InsertEnvironment = z.infer<typeof insertEnvironmentSchema>;
 export type Environment = typeof environments.$inferSelect;
+
+export type InsertEnvironmentRelease = z.infer<typeof insertEnvironmentReleaseSchema>;
+export type EnvironmentRelease = typeof environmentReleases.$inferSelect;
+
+export type InsertEnvironmentDeployment = z.infer<typeof insertEnvironmentDeploymentSchema>;
+export type EnvironmentDeployment = typeof environmentDeployments.$inferSelect;
+
+export type ChangeEvent = typeof changeEvents.$inferSelect;
 
 export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 export type Template = typeof templates.$inferSelect;

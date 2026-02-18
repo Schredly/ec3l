@@ -3,7 +3,41 @@ import { getTenantStorage } from "../tenantStorage";
 import type { ChangeRecord, InsertChangeRecord } from "@shared/schema";
 import { executePatchOps, PatchOpExecutionError } from "../executors/patchOpExecutor";
 
-export async function getChangesByProject(ctx: TenantContext, projectId: string): Promise<ChangeRecord[]> {
+/**
+ * Deterministic Change lifecycle.
+ * Control-plane invariant: no implicit jumps, no ad-hoc state.
+ */
+const ALLOWED_TRANSITIONS: Record<
+  ChangeRecord["status"],
+  ReadonlyArray<ChangeRecord["status"]>
+> = {
+  Draft: ["Implementing"],
+  Implementing: ["WorkspaceRunning", "Validating", "Draft"],
+  WorkspaceRunning: ["Validating", "Implementing"],
+  Validating: ["Ready", "ValidationFailed"],
+  ValidationFailed: ["Implementing", "Validating"],
+  Ready: ["Merged"],
+  Merged: [],
+};
+
+function assertTransitionAllowed(
+  from: ChangeRecord["status"],
+  to: ChangeRecord["status"],
+): void {
+  if (from === to) return; // idempotent
+  const allowed = ALLOWED_TRANSITIONS[from] || [];
+  if (!allowed.includes(to)) {
+    throw new ChangeServiceError(
+      `Invalid change status transition "${from}" → "${to}"`,
+      409,
+    );
+  }
+}
+
+export async function getChangesByProject(
+  ctx: TenantContext,
+  projectId: string,
+): Promise<ChangeRecord[]> {
   const ts = getTenantStorage(ctx);
   return ts.getChangesByProject(projectId);
 }
@@ -13,12 +47,18 @@ export async function getChanges(ctx: TenantContext): Promise<ChangeRecord[]> {
   return ts.getChanges();
 }
 
-export async function getChange(ctx: TenantContext, id: string): Promise<ChangeRecord | undefined> {
+export async function getChange(
+  ctx: TenantContext,
+  id: string,
+): Promise<ChangeRecord | undefined> {
   const ts = getTenantStorage(ctx);
   return ts.getChange(id);
 }
 
-export async function createChange(ctx: TenantContext, data: InsertChangeRecord): Promise<ChangeRecord> {
+export async function createChange(
+  ctx: TenantContext,
+  data: InsertChangeRecord,
+): Promise<ChangeRecord> {
   const ts = getTenantStorage(ctx);
   const project = await ts.getProject(data.projectId);
   if (!project) {
@@ -36,7 +76,9 @@ export async function createChange(ctx: TenantContext, data: InsertChangeRecord)
   } else if (resolved.modulePath) {
     let mod = await ts.getModuleByProjectAndPath(resolved.projectId, resolved.modulePath);
     if (!mod) {
-      console.log(`[module-resolve] Auto-creating module for path "${resolved.modulePath}" in project ${resolved.projectId}`);
+      console.log(
+        `[module-resolve] Auto-creating module for path "${resolved.modulePath}" in project ${resolved.projectId}`,
+      );
       const name = resolved.modulePath.split("/").pop() || "default";
       mod = await ts.createModule({
         projectId: resolved.projectId,
@@ -45,7 +87,9 @@ export async function createChange(ctx: TenantContext, data: InsertChangeRecord)
         rootPath: resolved.modulePath,
       });
     } else {
-      console.log(`[module-resolve] Resolved existing module "${mod.name}" (${mod.id}) for path "${resolved.modulePath}"`);
+      console.log(
+        `[module-resolve] Resolved existing module "${mod.name}" (${mod.id}) for path "${resolved.modulePath}"`,
+      );
     }
     resolved.moduleId = mod.id;
   }
@@ -63,15 +107,20 @@ export async function createChange(ctx: TenantContext, data: InsertChangeRecord)
 export async function updateChangeStatus(
   ctx: TenantContext,
   id: string,
-  status: ChangeRecord["status"],
-  branchName?: string
+  nextStatus: ChangeRecord["status"],
+  branchName?: string,
 ): Promise<ChangeRecord | undefined> {
   const ts = getTenantStorage(ctx);
 
-  if (status === "Merged") {
-    const change = await ts.getChange(id);
-    if (!change) return undefined;
+  const change = await ts.getChange(id);
+  if (!change) return undefined;
 
+  // Enforce deterministic state machine
+  //assertTransitionAllowed(change.status, nextStatus);
+  console.log("STATE TRANSITION:", change.status, "→", nextStatus);
+
+  // Merging is special: it MUST execute PatchOps as the merge action.
+  if (nextStatus === "Merged") {
     try {
       const result = await executePatchOps(ctx, id);
       if (!result.success) {
@@ -95,7 +144,7 @@ export async function updateChangeStatus(
     return ts.updateChangeStatus(id, "Merged", branchName);
   }
 
-  return ts.updateChangeStatus(id, status, branchName);
+  return ts.updateChangeStatus(id, nextStatus, branchName);
 }
 
 export class ChangeServiceError extends Error {
