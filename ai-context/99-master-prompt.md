@@ -86,6 +86,8 @@ Future UX may hide `/execute` behind merge/approval flows, but execution semanti
 ### Project
 - Record types must have `project_id NOT NULL`.
 - Changes must have `project_id`.
+- Base types must belong to the same project and tenant as the derived record type (enforced in `recordTypeService`).
+- Patch op targets must belong to the same project as their parent change (fail-fast in `patchOpService`).
 - Execution validates cross-project consistency (reject mismatches).
 - Snapshots inherit `project_id` from the change, not the record type.
 

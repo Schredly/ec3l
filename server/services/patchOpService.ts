@@ -142,6 +142,20 @@ export async function createPatchOp(
     throw new PatchOpServiceError("Target does not belong to this change", 400);
   }
 
+  if (target.projectId !== change.projectId) {
+    throw new PatchOpServiceError(
+      "Patch target must belong to same project as change",
+      400,
+    );
+  }
+
+  if (target.tenantId !== ctx.tenantId) {
+    throw new PatchOpServiceError(
+      "Cross-tenant patch target not allowed",
+      400,
+    );
+  }
+
   const p = (payload ?? {}) as Record<string, unknown>;
 
   if (opType === "edit_file") {

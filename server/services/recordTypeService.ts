@@ -91,6 +91,18 @@ export async function createRecordType(
         400,
       );
     }
+    if (base.projectId !== data.projectId) {
+      throw new RecordTypeServiceError(
+        "Base type must belong to same project",
+        400,
+      );
+    }
+    if (base.tenantId !== ctx.tenantId) {
+      throw new RecordTypeServiceError(
+        "Cross-tenant base type not allowed",
+        400,
+      );
+    }
   }
 
   validateSchema(data.schema);
@@ -104,6 +116,62 @@ export async function createRecordType(
     baseType: data.baseType ?? null,
     schema: data.schema ?? { fields: [] },
   });
+}
+
+export async function updateRecordType(
+  ctx: TenantContext,
+  key: string,
+  data: {
+    name?: string;
+    description?: string | null;
+    baseType?: string | null;
+    schema?: Record<string, unknown> | null;
+  },
+): Promise<RecordType> {
+  const ts = getTenantStorage(ctx);
+
+  const existing = await ts.getRecordTypeByKey(key);
+  if (!existing) {
+    throw new RecordTypeServiceError("Record type not found", 404);
+  }
+
+  if (data.baseType) {
+    const base = await ts.getRecordTypeByKey(data.baseType);
+    if (!base) {
+      throw new RecordTypeServiceError(
+        `Base type "${data.baseType}" not found`,
+        400,
+      );
+    }
+    if (base.projectId !== existing.projectId) {
+      throw new RecordTypeServiceError(
+        "Base type must belong to same project",
+        400,
+      );
+    }
+    if (base.tenantId !== ctx.tenantId) {
+      throw new RecordTypeServiceError(
+        "Cross-tenant base type not allowed",
+        400,
+      );
+    }
+  }
+
+  if (data.schema !== undefined && data.schema !== null) {
+    validateSchema(data.schema);
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (data.name !== undefined) updates.name = data.name;
+  if (data.description !== undefined) updates.description = data.description;
+  if (data.baseType !== undefined) updates.baseType = data.baseType;
+  if (data.schema !== undefined) updates.schema = data.schema;
+
+  const updated = await ts.updateRecordType(existing.id, updates);
+  if (!updated) {
+    throw new RecordTypeServiceError("Record type not found", 404);
+  }
+  return updated;
 }
 
 export async function getRecordType(

@@ -79,11 +79,11 @@ This is the data-side enforcement of P1. Even if the record type were somehow in
 
 **P6. Base types must belong to the same project as the derived record type.**
 If `incident` declares `baseType: "task"`, then `task.projectId` must equal `incident.projectId`. Cross-project inheritance creates unresolvable dependency chains.
-> **Current status:** NOT ENFORCED. `recordTypeService.createRecordType` checks base type existence (tenant-scoped) but does not compare `projectId`. This is a known gap — see Enforcement Gaps below.
+> **Enforced** in `recordTypeService.createRecordType` and `recordTypeService.updateRecordType`. Both check `base.projectId === data.projectId` and `base.tenantId === ctx.tenantId` before allowing a baseType reference.
 
 **P7. Patch op creation should validate record type project consistency early.**
 When a record-type patch op is created, `patchOpService` should verify that the target record type belongs to the same project as the change, not defer this check to execution time.
-> **Current status:** NOT ENFORCED. The cross-project check only runs in `patchOpExecutor.ts` during Phase 1 (Load). A patch op targeting a record type in the wrong project will be silently accepted at creation time and fail only at execution.
+> **Enforced** in `patchOpService.createPatchOp`. Fail-fast guard checks `target.projectId === change.projectId` and `target.tenantId === ctx.tenantId` before creating the op. The executor retains its Phase 1 check as defense-in-depth.
 
 ---
 
@@ -93,8 +93,8 @@ The following invariants are documented but not yet enforced. They represent har
 
 | Gap | Current Behavior | Required Behavior | Enforcement Point |
 |-----|-----------------|-------------------|-------------------|
-| P6 | Base type resolved tenant-wide | Must match project | `recordTypeService.ts` |
-| P7 | Cross-project check deferred to execution | Fail-fast at op creation | `patchOpService.ts` |
+| ~~P6~~ | ~~Base type resolved tenant-wide~~ | ~~Must match project~~ | **RESOLVED** — `recordTypeService.ts` |
+| ~~P7~~ | ~~Cross-project check deferred to execution~~ | ~~Fail-fast at op creation~~ | **RESOLVED** — `patchOpService.ts` |
 | `record_types.key` nullable at DB | Service enforces non-empty, DB allows NULL | Add `NOT NULL` constraint | `shared/schema.ts` |
 | Op creation on Merged changes | No status guard on `createPatchOp` | Block if change is Merged/Ready | `patchOpService.ts` |
 
@@ -162,8 +162,8 @@ Actors with `actorType: "system"` are not subject to permission checks. This is 
 | P3 | RT creation validates project | recordTypeService.ts |
 | P4 | Changes scoped to project | tenantStorage.ts |
 | P5 | Target project_id from change | changeTargetService.ts |
-| P6 | Base type same project as derived | **NOT ENFORCED** — recordTypeService.ts |
-| P7 | Op creation validates project early | **NOT ENFORCED** — patchOpService.ts |
+| P6 | Base type same project as derived | recordTypeService.ts |
+| P7 | Op creation validates project early | patchOpService.ts |
 | T1 | Slug-to-UUID resolution | middleware/tenant.ts |
 | T2 | Tenant-scoped queries | tenantStorage.ts |
 | T3 | Missing header → 401 | middleware/tenant.ts |

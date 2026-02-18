@@ -683,6 +683,25 @@ export function getTenantStorage(ctx: TenantContext) {
         .orderBy(desc(recordTypes.createdAt));
     },
 
+    async updateRecordType(
+      id: string,
+      data: Partial<Pick<RecordType, "name" | "description" | "baseType" | "schema">>,
+    ): Promise<RecordType | undefined> {
+      const [existing] = await db
+        .select()
+        .from(recordTypes)
+        .where(
+          and(eq(recordTypes.id, id), eq(recordTypes.tenantId, tenantId)),
+        );
+      if (!existing) return undefined;
+      const [updated] = await db
+        .update(recordTypes)
+        .set(data)
+        .where(eq(recordTypes.id, id))
+        .returning();
+      return updated;
+    },
+
     async updateRecordTypeSchema(
       id: string,
       schema: unknown,
