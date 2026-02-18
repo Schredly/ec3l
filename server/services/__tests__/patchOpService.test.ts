@@ -482,12 +482,12 @@ describe("patchOpService", () => {
       ).rejects.toThrow("Change not found");
     });
 
-    it("throws 400 when change is merged", async () => {
+    it("throws 409 when change is in immutable status", async () => {
       mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Merged" });
 
       await expect(
         deletePatchOp(ctx, "change-1", "po-1"),
-      ).rejects.toThrow("Cannot delete ops from a merged change");
+      ).rejects.toThrow('Cannot delete ops from a change in status "Merged"');
     });
 
     it("throws 404 when patch op not found", async () => {

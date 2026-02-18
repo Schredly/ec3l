@@ -247,9 +247,21 @@ export async function deletePatchOp(
     throw new PatchOpServiceError("Patch op does not belong to this change", 400);
   }
 
+  if (op.executedAt) {
+    throw new PatchOpServiceError("Cannot delete an executed patch op", 409);
+  }
+
   const deleted = await ts.deleteChangePatchOp(opId);
   if (!deleted) {
     throw new PatchOpServiceError("Patch op not found", 404);
   }
   return deleted;
+}
+
+export async function listPatchOps(
+  ctx: TenantContext,
+  changeId: string,
+): Promise<ChangePatchOp[]> {
+  const ts = getTenantStorage(ctx);
+  return ts.getChangePatchOpsByChange(changeId);
 }

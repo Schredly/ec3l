@@ -168,18 +168,22 @@ describe("changeService", () => {
 
   describe("updateChangeStatus", () => {
     it("delegates to ts.updateChangeStatus()", async () => {
-      const updated = { ...fakeChange, status: "InProgress" as const };
+      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Draft" });
+      const updated = { ...fakeChange, status: "Implementing" as const };
       mockTenantStorage.updateChangeStatus.mockResolvedValue(updated);
-      const result = await updateChangeStatus(ctx, "change-1", "InProgress");
-      expect(mockTenantStorage.updateChangeStatus).toHaveBeenCalledWith("change-1", "InProgress", undefined);
+      const result = await updateChangeStatus(ctx, "change-1", "Implementing");
+      expect(mockTenantStorage.getChange).toHaveBeenCalledWith("change-1");
+      expect(mockTenantStorage.updateChangeStatus).toHaveBeenCalledWith("change-1", "Implementing", undefined);
       expect(result).toEqual(updated);
     });
 
     it("passes branchName when provided", async () => {
-      const updated = { ...fakeChange, status: "InProgress" as const, branchName: "feat/x" };
+      mockTenantStorage.getChange.mockResolvedValue({ ...fakeChange, status: "Draft" });
+      const updated = { ...fakeChange, status: "Implementing" as const, branchName: "feat/x" };
       mockTenantStorage.updateChangeStatus.mockResolvedValue(updated);
-      const result = await updateChangeStatus(ctx, "change-1", "InProgress", "feat/x");
-      expect(mockTenantStorage.updateChangeStatus).toHaveBeenCalledWith("change-1", "InProgress", "feat/x");
+      const result = await updateChangeStatus(ctx, "change-1", "Implementing", "feat/x");
+      expect(mockTenantStorage.getChange).toHaveBeenCalledWith("change-1");
+      expect(mockTenantStorage.updateChangeStatus).toHaveBeenCalledWith("change-1", "Implementing", "feat/x");
       expect(result).toEqual(updated);
     });
   });
