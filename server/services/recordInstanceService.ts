@@ -59,6 +59,26 @@ export async function createRecordInstance(
     }));
   }
 
+  // SLA timer creation
+  const slaConfig = rt.slaConfig as { durationMinutes?: number } | null;
+  if (slaConfig?.durationMinutes && slaConfig.durationMinutes > 0) {
+    const dueAt = new Date(Date.now() + slaConfig.durationMinutes * 60_000);
+    storage.createRecordTimer({
+      tenantId: ctx.tenantId,
+      recordId: instance.id,
+      type: "sla_due",
+      dueAt,
+    }).then(() => {
+      emitTelemetry(buildTelemetryParams(ctx, {
+        eventType: "record.sla.created",
+        executionType: "task",
+        executionId: instance.id,
+        status: "timer_created",
+        affectedRecordIds: { recordId: instance.id, dueAt: dueAt.toISOString() },
+      }));
+    }).catch(() => {});
+  }
+
   emitRecordEvent(ctx, "record.created", rt.key, data.data).catch(() => {});
 
   return instance;

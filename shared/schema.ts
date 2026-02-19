@@ -480,6 +480,7 @@ export const recordTypes = pgTable("record_types", {
   baseType: text("base_type"),
   schema: jsonb("schema").notNull().default(sql`'{"fields":[]}'::jsonb`),
   assignmentConfig: jsonb("assignment_config"),
+  slaConfig: jsonb("sla_config"),
   version: integer("version").notNull().default(1),
   status: recordTypeStatusEnum("status").notNull().default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -511,6 +512,24 @@ export const recordInstances = pgTable("record_instances", {
   createdBy: text("created_by").notNull(),
   assignedTo: text("assigned_to"),
   assignedGroup: text("assigned_group"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Record Timers — SLA/deadline tracking for record instances
+export const recordTimerStatusEnum = pgEnum("record_timer_status", [
+  "pending",
+  "breached",
+  "completed",
+]);
+
+export const recordTimers = pgTable("record_timers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  recordId: varchar("record_id").notNull().references(() => recordInstances.id),
+  type: text("type").notNull(),
+  dueAt: timestamp("due_at").notNull(),
+  status: recordTimerStatusEnum("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -896,6 +915,14 @@ export const insertRecordInstanceSchema = createInsertSchema(recordInstances).om
   tenantId: true,
 });
 
+export const insertRecordTimerSchema = createInsertSchema(recordTimers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  status: true,
+  tenantId: true,
+});
+
 export const insertFieldDefinitionSchema = createInsertSchema(fieldDefinitions).omit({
   id: true,
 });
@@ -1021,6 +1048,9 @@ export type RecordType = typeof recordTypes.$inferSelect;
 export type InsertRecordInstance = z.infer<typeof insertRecordInstanceSchema> & { tenantId: string };
 export type RecordInstance = typeof recordInstances.$inferSelect;
 
+export type InsertRecordTimer = z.infer<typeof insertRecordTimerSchema> & { tenantId: string };
+export type RecordTimer = typeof recordTimers.$inferSelect;
+
 export type InsertFieldDefinition = z.infer<typeof insertFieldDefinitionSchema>;
 export type FieldDefinition = typeof fieldDefinitions.$inferSelect;
 
@@ -1085,6 +1115,8 @@ export const telemetryEventTypeEnum = pgEnum("telemetry_event_type", [
   "workflow.intent.completed",
   "workflow.intent.failed",
   "record.assigned",
+  "record.sla.created",
+  "record.sla.breached",
 ]);
 
 export const telemetryExecutionTypeEnum = pgEnum("telemetry_execution_type", [

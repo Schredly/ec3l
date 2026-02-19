@@ -111,6 +111,9 @@ import {
   recordInstances,
   type RecordInstance,
   type InsertRecordInstance,
+  recordTimers,
+  type RecordTimer,
+  type InsertRecordTimer,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -307,6 +310,10 @@ export interface IStorage {
   getRecordInstance(id: string, tenantId: string): Promise<RecordInstance | undefined>;
   listRecordInstancesByRecordType(tenantId: string, recordTypeId: string): Promise<RecordInstance[]>;
   updateRecordInstance(id: string, tenantId: string, data: Record<string, unknown>): Promise<RecordInstance | undefined>;
+
+  createRecordTimer(data: InsertRecordTimer): Promise<RecordTimer>;
+  getDueTimers(now: Date): Promise<RecordTimer[]>;
+  updateTimerStatus(id: string, status: RecordTimer["status"]): Promise<RecordTimer | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1181,6 +1188,24 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db.update(recordInstances)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(recordInstances.id, id))
+      .returning();
+    return updated;
+  }
+
+  async createRecordTimer(data: InsertRecordTimer): Promise<RecordTimer> {
+    const [timer] = await db.insert(recordTimers).values(data).returning();
+    return timer;
+  }
+
+  async getDueTimers(now: Date): Promise<RecordTimer[]> {
+    return db.select().from(recordTimers)
+      .where(and(eq(recordTimers.status, "pending"), lte(recordTimers.dueAt, now)));
+  }
+
+  async updateTimerStatus(id: string, status: RecordTimer["status"]): Promise<RecordTimer | undefined> {
+    const [updated] = await db.update(recordTimers)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(recordTimers.id, id))
       .returning();
     return updated;
   }
