@@ -11,14 +11,22 @@ export function useTenantBootstrap() {
     }
 
     fetch("/api/tenants")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("API unavailable");
+        return r.json();
+      })
       .then((tenants: { id: string }[]) => {
         if (tenants.length > 0) {
           setTenantId(tenants[0].id);
-          setReady(true);
+        } else {
+          setTenantId("default");
         }
+        setReady(true);
       })
-      .catch(console.error);
+      .catch(() => {
+        setTenantId("default");
+        setReady(true);
+      });
   }, []);
 
   return ready;
