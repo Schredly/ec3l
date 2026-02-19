@@ -108,6 +108,9 @@ import {
   type InsertExecutionTelemetryEvent,
   changeEvents,
   type ChangeEvent,
+  recordInstances,
+  type RecordInstance,
+  type InsertRecordInstance,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -297,6 +300,11 @@ export interface IStorage {
   getExecutionTelemetryEvents(tenantId: string, opts?: { from?: Date; to?: Date; limit?: number }): Promise<ExecutionTelemetryEvent[]>;
 
   getChangeEvents(tenantId: string, limit?: number): Promise<ChangeEvent[]>;
+
+  createRecordInstance(data: InsertRecordInstance): Promise<RecordInstance>;
+  getRecordInstance(id: string, tenantId: string): Promise<RecordInstance | undefined>;
+  listRecordInstancesByRecordType(tenantId: string, recordTypeId: string): Promise<RecordInstance[]>;
+  updateRecordInstance(id: string, tenantId: string, data: Record<string, unknown>): Promise<RecordInstance | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1125,6 +1133,34 @@ export class DatabaseStorage implements IStorage {
       .where(eq(changeEvents.tenantId, tenantId))
       .orderBy(desc(changeEvents.createdAt))
       .limit(limit);
+  }
+
+  async createRecordInstance(data: InsertRecordInstance): Promise<RecordInstance> {
+    const [instance] = await db.insert(recordInstances).values(data).returning();
+    return instance;
+  }
+
+  async getRecordInstance(id: string, tenantId: string): Promise<RecordInstance | undefined> {
+    const [instance] = await db.select().from(recordInstances)
+      .where(and(eq(recordInstances.id, id), eq(recordInstances.tenantId, tenantId)));
+    return instance;
+  }
+
+  async listRecordInstancesByRecordType(tenantId: string, recordTypeId: string): Promise<RecordInstance[]> {
+    return db.select().from(recordInstances)
+      .where(and(eq(recordInstances.tenantId, tenantId), eq(recordInstances.recordTypeId, recordTypeId)))
+      .orderBy(desc(recordInstances.createdAt));
+  }
+
+  async updateRecordInstance(id: string, tenantId: string, data: Record<string, unknown>): Promise<RecordInstance | undefined> {
+    const [existing] = await db.select().from(recordInstances)
+      .where(and(eq(recordInstances.id, id), eq(recordInstances.tenantId, tenantId)));
+    if (!existing) return undefined;
+    const [updated] = await db.update(recordInstances)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(recordInstances.id, id))
+      .returning();
+    return updated;
   }
 }
 

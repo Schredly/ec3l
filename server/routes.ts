@@ -1918,6 +1918,55 @@ export async function registerRoutes(
     }
   });
 
+  // --- Record Instances ---
+  app.post("/api/record-instances", async (req, res) => {
+    try {
+      const { recordTypeId, data } = req.body;
+      if (!recordTypeId) return res.status(400).json({ message: "recordTypeId is required" });
+      if (!data || typeof data !== "object") return res.status(400).json({ message: "data is required and must be an object" });
+      const instance = await ec3l.recordInstance.createRecordInstance(req.tenantContext, { recordTypeId, data });
+      res.status(201).json(instance);
+    } catch (err) {
+      if (err instanceof ec3l.recordInstance.RecordInstanceServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/record-instances", async (req, res) => {
+    try {
+      const { recordTypeId } = req.query;
+      if (!recordTypeId) return res.status(400).json({ message: "recordTypeId query parameter is required" });
+      const instances = await ec3l.recordInstance.listRecordInstances(req.tenantContext, recordTypeId as string);
+      res.json(instances);
+    } catch (err) {
+      if (err instanceof ec3l.recordInstance.RecordInstanceServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/record-instances/:id", async (req, res) => {
+    try {
+      const instance = await ec3l.recordInstance.getRecordInstance(req.tenantContext, req.params.id);
+      if (!instance) return res.status(404).json({ message: "Record instance not found" });
+      res.json(instance);
+    } catch (err) {
+      if (err instanceof ec3l.recordInstance.RecordInstanceServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.patch("/api/record-instances/:id", async (req, res) => {
+    try {
+      const { data } = req.body;
+      if (!data || typeof data !== "object") return res.status(400).json({ message: "data is required and must be an object" });
+      const instance = await ec3l.recordInstance.updateRecordInstance(req.tenantContext, req.params.id, data);
+      res.json(instance);
+    } catch (err) {
+      if (err instanceof ec3l.recordInstance.RecordInstanceServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
   app.get("/api/audit-feed", async (req, res) => {
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
     const feed = await ec3l.auditFeed.getAuditFeed(req.tenantContext, { limit });

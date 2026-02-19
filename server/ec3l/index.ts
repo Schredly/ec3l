@@ -24,6 +24,7 @@ import * as intentDispatcher from "../services/intentDispatcher";
 import * as scheduler from "../services/schedulerService";
 import * as hrLite from "../services/hrLiteInstaller";
 import * as agentGuard from "../services/agentGuardService";
+import * as recordInstance from "../services/recordInstanceService";
 
 export const ec3l = {
   project,
@@ -49,4 +50,5 @@ export const ec3l = {
   scheduler,
   hrLite,
   agentGuard,
+  recordInstance,
 } as const;

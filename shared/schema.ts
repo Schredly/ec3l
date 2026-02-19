@@ -499,6 +499,17 @@ export const recordLocks = pgTable("record_locks", {
   unique("uq_record_locks_tenant_type_record").on(table.tenantId, table.recordTypeId, table.recordId),
 ]);
 
+// Record Instances — runtime data rows governed by record_types
+export const recordInstances = pgTable("record_instances", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  recordTypeId: varchar("record_type_id").notNull().references(() => recordTypes.id),
+  data: jsonb("data").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Agent Proposals — propose-only agent outputs linked to Change drafts
 export const agentProposals = pgTable("agent_proposals", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -873,6 +884,13 @@ export const insertRecordTypeSchema = createInsertSchema(recordTypes).omit({
   tenantId: true,
 });
 
+export const insertRecordInstanceSchema = createInsertSchema(recordInstances).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  tenantId: true,
+});
+
 export const insertFieldDefinitionSchema = createInsertSchema(fieldDefinitions).omit({
   id: true,
 });
@@ -994,6 +1012,9 @@ export type RecordLock = typeof recordLocks.$inferSelect;
 
 export type InsertRecordType = z.infer<typeof insertRecordTypeSchema> & { tenantId: string };
 export type RecordType = typeof recordTypes.$inferSelect;
+
+export type InsertRecordInstance = z.infer<typeof insertRecordInstanceSchema> & { tenantId: string };
+export type RecordInstance = typeof recordInstances.$inferSelect;
 
 export type InsertFieldDefinition = z.infer<typeof insertFieldDefinitionSchema>;
 export type FieldDefinition = typeof fieldDefinitions.$inferSelect;
