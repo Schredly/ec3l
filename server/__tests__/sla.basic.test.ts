@@ -5,6 +5,7 @@ const mockGetRecordType = vi.fn();
 const mockCreateRecordInstance = vi.fn();
 const mockCreateRecordTimer = vi.fn();
 const mockGetDueTimers = vi.fn();
+const mockGetDueTimersByTenant = vi.fn();
 const mockUpdateTimerStatus = vi.fn();
 
 vi.mock("../storage", () => ({
@@ -13,6 +14,7 @@ vi.mock("../storage", () => ({
     createRecordInstance: (...args: unknown[]) => mockCreateRecordInstance(...args),
     createRecordTimer: (...args: unknown[]) => mockCreateRecordTimer(...args),
     getDueTimers: (...args: unknown[]) => mockGetDueTimers(...args),
+    getDueTimersByTenant: (...args: unknown[]) => mockGetDueTimersByTenant(...args),
     updateTimerStatus: (...args: unknown[]) => mockUpdateTimerStatus(...args),
   },
 }));
@@ -187,6 +189,29 @@ describe("processDueTimers", () => {
 
     expect(count).toBe(0);
     expect(mockUpdateTimerStatus).not.toHaveBeenCalled();
+  });
+
+  it("processes only the given tenant when tenantId is provided", async () => {
+    const pastDue = new Date("2024-01-01T00:00:00Z");
+    mockGetDueTimersByTenant.mockResolvedValue([
+      {
+        id: "timer-a",
+        tenantId: "tenant-a",
+        recordId: "ri-a",
+        type: "sla_due",
+        dueAt: pastDue,
+        status: "pending",
+        createdAt: pastDue,
+        updatedAt: pastDue,
+      },
+    ]);
+    mockUpdateTimerStatus.mockResolvedValue({});
+
+    const count = await processDueTimers(new Date("2024-01-02T00:00:00Z"), "tenant-a");
+
+    expect(count).toBe(1);
+    expect(mockGetDueTimersByTenant).toHaveBeenCalledWith("tenant-a", expect.any(Date));
+    expect(mockGetDueTimers).not.toHaveBeenCalled();
   });
 
   it("enforces tenant isolation via tenant-scoped telemetry", async () => {

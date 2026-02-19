@@ -1,5 +1,5 @@
 import type { TenantContext } from "../tenant";
-import { storage } from "../storage";
+import { storage, type RecordInstanceWithSla } from "../storage";
 import type { RecordInstance } from "@shared/schema";
 import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
 import { emitRecordEvent } from "./triggerService";
@@ -96,6 +96,13 @@ export async function listRecordInstances(
   recordTypeId: string,
 ): Promise<RecordInstance[]> {
   return storage.listRecordInstancesByRecordType(ctx.tenantId, recordTypeId);
+}
+
+export async function listRecordInstancesWithSla(
+  ctx: TenantContext,
+  recordTypeId: string,
+): Promise<RecordInstanceWithSla[]> {
+  return storage.listRecordInstancesWithSla(ctx.tenantId, recordTypeId);
 }
 
 export async function updateRecordInstance(

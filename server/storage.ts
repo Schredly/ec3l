@@ -1,4 +1,4 @@
-import { eq, desc, and, or, asc, gte, lte } from "drizzle-orm";
+import { eq, desc, and, or, asc, gte, lte, getTableColumns } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants,
@@ -313,8 +313,15 @@ export interface IStorage {
 
   createRecordTimer(data: InsertRecordTimer): Promise<RecordTimer>;
   getDueTimers(now: Date): Promise<RecordTimer[]>;
+  getDueTimersByTenant(tenantId: string, now: Date): Promise<RecordTimer[]>;
   updateTimerStatus(id: string, status: RecordTimer["status"]): Promise<RecordTimer | undefined>;
+  listRecordInstancesWithSla(tenantId: string, recordTypeId: string): Promise<RecordInstanceWithSla[]>;
 }
+
+export type RecordInstanceWithSla = RecordInstance & {
+  dueAt: Date | null;
+  slaStatus: string | null;
+};
 
 export class DatabaseStorage implements IStorage {
   async getTenants(): Promise<Tenant[]> {
@@ -1202,12 +1209,35 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(recordTimers.status, "pending"), lte(recordTimers.dueAt, now)));
   }
 
+  async getDueTimersByTenant(tenantId: string, now: Date): Promise<RecordTimer[]> {
+    return db.select().from(recordTimers)
+      .where(and(
+        eq(recordTimers.tenantId, tenantId),
+        eq(recordTimers.status, "pending"),
+        lte(recordTimers.dueAt, now),
+      ));
+  }
+
   async updateTimerStatus(id: string, status: RecordTimer["status"]): Promise<RecordTimer | undefined> {
     const [updated] = await db.update(recordTimers)
       .set({ status, updatedAt: new Date() })
       .where(eq(recordTimers.id, id))
       .returning();
     return updated;
+  }
+
+  async listRecordInstancesWithSla(tenantId: string, recordTypeId: string): Promise<RecordInstanceWithSla[]> {
+    const cols = getTableColumns(recordInstances);
+    const rows = await db.select({
+      ...cols,
+      dueAt: recordTimers.dueAt,
+      slaStatus: recordTimers.status,
+    })
+      .from(recordInstances)
+      .leftJoin(recordTimers, eq(recordTimers.recordId, recordInstances.id))
+      .where(and(eq(recordInstances.tenantId, tenantId), eq(recordInstances.recordTypeId, recordTypeId)))
+      .orderBy(desc(recordInstances.createdAt));
+    return rows;
   }
 }
 

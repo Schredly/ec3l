@@ -8,9 +8,11 @@ import type { TenantContext } from "../tenant";
  * Idempotent — breached timers are not reprocessed.
  * Never throws for individual timer failures.
  */
-export async function processDueTimers(now?: Date): Promise<number> {
+export async function processDueTimers(now?: Date, tenantId?: string): Promise<number> {
   const effectiveNow = now ?? new Date();
-  const dueTimers = await storage.getDueTimers(effectiveNow);
+  const dueTimers = tenantId
+    ? await storage.getDueTimersByTenant(tenantId, effectiveNow)
+    : await storage.getDueTimers(effectiveNow);
   let processed = 0;
 
   for (const timer of dueTimers) {

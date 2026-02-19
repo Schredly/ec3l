@@ -2,10 +2,18 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Database, User, Users } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { Database, User, Users, Timer, Play } from "lucide-react";
+import { formatDistanceToNow, format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { RecordType, RecordInstance } from "@shared/schema";
+
+type RecordInstanceWithSla = RecordInstance & {
+  dueAt: string | null;
+  slaStatus: string | null;
+};
 
 function AssignedCell({ assignedTo, assignedGroup }: { assignedTo: string | null; assignedGroup: string | null }) {
   if (assignedTo) {
@@ -27,25 +35,80 @@ function AssignedCell({ assignedTo, assignedGroup }: { assignedTo: string | null
   return <span className="text-xs text-muted-foreground">Unassigned</span>;
 }
 
+function SlaStatusBadge({ slaStatus }: { slaStatus: string | null }) {
+  if (!slaStatus) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  if (slaStatus === "breached") {
+    return (
+      <Badge variant="destructive" className="gap-1 text-xs">
+        <Timer className="w-3 h-3" />
+        Breached
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="gap-1 text-xs bg-green-600 hover:bg-green-700">
+      <Timer className="w-3 h-3" />
+      Pending
+    </Badge>
+  );
+}
+
 export default function Records() {
   const [selectedTypeId, setSelectedTypeId] = useState<string>("");
+  const [processing, setProcessing] = useState(false);
+  const { toast } = useToast();
 
   const { data: recordTypes, isLoading: typesLoading } = useQuery<RecordType[]>({
     queryKey: ["/api/record-types"],
   });
 
-  const { data: instances, isLoading: instancesLoading } = useQuery<RecordInstance[]>({
+  const { data: instances, isLoading: instancesLoading } = useQuery<RecordInstanceWithSla[]>({
     queryKey: [`/api/record-instances?recordTypeId=${selectedTypeId}`],
     enabled: !!selectedTypeId,
   });
 
+  async function handleProcessTimers() {
+    setProcessing(true);
+    try {
+      const res = await apiRequest("POST", "/api/timers/process");
+      const { processedCount } = await res.json();
+      toast({
+        title: "Timers processed",
+        description: `${processedCount} timer(s) marked as breached.`,
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/record-instances?recordTypeId=${selectedTypeId}`] });
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "Failed to process timers",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Record Instances</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Browse record instances and assignment status
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Record Instances</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Browse record instances, assignment, and SLA status
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleProcessTimers}
+          disabled={processing}
+          className="gap-2"
+        >
+          <Play className="w-4 h-4" />
+          {processing ? "Processing…" : "Process Timers"}
+        </Button>
       </div>
 
       <div>
@@ -102,6 +165,8 @@ export default function Records() {
               <tr className="border-b bg-muted/50">
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground">ID</th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground">Assigned</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">SLA Due</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">SLA Status</th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground">Created By</th>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground">Created</th>
               </tr>
@@ -121,6 +186,14 @@ export default function Records() {
                       assignedTo={instance.assignedTo}
                       assignedGroup={instance.assignedGroup}
                     />
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">
+                    {instance.dueAt
+                      ? format(new Date(instance.dueAt), "MMM d, HH:mm")
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-2">
+                    <SlaStatusBadge slaStatus={instance.slaStatus} />
                   </td>
                   <td className="px-4 py-2 text-xs">
                     {instance.createdBy}

@@ -1919,6 +1919,12 @@ export async function registerRoutes(
     }
   });
 
+  // --- Timers ---
+  app.post("/api/timers/process", async (req, res) => {
+    const processedCount = await ec3l.timer.processDueTimers(undefined, req.tenantContext.tenantId);
+    res.json({ processedCount });
+  });
+
   // --- Record Instances ---
   app.post("/api/record-instances", async (req, res) => {
     try {
@@ -1937,7 +1943,7 @@ export async function registerRoutes(
     try {
       const { recordTypeId } = req.query;
       if (!recordTypeId) return res.status(400).json({ message: "recordTypeId query parameter is required" });
-      const instances = await ec3l.recordInstance.listRecordInstances(req.tenantContext, recordTypeId as string);
+      const instances = await ec3l.recordInstance.listRecordInstancesWithSla(req.tenantContext, recordTypeId as string);
       res.json(instances);
     } catch (err) {
       if (err instanceof ec3l.recordInstance.RecordInstanceServiceError) return res.status(err.statusCode).json({ message: err.message });

@@ -25,6 +25,7 @@ import * as scheduler from "../services/schedulerService";
 import * as hrLite from "../services/hrLiteInstaller";
 import * as agentGuard from "../services/agentGuardService";
 import * as recordInstance from "../services/recordInstanceService";
+import * as timer from "../services/timerService";
 
 export const ec3l = {
   project,
@@ -51,4 +52,5 @@ export const ec3l = {
   hrLite,
   agentGuard,
   recordInstance,
+  timer,
 } as const;
