@@ -1,10 +1,12 @@
 import { Badge } from "@/components/ui/badge";
-import { Circle, GitBranch, Play, CheckCircle2, GitMerge, Clock, XCircle, Loader2 } from "lucide-react";
+import { Circle, GitBranch, Play, CheckCircle2, GitMerge, Clock, XCircle, Loader2, Wrench, AlertTriangle } from "lucide-react";
 
 const changeStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive"; icon: React.ReactNode }> = {
   Draft: { label: "Draft", variant: "secondary", icon: <Circle className="w-3 h-3" /> },
+  Implementing: { label: "Implementing", variant: "outline", icon: <Wrench className="w-3 h-3" /> },
   WorkspaceRunning: { label: "Workspace Running", variant: "default", icon: <Play className="w-3 h-3" /> },
   Validating: { label: "Validating", variant: "outline", icon: <Loader2 className="w-3 h-3 animate-spin" /> },
+  ValidationFailed: { label: "Validation Failed", variant: "destructive", icon: <AlertTriangle className="w-3 h-3" /> },
   Ready: { label: "Ready", variant: "default", icon: <CheckCircle2 className="w-3 h-3" /> },
   Merged: { label: "Merged", variant: "secondary", icon: <GitMerge className="w-3 h-3" /> },
 };

@@ -5,12 +5,21 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +40,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ChangeStatusBadge, WorkspaceStatusBadge, AgentRunStatusBadge } from "@/components/status-badge";
 import {
   ArrowLeft,
+  ArrowRight,
   Play,
   CheckCircle2,
   GitPullRequestArrow,
@@ -40,9 +50,38 @@ import {
   Clock,
   FileCode2,
   Loader2,
+  Target,
+  Wrench,
+  History,
 } from "lucide-react";
-import type { ChangeRecord, Workspace, AgentRun, Project } from "@shared/schema";
-import { formatDistanceToNow } from "date-fns";
+import type { ChangeRecord, Workspace, AgentRun, Project, ChangeTarget, ChangePatchOp } from "@shared/schema";
+import { formatDistanceToNow, format } from "date-fns";
+
+// --- Allowed transitions (mirrors server/services/changeService.ts) ---
+
+const ALLOWED_TRANSITIONS: Record<string, readonly string[]> = {
+  Draft: ["Implementing"],
+  Implementing: ["WorkspaceRunning", "Validating", "Draft"],
+  WorkspaceRunning: ["Validating", "Implementing"],
+  Validating: ["Ready", "ValidationFailed"],
+  ValidationFailed: ["Implementing", "Validating"],
+  Ready: ["Merged"],
+  Merged: [],
+};
+
+// --- Audit feed entry shape ---
+
+interface AuditFeedEntry {
+  id: string;
+  timestamp: string;
+  source: "change" | "rbac" | "telemetry";
+  eventType: string;
+  entityType: string | null;
+  entityId: string | null;
+  payload: unknown;
+}
+
+// --- Sub-panels ---
 
 function WorkspacePanel({ changeId, workspace }: { changeId: string; workspace?: Workspace | null }) {
   const { toast } = useToast();
@@ -254,6 +293,138 @@ function AgentRunPanel({ changeId, agentRuns }: { changeId: string; agentRuns: A
   );
 }
 
+function TargetsPanel({ targets }: { targets: ChangeTarget[] }) {
+  if (targets.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <Target className="w-8 h-8 text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">No targets</p>
+      </div>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Type</TableHead>
+          <TableHead>Selector</TableHead>
+          <TableHead>Created</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {targets.map((t) => {
+          const selector = t.selector as Record<string, unknown> | null;
+          return (
+            <TableRow key={t.id}>
+              <TableCell className="font-mono text-xs">{t.type}</TableCell>
+              <TableCell className="font-mono text-xs max-w-xs truncate">
+                {selector ? JSON.stringify(selector) : "-"}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {formatDistanceToNow(new Date(t.createdAt), { addSuffix: true })}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+function PatchOpsPanel({ patchOps }: { patchOps: ChangePatchOp[] }) {
+  if (patchOps.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <Wrench className="w-8 h-8 text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">No patch operations</p>
+      </div>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Op Type</TableHead>
+          <TableHead>Payload</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Created</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {patchOps.map((op) => {
+          const payload = op.payload as Record<string, unknown> | null;
+          const summary = payload
+            ? `${payload.recordType || ""}${payload.field ? "." + payload.field : ""}`
+            : "-";
+          return (
+            <TableRow key={op.id}>
+              <TableCell>
+                <Badge variant="outline" className="font-mono text-xs">
+                  {op.opType}
+                </Badge>
+              </TableCell>
+              <TableCell className="font-mono text-xs max-w-xs truncate">{summary}</TableCell>
+              <TableCell>
+                {op.executedAt ? (
+                  <Badge variant="secondary" className="text-xs">Executed</Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs">Pending</Badge>
+                )}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {formatDistanceToNow(new Date(op.createdAt), { addSuffix: true })}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+function TimelinePanel({ entries }: { entries: AuditFeedEntry[] }) {
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <History className="w-8 h-8 text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">No timeline events</p>
+      </div>
+    );
+  }
+
+  const sourceColors: Record<string, string> = {
+    change: "bg-blue-500",
+    telemetry: "bg-green-500",
+    rbac: "bg-orange-500",
+  };
+
+  return (
+    <div className="space-y-0">
+      {entries.map((entry, idx) => (
+        <div key={entry.id} className="flex gap-3 pb-4">
+          <div className="flex flex-col items-center">
+            <div className={`w-2 h-2 rounded-full mt-2 ${sourceColors[entry.source] || "bg-muted-foreground"}`} />
+            {idx < entries.length - 1 && <div className="w-px flex-1 bg-border mt-1" />}
+          </div>
+          <div className="flex-1 min-w-0 pb-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium">{entry.eventType}</span>
+              <Badge variant="outline" className="text-[10px]">{entry.source}</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {format(new Date(entry.timestamp), "MMM d, yyyy HH:mm:ss")}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --- Main page ---
+
 export default function ChangeDetail() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
@@ -274,33 +445,31 @@ export default function ChangeDetail() {
     queryKey: ["/api/changes", id, "project"],
   });
 
-  const checkinMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/changes/${id}/checkin`);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/changes", id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/changes"] });
-      toast({ title: "Checked in", description: "Change status updated to Ready." });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
+  const { data: targets } = useQuery<ChangeTarget[]>({
+    queryKey: ["/api/changes", id, "targets"],
   });
 
-  const mergeMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/changes/${id}/merge`);
+  const { data: patchOps } = useQuery<ChangePatchOp[]>({
+    queryKey: ["/api/changes", id, "patch-ops"],
+  });
+
+  const { data: auditFeed } = useQuery<AuditFeedEntry[]>({
+    queryKey: ["/api/audit-feed?limit=50"],
+  });
+
+  const transitionMutation = useMutation({
+    mutationFn: async (nextStatus: string) => {
+      const res = await apiRequest("POST", `/api/changes/${id}/status`, { status: nextStatus });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/changes", id] });
       queryClient.invalidateQueries({ queryKey: ["/api/changes"] });
-      toast({ title: "Merged", description: "Change has been merged." });
+      queryClient.invalidateQueries({ queryKey: ["/api/audit-feed?limit=50"] });
+      toast({ title: "Status updated" });
     },
     onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: "Transition failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -322,11 +491,18 @@ export default function ChangeDetail() {
     );
   }
 
-  const statusSteps = ["Draft", "WorkspaceRunning", "Validating", "Ready", "Merged"];
+  const allowedNext = ALLOWED_TRANSITIONS[change.status] || [];
+  const statusSteps = ["Draft", "Implementing", "WorkspaceRunning", "Validating", "Ready", "Merged"];
   const currentIdx = statusSteps.indexOf(change.status);
+
+  // Filter audit feed to entries related to this change
+  const timelineEntries = (auditFeed || []).filter(
+    (e) => e.entityId === id,
+  );
 
   return (
     <div className="p-6 space-y-6 max-w-5xl mx-auto">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Link href={project ? `/projects/${project.id}` : "/changes"}>
           <Button variant="ghost" size="icon" data-testid="button-back-change">
@@ -364,6 +540,7 @@ export default function ChangeDetail() {
         </div>
       </div>
 
+      {/* Progress bar */}
       <Card>
         <CardContent className="py-4">
           <div className="flex items-center gap-1">
@@ -404,39 +581,39 @@ export default function ChangeDetail() {
         </Card>
       )}
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {change.status === "WorkspaceRunning" && (
-          <Button
-            onClick={() => checkinMutation.mutate()}
-            disabled={checkinMutation.isPending}
-            data-testid="button-checkin"
-          >
-            {checkinMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4 mr-2" />
-            )}
-            Check In
-          </Button>
-        )}
-        {change.status === "Ready" && (
-          <Button
-            onClick={() => mergeMutation.mutate()}
-            disabled={mergeMutation.isPending}
-            data-testid="button-merge"
-          >
-            {mergeMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <GitPullRequestArrow className="w-4 h-4 mr-2" />
-            )}
-            Merge
-          </Button>
-        )}
-      </div>
+      {/* Status transition buttons */}
+      {allowedNext.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {allowedNext.map((nextStatus) => (
+            <Button
+              key={nextStatus}
+              onClick={() => transitionMutation.mutate(nextStatus)}
+              disabled={transitionMutation.isPending}
+              variant={nextStatus === "Merged" ? "default" : "outline"}
+              data-testid={`button-transition-${nextStatus}`}
+            >
+              {transitionMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <ArrowRight className="w-4 h-4 mr-2" />
+              )}
+              {nextStatus}
+            </Button>
+          ))}
+        </div>
+      )}
 
-      <Tabs defaultValue="workspace" className="w-full">
+      {/* Tabbed sections */}
+      <Tabs defaultValue="targets" className="w-full">
         <TabsList>
+          <TabsTrigger value="targets" data-testid="tab-targets">
+            <Target className="w-4 h-4 mr-2" />
+            Targets
+          </TabsTrigger>
+          <TabsTrigger value="patch-ops" data-testid="tab-patch-ops">
+            <Wrench className="w-4 h-4 mr-2" />
+            Patch Ops
+          </TabsTrigger>
           <TabsTrigger value="workspace" data-testid="tab-workspace">
             <Terminal className="w-4 h-4 mr-2" />
             Workspace
@@ -445,7 +622,28 @@ export default function ChangeDetail() {
             <Bot className="w-4 h-4 mr-2" />
             Agent Runs
           </TabsTrigger>
+          <TabsTrigger value="timeline" data-testid="tab-timeline">
+            <History className="w-4 h-4 mr-2" />
+            Timeline
+          </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="targets" className="mt-4">
+          <Card>
+            <CardContent className="pt-4">
+              <TargetsPanel targets={targets || []} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="patch-ops" className="mt-4">
+          <Card>
+            <CardContent className="pt-4">
+              <PatchOpsPanel patchOps={patchOps || []} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="workspace" className="mt-4">
           <Card>
             <CardContent className="pt-4">
@@ -453,10 +651,19 @@ export default function ChangeDetail() {
             </CardContent>
           </Card>
         </TabsContent>
+
         <TabsContent value="agent" className="mt-4">
           <Card>
             <CardContent className="pt-4">
               <AgentRunPanel changeId={change.id} agentRuns={agentRuns || []} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="timeline" className="mt-4">
+          <Card>
+            <CardContent className="pt-4">
+              <TimelinePanel entries={timelineEntries} />
             </CardContent>
           </Card>
         </TabsContent>
