@@ -1,4 +1,4 @@
-import { eq, desc, and, asc, gte, lte } from "drizzle-orm";
+import { eq, desc, and, or, asc, gte, lte } from "drizzle-orm";
 import { db } from "./db";
 import {
   tenants,
@@ -216,6 +216,8 @@ export interface IStorage {
   getPendingIntents(): Promise<WorkflowExecutionIntent[]>;
   getIntentByIdempotencyKey(key: string): Promise<WorkflowExecutionIntent | undefined>;
   createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent>;
+  claimIntent(id: string): Promise<WorkflowExecutionIntent | undefined>;
+  completeIntent(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined>;
   updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined>;
   updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined>;
 
@@ -775,6 +777,22 @@ export class DatabaseStorage implements IStorage {
     return intent;
   }
 
+  async claimIntent(id: string): Promise<WorkflowExecutionIntent | undefined> {
+    const [intent] = await db.update(workflowExecutionIntents)
+      .set({ status: "running" })
+      .where(and(eq(workflowExecutionIntents.id, id), eq(workflowExecutionIntents.status, "pending")))
+      .returning();
+    return intent;
+  }
+
+  async completeIntent(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined> {
+    const [intent] = await db.update(workflowExecutionIntents)
+      .set({ status: "completed", executionId, dispatchedAt: new Date() })
+      .where(and(eq(workflowExecutionIntents.id, id), eq(workflowExecutionIntents.status, "running")))
+      .returning();
+    return intent;
+  }
+
   async updateIntentDispatched(id: string, executionId: string): Promise<WorkflowExecutionIntent | undefined> {
     const [intent] = await db.update(workflowExecutionIntents)
       .set({ status: "dispatched", executionId, dispatchedAt: new Date() })
@@ -786,7 +804,10 @@ export class DatabaseStorage implements IStorage {
   async updateIntentFailed(id: string, error: string): Promise<WorkflowExecutionIntent | undefined> {
     const [intent] = await db.update(workflowExecutionIntents)
       .set({ status: "failed", error, dispatchedAt: new Date() })
-      .where(and(eq(workflowExecutionIntents.id, id), eq(workflowExecutionIntents.status, "pending")))
+      .where(and(
+        eq(workflowExecutionIntents.id, id),
+        or(eq(workflowExecutionIntents.status, "pending"), eq(workflowExecutionIntents.status, "running")),
+      ))
       .returning();
     return intent;
   }

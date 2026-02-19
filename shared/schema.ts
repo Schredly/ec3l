@@ -127,6 +127,8 @@ export const wfTriggerStatusEnum = pgEnum("wf_trigger_status", [
 
 export const wfIntentStatusEnum = pgEnum("wf_intent_status", [
   "pending",
+  "running",
+  "completed",
   "dispatched",
   "failed",
   "duplicate",
@@ -1076,6 +1078,9 @@ export const telemetryEventTypeEnum = pgEnum("telemetry_event_type", [
   "execution_started",
   "execution_completed",
   "execution_failed",
+  "workflow.intent.started",
+  "workflow.intent.completed",
+  "workflow.intent.failed",
 ]);
 
 export const telemetryExecutionTypeEnum = pgEnum("telemetry_execution_type", [
