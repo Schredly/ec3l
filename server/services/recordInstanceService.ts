@@ -2,6 +2,7 @@ import type { TenantContext } from "../tenant";
 import { storage } from "../storage";
 import type { RecordInstance } from "@shared/schema";
 import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
+import { emitRecordEvent } from "./triggerService";
 
 export class RecordInstanceServiceError extends Error {
   public readonly statusCode: number;
@@ -39,6 +40,8 @@ export async function createRecordInstance(
     executionId: instance.id,
     status: "created",
   }));
+
+  emitRecordEvent(ctx, "record.created", rt.key, data.data).catch(() => {});
 
   return instance;
 }
@@ -78,6 +81,11 @@ export async function updateRecordInstance(
     executionId: id,
     status: "updated",
   }));
+
+  const rt = await storage.getRecordType(existing.recordTypeId);
+  if (rt) {
+    emitRecordEvent(ctx, "record.updated", rt.key, data).catch(() => {});
+  }
 
   return updated;
 }

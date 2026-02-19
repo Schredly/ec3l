@@ -22,6 +22,10 @@ vi.mock("../services/telemetryService", () => ({
   buildTelemetryParams: vi.fn(() => ({})),
 }));
 
+vi.mock("../services/triggerService", () => ({
+  emitRecordEvent: vi.fn(() => Promise.resolve([])),
+}));
+
 import {
   createRecordInstance,
   getRecordInstance,
