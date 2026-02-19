@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import type { RecordInstance } from "@shared/schema";
 import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
 import { emitRecordEvent } from "./triggerService";
+import { resolveAssignment } from "./assignmentService";
 
 export class RecordInstanceServiceError extends Error {
   public readonly statusCode: number;
@@ -26,12 +27,15 @@ export async function createRecordInstance(
   }
 
   const createdBy = ctx.userId ?? ctx.agentId ?? "system";
+  const assignment = resolveAssignment(rt);
 
   const instance = await storage.createRecordInstance({
     tenantId: ctx.tenantId,
     recordTypeId: data.recordTypeId,
     data: data.data,
     createdBy,
+    ...(assignment?.assignedTo && { assignedTo: assignment.assignedTo }),
+    ...(assignment?.assignedGroup && { assignedGroup: assignment.assignedGroup }),
   });
 
   emitTelemetry(buildTelemetryParams(ctx, {
@@ -40,6 +44,20 @@ export async function createRecordInstance(
     executionId: instance.id,
     status: "created",
   }));
+
+  if (assignment) {
+    emitTelemetry(buildTelemetryParams(ctx, {
+      eventType: "record.assigned",
+      executionType: "task",
+      executionId: instance.id,
+      status: "assigned",
+      affectedRecordIds: {
+        recordId: instance.id,
+        assignedTo: assignment.assignedTo ?? null,
+        assignedGroup: assignment.assignedGroup ?? null,
+      },
+    }));
+  }
 
   emitRecordEvent(ctx, "record.created", rt.key, data.data).catch(() => {});
 

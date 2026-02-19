@@ -479,6 +479,7 @@ export const recordTypes = pgTable("record_types", {
   description: text("description"),
   baseType: text("base_type"),
   schema: jsonb("schema").notNull().default(sql`'{"fields":[]}'::jsonb`),
+  assignmentConfig: jsonb("assignment_config"),
   version: integer("version").notNull().default(1),
   status: recordTypeStatusEnum("status").notNull().default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -508,6 +509,8 @@ export const recordInstances = pgTable("record_instances", {
   recordTypeId: varchar("record_type_id").notNull().references(() => recordTypes.id),
   data: jsonb("data").notNull(),
   createdBy: text("created_by").notNull(),
+  assignedTo: text("assigned_to"),
+  assignedGroup: text("assigned_group"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1081,6 +1084,7 @@ export const telemetryEventTypeEnum = pgEnum("telemetry_event_type", [
   "workflow.intent.started",
   "workflow.intent.completed",
   "workflow.intent.failed",
+  "record.assigned",
 ]);
 
 export const telemetryExecutionTypeEnum = pgEnum("telemetry_execution_type", [
