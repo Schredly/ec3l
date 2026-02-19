@@ -9,52 +9,17 @@ import { ModuleBoundaryViolationError } from "./moduleContext";
 import { CapabilityDeniedError } from "./capabilities";
 import type { CapabilityProfileName } from "./capabilityProfiles";
 import { PlatformContexts } from "./platformContext";
-import * as projectService from "./services/projectService";
-import * as changeService from "./services/changeService";
-import { ChangeServiceError } from "./services/changeService";
-import * as workspaceService from "./services/workspaceService";
-import * as agentRunService from "./services/agentRunService";
-import * as moduleService from "./services/moduleService";
-import * as environmentService from "./services/environmentService";
-import { ReleaseServiceError } from "./services/environmentService";
-import * as templateService from "./services/templateService";
-import * as installService from "./services/installService";
-import { InstallServiceError } from "./services/installService";
-import * as overrideService from "./services/overrideService";
-import { OverrideServiceError, OverridePatchValidationError } from "./services/overrideService";
-import * as workflowService from "./services/workflowService";
-import { WorkflowServiceError } from "./services/workflowService";
-import * as triggerService from "./services/triggerService";
-import { TriggerServiceError } from "./services/triggerService";
+import { ec3l } from "./ec3l";
 import { insertWorkflowTriggerSchema, insertRecordTypeSchema, insertFieldDefinitionSchema, insertChoiceListSchema, insertChoiceItemSchema, insertFormDefinitionSchema, insertFormSectionSchema, insertFormFieldPlacementSchema, insertFormBehaviorRuleSchema } from "@shared/schema";
-import { dispatchPendingIntents } from "./services/intentDispatcher";
-import { startScheduler } from "./services/schedulerService";
-import * as formService from "./services/formService";
-import { installHrLite, HrLiteInstallError } from "./services/hrLiteInstaller";
-import { FormServiceError } from "./services/formService";
-import * as rbacService from "./services/rbacService";
-import { RbacDeniedError, PERMISSIONS, seedPermissions, seedDefaultRoles, actorFromContext, resolveActorFromContext, systemActor } from "./services/rbacService";
 import { insertRbacRoleSchema, insertRbacPolicySchema } from "@shared/schema";
-import type { ActorIdentity } from "@shared/schema";
-import { assertNotAgent, AgentGuardError } from "./services/agentGuardService";
-import * as agentProposalService from "./services/agentProposalService";
-import { AgentProposalError } from "./services/agentProposalService";
-import * as auditFeedService from "./services/auditFeedService";
-import * as changeTargetService from "./services/changeTargetService";
-import { ChangeTargetServiceError } from "./services/changeTargetService";
-import * as recordTypeService from "./services/recordTypeService";
-import { RecordTypeServiceError } from "./services/recordTypeService";
-import * as patchOpService from "./services/patchOpService";
-import { PatchOpServiceError } from "./services/patchOpService";
 import { insertChangeTargetSchema } from "@shared/schema";
-import { executePatchOps, PatchOpExecutionError } from "./executors/patchOpExecutor";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
 
-  await seedPermissions();
+  await ec3l.rbac.seedPermissions();
 
   app.get("/api/tenants", async (_req, res) => {
     const tenantList = await storage.getTenants();
@@ -65,12 +30,12 @@ export async function registerRoutes(
 
   // Projects — tenant-scoped via service layer
   app.get("/api/projects", async (req, res) => {
-    const result = await projectService.getProjects(req.tenantContext);
+    const result = await ec3l.project.getProjects(req.tenantContext);
     res.json(result);
   });
 
   app.get("/api/projects/:id", async (req, res) => {
-    const project = await projectService.getProject(req.tenantContext, req.params.id);
+    const project = await ec3l.project.getProject(req.tenantContext, req.params.id);
     if (!project) return res.status(404).json({ message: "Project not found" });
     res.json(project);
   });
@@ -79,33 +44,33 @@ export async function registerRoutes(
     const parsed = insertProjectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
-    const project = await projectService.createProject(req.tenantContext, parsed.data);
+    const project = await ec3l.project.createProject(req.tenantContext, parsed.data);
     res.status(201).json(project);
   });
 
   app.get("/api/projects/:id/changes", async (req, res) => {
-    const changes = await changeService.getChangesByProject(req.tenantContext, req.params.id);
+    const changes = await ec3l.change.getChangesByProject(req.tenantContext, req.params.id);
     res.json(changes);
   });
 
   app.get("/api/projects/:id/modules", async (req, res) => {
-    const mods = await moduleService.getModulesByProject(req.tenantContext, req.params.id);
+    const mods = await ec3l.module.getModulesByProject(req.tenantContext, req.params.id);
     res.json(mods);
   });
 
   app.get("/api/projects/:id/environments", async (req, res) => {
-    const envs = await environmentService.getEnvironmentsByProject(req.tenantContext, req.params.id);
+    const envs = await ec3l.environment.getEnvironmentsByProject(req.tenantContext, req.params.id);
     res.json(envs);
   });
 
   // Changes
   app.get("/api/changes", async (req, res) => {
-    const changes = await changeService.getChanges(req.tenantContext);
+    const changes = await ec3l.change.getChanges(req.tenantContext);
     res.json(changes);
   });
 
   app.get("/api/changes/:id", async (req, res) => {
-    const change = await changeService.getChange(req.tenantContext, req.params.id);
+    const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
     res.json(change);
   });
@@ -115,10 +80,10 @@ export async function registerRoutes(
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
     try {
-      const change = await changeService.createChange(req.tenantContext, parsed.data);
+      const change = await ec3l.change.createChange(req.tenantContext, parsed.data);
       res.status(201).json(change);
     } catch (err) {
-      if (err instanceof ChangeServiceError) {
+      if (err instanceof ec3l.change.ChangeServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -129,22 +94,22 @@ export async function registerRoutes(
     const { status } = req.body;
     if (!status) return res.status(400).json({ message: "status is required" });
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
       if (status === "Ready" || status === "Merged") {
-        assertNotAgent(actor, "approve changes");
-        await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+        ec3l.agentGuard.assertNotAgent(actor, "approve changes");
+        await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
       }
-      const updated = await changeService.updateChangeStatus(req.tenantContext, req.params.id, status);
+      const updated = await ec3l.change.updateChangeStatus(req.tenantContext, req.params.id, status);
       if (!updated) return res.status(404).json({ message: "Change not found" });
       res.json(updated);
     } catch (err: any) {
-      if (err instanceof AgentGuardError) {
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
-      if (err instanceof ChangeServiceError) {
+      if (err instanceof ec3l.change.ChangeServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       if (err.message?.startsWith("Missing actor identity") || err.message?.startsWith("Missing user identity")) {
@@ -155,19 +120,19 @@ export async function registerRoutes(
   });
 
   app.get("/api/changes/:id/project", async (req, res) => {
-    const change = await changeService.getChange(req.tenantContext, req.params.id);
+    const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
-    const project = await projectService.getProject(req.tenantContext, change.projectId);
+    const project = await ec3l.project.getProject(req.tenantContext, change.projectId);
     res.json(project || null);
   });
 
   app.get("/api/changes/:id/workspace", async (req, res) => {
-    const workspace = await workspaceService.getWorkspaceByChange(req.tenantContext, req.params.id);
+    const workspace = await ec3l.workspace.getWorkspaceByChange(req.tenantContext, req.params.id);
     res.json(workspace || null);
   });
 
   app.get("/api/changes/:id/agent-runs", async (req, res) => {
-    const runs = await agentRunService.getAgentRunsByChange(req.tenantContext, req.params.id);
+    const runs = await ec3l.agentRun.getAgentRunsByChange(req.tenantContext, req.params.id);
     res.json(runs);
   });
 
@@ -177,14 +142,14 @@ export async function registerRoutes(
       const parsed = insertChangeTargetSchema
         .omit({ projectId: true, changeId: true })
         .parse(req.body);
-      const target = await changeTargetService.createChangeTarget(
+      const target = await ec3l.changeTarget.createChangeTarget(
         req.tenantContext,
         req.params.id,
         parsed,
       );
       res.status(201).json(target);
     } catch (err) {
-      if (err instanceof ChangeTargetServiceError) {
+      if (err instanceof ec3l.changeTarget.ChangeTargetServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       if (err instanceof Error && err.name === "ZodError") {
@@ -196,13 +161,13 @@ export async function registerRoutes(
 
   app.get("/api/changes/:id/targets", async (req, res) => {
     try {
-      const targets = await changeTargetService.listChangeTargets(
+      const targets = await ec3l.changeTarget.listChangeTargets(
         req.tenantContext,
         req.params.id,
       );
       res.json(targets);
     } catch (err) {
-      if (err instanceof ChangeTargetServiceError) {
+      if (err instanceof ec3l.changeTarget.ChangeTargetServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -218,7 +183,7 @@ export async function registerRoutes(
       if (payload === undefined || payload === null) {
         return res.status(400).json({ message: "payload is required" });
       }
-      const op = await patchOpService.createPatchOp(
+      const op = await ec3l.patchOp.createPatchOp(
         req.tenantContext,
         req.params.id,
         targetId,
@@ -227,7 +192,7 @@ export async function registerRoutes(
       );
       res.status(201).json(op);
     } catch (err) {
-      if (err instanceof PatchOpServiceError) {
+      if (err instanceof ec3l.patchOp.PatchOpServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -236,14 +201,14 @@ export async function registerRoutes(
 
   app.delete("/api/changes/:id/patch-ops/:opId", async (req, res) => {
     try {
-      await patchOpService.deletePatchOp(
+      await ec3l.patchOp.deletePatchOp(
         req.tenantContext,
         req.params.id,
         req.params.opId,
       );
       res.status(204).send();
     } catch (err) {
-      if (err instanceof PatchOpServiceError) {
+      if (err instanceof ec3l.patchOp.PatchOpServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -252,13 +217,13 @@ export async function registerRoutes(
 
   app.get("/api/changes/:id/patch-ops", async (req, res) => {
     try {
-      const ops = await patchOpService.listPatchOps(
+      const ops = await ec3l.patchOp.listPatchOps(
         req.tenantContext,
         req.params.id,
       );
       res.json(ops);
     } catch (err) {
-      if (err instanceof PatchOpServiceError) {
+      if (err instanceof ec3l.patchOp.PatchOpServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -268,19 +233,19 @@ export async function registerRoutes(
   // Execute patch operations for a change
   app.post("/api/changes/:id/execute", async (req, res) => {
     try {
-      const change = await changeService.getChange(req.tenantContext, req.params.id);
+      const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
       if (!change) return res.status(404).json({ message: "Change not found" });
 
-      const result = await executePatchOps(req.tenantContext, req.params.id);
+      const result = await ec3l.patchOpExecutor.executePatchOps(req.tenantContext, req.params.id);
       if (!result.success) {
         return res.status(422).json({ message: result.error, ...result });
       }
       res.json(result);
     } catch (err) {
-      if (err instanceof PatchOpExecutionError) {
+      if (err instanceof ec3l.patchOpExecutor.PatchOpExecutionError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
-      if (err instanceof ChangeServiceError) {
+      if (err instanceof ec3l.change.ChangeServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -289,7 +254,7 @@ export async function registerRoutes(
 
   // Start workspace — control plane delegates to runner service
   app.post("/api/changes/:id/start-workspace", async (req, res) => {
-    const change = await changeService.getChange(req.tenantContext, req.params.id);
+    const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
     if (change.status === "ValidationFailed") {
@@ -311,15 +276,15 @@ export async function registerRoutes(
       capabilityProfile: (mod?.capabilityProfile as CapabilityProfileName) ?? "CODE_MODULE_DEFAULT",
     });
 
-    const updated = await workspaceService.startWorkspace(req.tenantContext, change, moduleCtx);
+    const updated = await ec3l.workspace.startWorkspace(req.tenantContext, change, moduleCtx);
     res.status(201).json(updated);
   });
 
   // Check in
   app.post("/api/changes/:id/checkin", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
-      const change = await changeService.getChange(req.tenantContext, req.params.id);
+      await ec3l.rbac.authorize(req.tenantContext, ec3l.rbac.actorFromContext(req.tenantContext), ec3l.rbac.PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+      const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
       if (!change) return res.status(404).json({ message: "Change not found" });
 
       if (change.status === "ValidationFailed") {
@@ -329,11 +294,11 @@ export async function registerRoutes(
         });
       }
 
-      await changeService.updateChangeStatus(req.tenantContext, change.id, "Ready");
-      const updated = await changeService.getChange(req.tenantContext, change.id);
+      await ec3l.change.updateChangeStatus(req.tenantContext, change.id, "Ready");
+      const updated = await ec3l.change.getChange(req.tenantContext, change.id);
       res.json(updated);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
       throw err;
@@ -343,8 +308,8 @@ export async function registerRoutes(
   // Merge
   app.post("/api/changes/:id/merge", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
-      const change = await changeService.getChange(req.tenantContext, req.params.id);
+      await ec3l.rbac.authorize(req.tenantContext, ec3l.rbac.actorFromContext(req.tenantContext), ec3l.rbac.PERMISSIONS.CHANGE_APPROVE, "change", req.params.id);
+      const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
       if (!change) return res.status(404).json({ message: "Change not found" });
 
       if (change.status === "ValidationFailed") {
@@ -354,18 +319,18 @@ export async function registerRoutes(
         });
       }
 
-      await changeService.updateChangeStatus(req.tenantContext, change.id, "Merged");
-      const workspace = await workspaceService.getWorkspaceByChange(req.tenantContext, change.id);
+      await ec3l.change.updateChangeStatus(req.tenantContext, change.id, "Merged");
+      const workspace = await ec3l.workspace.getWorkspaceByChange(req.tenantContext, change.id);
       if (workspace) {
-        await workspaceService.stopWorkspace(req.tenantContext, workspace.id);
+        await ec3l.workspace.stopWorkspace(req.tenantContext, workspace.id);
       }
-      const updated = await changeService.getChange(req.tenantContext, change.id);
+      const updated = await ec3l.change.getChange(req.tenantContext, change.id);
       res.json(updated);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
-      if (err instanceof ChangeServiceError) {
+      if (err instanceof ec3l.change.ChangeServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -374,7 +339,7 @@ export async function registerRoutes(
 
   // Agent run — with module-scoped permissions
   app.post("/api/changes/:id/agent-run", async (req, res) => {
-    const change = await changeService.getChange(req.tenantContext, req.params.id);
+    const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });
 
     if (change.status === "ValidationFailed") {
@@ -400,7 +365,7 @@ export async function registerRoutes(
     });
 
     try {
-      const run = await agentRunService.createAgentRun(req.tenantContext, parsed.data, change, moduleCtx);
+      const run = await ec3l.agentRun.createAgentRun(req.tenantContext, parsed.data, change, moduleCtx);
       res.status(201).json(run);
     } catch (err) {
       if (err instanceof CapabilityDeniedError) {
@@ -427,19 +392,19 @@ export async function registerRoutes(
 
   // Agent runs (all)
   app.get("/api/agent-runs", async (req, res) => {
-    const runs = await agentRunService.getAgentRuns(req.tenantContext);
+    const runs = await ec3l.agentRun.getAgentRuns(req.tenantContext);
     res.json(runs);
   });
 
   // Modules
   app.get("/api/modules", async (req, res) => {
-    const mods = await moduleService.getModules(req.tenantContext);
+    const mods = await ec3l.module.getModules(req.tenantContext);
     res.json(mods);
   });
 
   // Environments
   app.get("/api/environments/:id", async (req, res) => {
-    const env = await environmentService.getEnvironment(req.tenantContext, req.params.id);
+    const env = await ec3l.environment.getEnvironment(req.tenantContext, req.params.id);
     if (!env) return res.status(404).json({ message: "Environment not found" });
     res.json(env);
   });
@@ -447,23 +412,23 @@ export async function registerRoutes(
   // Environment Release Snapshot
   app.post("/api/environments/:id/release", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(
         req.tenantContext,
         actor,
-        PERMISSIONS.ENVIRONMENT_RELEASE_CREATE,
+        ec3l.rbac.PERMISSIONS.ENVIRONMENT_RELEASE_CREATE,
       );
-      const release = await environmentService.createReleaseSnapshot(
+      const release = await ec3l.environment.createReleaseSnapshot(
         req.tenantContext,
         req.params.id,
         actor,
       );
       res.status(201).json(release);
     } catch (err: any) {
-      if (err instanceof ReleaseServiceError) {
+      if (err instanceof ec3l.environment.ReleaseServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
       if (
@@ -478,31 +443,31 @@ export async function registerRoutes(
 
   // Templates (read-only, system context)
   app.get("/api/templates", async (_req, res) => {
-    const temps = await templateService.systemGetTemplates(PlatformContexts.templateRead());
+    const temps = await ec3l.template.systemGetTemplates(PlatformContexts.templateRead());
     res.json(temps);
   });
 
   app.get("/api/templates/:id", async (req, res) => {
-    const template = await templateService.systemGetTemplate(PlatformContexts.templateRead(), req.params.id);
+    const template = await ec3l.template.systemGetTemplate(PlatformContexts.templateRead(), req.params.id);
     if (!template) return res.status(404).json({ message: "Template not found" });
     res.json(template);
   });
 
   app.get("/api/templates/:id/modules", async (req, res) => {
-    const tms = await templateService.systemGetTemplateModules(PlatformContexts.templateRead(), req.params.id);
+    const tms = await ec3l.template.systemGetTemplateModules(PlatformContexts.templateRead(), req.params.id);
     res.json(tms);
   });
 
   app.post("/api/templates/:id/install", async (req, res) => {
     try {
-      const installed = await installService.installTemplateIntoTenant(
+      const installed = await ec3l.install.installTemplateIntoTenant(
         PlatformContexts.templateInstall(),
         req.tenantContext.tenantId,
         req.params.id,
       );
       res.status(201).json(installed);
     } catch (err) {
-      if (err instanceof InstallServiceError) {
+      if (err instanceof ec3l.install.InstallServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -510,7 +475,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/installed-apps", async (req, res) => {
-    const apps = await installService.getInstalledApps(
+    const apps = await ec3l.install.getInstalledApps(
       PlatformContexts.installedAppsRead(),
       req.tenantContext.tenantId,
     );
@@ -519,17 +484,17 @@ export async function registerRoutes(
 
   // Module Overrides — tenant-scoped
   app.get("/api/overrides", async (req, res) => {
-    const overrides = await overrideService.getOverridesByTenant(req.tenantContext);
+    const overrides = await ec3l.override.getOverridesByTenant(req.tenantContext);
     res.json(overrides);
   });
 
   app.get("/api/overrides/:id", async (req, res) => {
     try {
-      const override = await overrideService.getOverride(req.tenantContext, req.params.id);
+      const override = await ec3l.override.getOverride(req.tenantContext, req.params.id);
       if (!override) return res.status(404).json({ message: "Override not found" });
       res.json(override);
     } catch (err) {
-      if (err instanceof OverrideServiceError) {
+      if (err instanceof ec3l.override.OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -541,16 +506,16 @@ export async function registerRoutes(
     if (!parsed.success) return res.status(400).json({ message: parsed.error.message });
 
     try {
-      const override = await overrideService.createOverride(req.tenantContext, {
+      const override = await ec3l.override.createOverride(req.tenantContext, {
         ...parsed.data,
         tenantId: req.tenantContext.tenantId,
       });
       res.status(201).json(override);
     } catch (err) {
-      if (err instanceof OverridePatchValidationError) {
+      if (err instanceof ec3l.override.OverridePatchValidationError) {
         return res.status(err.statusCode).json({ message: err.message, violations: err.violations });
       }
-      if (err instanceof OverrideServiceError) {
+      if (err instanceof ec3l.override.OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -559,22 +524,22 @@ export async function registerRoutes(
 
   app.post("/api/overrides/:id/activate", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      assertNotAgent(actor, "activate overrides");
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.OVERRIDE_ACTIVATE, "override", req.params.id);
-      const override = await overrideService.activateOverride(req.tenantContext, req.params.id);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      ec3l.agentGuard.assertNotAgent(actor, "activate overrides");
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.OVERRIDE_ACTIVATE, "override", req.params.id);
+      const override = await ec3l.override.activateOverride(req.tenantContext, req.params.id);
       res.json(override);
     } catch (err) {
-      if (err instanceof AgentGuardError) {
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
-      if (err instanceof OverridePatchValidationError) {
+      if (err instanceof ec3l.override.OverridePatchValidationError) {
         return res.status(err.statusCode).json({ message: err.message, violations: err.violations });
       }
-      if (err instanceof OverrideServiceError) {
+      if (err instanceof ec3l.override.OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -583,10 +548,10 @@ export async function registerRoutes(
 
   app.post("/api/overrides/:id/retire", async (req, res) => {
     try {
-      const override = await overrideService.retireOverride(req.tenantContext, req.params.id);
+      const override = await ec3l.override.retireOverride(req.tenantContext, req.params.id);
       res.json(override);
     } catch (err) {
-      if (err instanceof OverrideServiceError) {
+      if (err instanceof ec3l.override.OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -595,13 +560,13 @@ export async function registerRoutes(
 
   app.get("/api/installed-modules/:id/overrides", async (req, res) => {
     try {
-      const overrides = await overrideService.getOverridesByInstalledModule(
+      const overrides = await ec3l.override.getOverridesByInstalledModule(
         req.tenantContext,
         req.params.id,
       );
       res.json(overrides);
     } catch (err) {
-      if (err instanceof OverrideServiceError) {
+      if (err instanceof ec3l.override.OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -610,13 +575,13 @@ export async function registerRoutes(
 
   app.get("/api/installed-modules/:id/resolve", async (req, res) => {
     try {
-      const resolved = await overrideService.resolveModuleConfig(
+      const resolved = await ec3l.override.resolveModuleConfig(
         req.tenantContext,
         req.params.id,
       );
       res.json(resolved);
     } catch (err) {
-      if (err instanceof OverrideServiceError) {
+      if (err instanceof ec3l.override.OverrideServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -625,10 +590,10 @@ export async function registerRoutes(
 
   app.get("/api/workflow-definitions", async (req, res) => {
     try {
-      const defs = await workflowService.getWorkflowDefinitions(req.tenantContext);
+      const defs = await ec3l.workflow.getWorkflowDefinitions(req.tenantContext);
       res.json(defs);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -637,11 +602,11 @@ export async function registerRoutes(
 
   app.get("/api/workflow-definitions/:id", async (req, res) => {
     try {
-      const def = await workflowService.getWorkflowDefinition(req.tenantContext, req.params.id);
+      const def = await ec3l.workflow.getWorkflowDefinition(req.tenantContext, req.params.id);
       if (!def) return res.status(404).json({ message: "Workflow definition not found" });
       res.json(def);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -655,7 +620,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "projectId is required" });
       }
       const parsed = insertWorkflowDefinitionSchema.parse(data);
-      const def = await workflowService.createWorkflowDefinition(
+      const def = await ec3l.workflow.createWorkflowDefinition(
         req.tenantContext,
         parsed,
         projectId,
@@ -663,7 +628,7 @@ export async function registerRoutes(
       );
       res.status(201).json(def);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -672,10 +637,10 @@ export async function registerRoutes(
 
   app.post("/api/workflow-definitions/:id/activate", async (req, res) => {
     try {
-      const def = await workflowService.activateWorkflowDefinition(req.tenantContext, req.params.id);
+      const def = await ec3l.workflow.activateWorkflowDefinition(req.tenantContext, req.params.id);
       res.json(def);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -684,10 +649,10 @@ export async function registerRoutes(
 
   app.post("/api/workflow-definitions/:id/retire", async (req, res) => {
     try {
-      const def = await workflowService.retireWorkflowDefinition(req.tenantContext, req.params.id);
+      const def = await ec3l.workflow.retireWorkflowDefinition(req.tenantContext, req.params.id);
       res.json(def);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -696,10 +661,10 @@ export async function registerRoutes(
 
   app.get("/api/workflow-definitions/:id/steps", async (req, res) => {
     try {
-      const steps = await workflowService.getWorkflowSteps(req.tenantContext, req.params.id);
+      const steps = await ec3l.workflow.getWorkflowSteps(req.tenantContext, req.params.id);
       res.json(steps);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -709,14 +674,14 @@ export async function registerRoutes(
   app.post("/api/workflow-definitions/:id/steps", async (req, res) => {
     try {
       const parsed = insertWorkflowStepSchema.omit({ workflowDefinitionId: true }).parse(req.body);
-      const step = await workflowService.addWorkflowStep(
+      const step = await ec3l.workflow.addWorkflowStep(
         req.tenantContext,
         req.params.id,
         parsed,
       );
       res.status(201).json(step);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -725,9 +690,9 @@ export async function registerRoutes(
 
   app.post("/api/workflow-definitions/:id/execute", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      assertNotAgent(actor, "execute workflows");
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.WORKFLOW_EXECUTE, "workflow", req.params.id);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      ec3l.agentGuard.assertNotAgent(actor, "execute workflows");
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.WORKFLOW_EXECUTE, "workflow", req.params.id);
       const { moduleId, input } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -745,7 +710,7 @@ export async function registerRoutes(
         capabilityProfile: mod.capabilityProfile as any,
       });
 
-      const execution = await workflowService.executeWorkflow(
+      const execution = await ec3l.workflow.executeWorkflow(
         req.tenantContext,
         moduleCtx,
         req.params.id,
@@ -753,16 +718,16 @@ export async function registerRoutes(
       );
       res.status(201).json(execution);
     } catch (err) {
-      if (err instanceof AgentGuardError) {
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
       if (err instanceof CapabilityDeniedError) {
         return res.status(403).json({ message: err.message, capability: err.capability });
       }
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -771,10 +736,10 @@ export async function registerRoutes(
 
   app.get("/api/workflow-executions", async (req, res) => {
     try {
-      const execs = await workflowService.getWorkflowExecutions(req.tenantContext);
+      const execs = await ec3l.workflow.getWorkflowExecutions(req.tenantContext);
       res.json(execs);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -783,11 +748,11 @@ export async function registerRoutes(
 
   app.get("/api/workflow-executions/:id", async (req, res) => {
     try {
-      const exec = await workflowService.getWorkflowExecution(req.tenantContext, req.params.id);
+      const exec = await ec3l.workflow.getWorkflowExecution(req.tenantContext, req.params.id);
       if (!exec) return res.status(404).json({ message: "Workflow execution not found" });
       res.json(exec);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -796,9 +761,9 @@ export async function registerRoutes(
 
   app.post("/api/workflow-executions/:id/resume", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      assertNotAgent(actor, "approve or resume workflow executions");
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.WORKFLOW_APPROVE, "workflow", req.params.id);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      ec3l.agentGuard.assertNotAgent(actor, "approve or resume workflow executions");
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.WORKFLOW_APPROVE, "workflow", req.params.id);
       const { moduleId, stepExecutionId, outcome } = req.body;
       if (!moduleId) {
         return res.status(400).json({ message: "moduleId is required" });
@@ -822,7 +787,7 @@ export async function registerRoutes(
         capabilityProfile: mod.capabilityProfile as any,
       });
 
-      const execution = await workflowService.resumeWorkflowExecution(
+      const execution = await ec3l.workflow.resumeWorkflowExecution(
         req.tenantContext,
         moduleCtx,
         req.params.id,
@@ -831,16 +796,16 @@ export async function registerRoutes(
       );
       res.json(execution);
     } catch (err) {
-      if (err instanceof AgentGuardError) {
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
       if (err instanceof CapabilityDeniedError) {
         return res.status(403).json({ message: err.message, capability: err.capability });
       }
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -849,10 +814,10 @@ export async function registerRoutes(
 
   app.get("/api/workflow-executions/:id/steps", async (req, res) => {
     try {
-      const steps = await workflowService.getWorkflowExecutionSteps(req.tenantContext, req.params.id);
+      const steps = await ec3l.workflow.getWorkflowExecutionSteps(req.tenantContext, req.params.id);
       res.json(steps);
     } catch (err) {
-      if (err instanceof WorkflowServiceError) {
+      if (err instanceof ec3l.workflow.WorkflowServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -861,10 +826,10 @@ export async function registerRoutes(
 
   app.get("/api/workflow-triggers", async (req, res) => {
     try {
-      const triggers = await triggerService.getTriggersByTenant(req.tenantContext);
+      const triggers = await ec3l.trigger.getTriggersByTenant(req.tenantContext);
       res.json(triggers);
     } catch (err) {
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -873,11 +838,11 @@ export async function registerRoutes(
 
   app.get("/api/workflow-triggers/:id", async (req, res) => {
     try {
-      const trigger = await triggerService.getTrigger(req.tenantContext, req.params.id);
+      const trigger = await ec3l.trigger.getTrigger(req.tenantContext, req.params.id);
       if (!trigger) return res.status(404).json({ message: "Trigger not found" });
       res.json(trigger);
     } catch (err) {
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -887,10 +852,10 @@ export async function registerRoutes(
   app.post("/api/workflow-triggers", async (req, res) => {
     try {
       const parsed = insertWorkflowTriggerSchema.parse(req.body);
-      const trigger = await triggerService.createTrigger(req.tenantContext, parsed);
+      const trigger = await ec3l.trigger.createTrigger(req.tenantContext, parsed);
       res.status(201).json(trigger);
     } catch (err) {
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -899,10 +864,10 @@ export async function registerRoutes(
 
   app.post("/api/workflow-triggers/:id/disable", async (req, res) => {
     try {
-      const trigger = await triggerService.disableTrigger(req.tenantContext, req.params.id);
+      const trigger = await ec3l.trigger.disableTrigger(req.tenantContext, req.params.id);
       res.json(trigger);
     } catch (err) {
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -911,10 +876,10 @@ export async function registerRoutes(
 
   app.post("/api/workflow-triggers/:id/enable", async (req, res) => {
     try {
-      const trigger = await triggerService.enableTrigger(req.tenantContext, req.params.id);
+      const trigger = await ec3l.trigger.enableTrigger(req.tenantContext, req.params.id);
       res.json(trigger);
     } catch (err) {
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -923,19 +888,19 @@ export async function registerRoutes(
 
   app.post("/api/workflow-triggers/:id/fire", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      assertNotAgent(actor, "fire workflow triggers");
-      const intent = await triggerService.fireManualTrigger(
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      ec3l.agentGuard.assertNotAgent(actor, "fire workflow triggers");
+      const intent = await ec3l.trigger.fireManualTrigger(
         req.tenantContext,
         req.params.id,
         req.body.payload || {},
       );
       res.status(201).json(intent);
     } catch (err) {
-      if (err instanceof AgentGuardError) {
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -944,13 +909,13 @@ export async function registerRoutes(
 
   app.get("/api/workflow-definitions/:id/triggers", async (req, res) => {
     try {
-      const triggers = await triggerService.getTriggersByDefinition(
+      const triggers = await ec3l.trigger.getTriggersByDefinition(
         req.tenantContext,
         req.params.id,
       );
       res.json(triggers);
     } catch (err) {
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -963,7 +928,7 @@ export async function registerRoutes(
       if (!event || !recordType) {
         return res.status(400).json({ message: "event and recordType are required" });
       }
-      const intents = await triggerService.emitRecordEvent(
+      const intents = await ec3l.trigger.emitRecordEvent(
         req.tenantContext,
         event,
         recordType,
@@ -971,7 +936,7 @@ export async function registerRoutes(
       );
       res.status(201).json({ matched: intents.length, intents });
     } catch (err) {
-      if (err instanceof TriggerServiceError) {
+      if (err instanceof ec3l.trigger.TriggerServiceError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -994,7 +959,7 @@ export async function registerRoutes(
 
   app.post("/api/workflow-intents/dispatch", async (req, res) => {
     try {
-      const dispatched = await dispatchPendingIntents();
+      const dispatched = await ec3l.intentDispatcher.dispatchPendingIntents();
       res.json({ dispatched: dispatched.length, intents: dispatched });
     } catch (err) {
       throw err;
@@ -1004,32 +969,32 @@ export async function registerRoutes(
   // --- Record Types ---
   app.get("/api/record-types", async (req, res) => {
     try {
-      const types = await recordTypeService.listRecordTypes(req.tenantContext);
+      const types = await ec3l.recordType.listRecordTypes(req.tenantContext);
       res.json(types);
     } catch (err) {
-      if (err instanceof RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.recordType.RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
 
   app.get("/api/record-types/by-key/:key", async (req, res) => {
     try {
-      const rt = await recordTypeService.getRecordType(req.tenantContext, req.params.key);
+      const rt = await ec3l.recordType.getRecordType(req.tenantContext, req.params.key);
       if (!rt) return res.status(404).json({ message: "Record type not found" });
       res.json(rt);
     } catch (err) {
-      if (err instanceof RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.recordType.RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
 
   app.get("/api/record-types/:id", async (req, res) => {
     try {
-      const rt = await formService.getRecordType(req.tenantContext, req.params.id);
+      const rt = await ec3l.form.getRecordType(req.tenantContext, req.params.id);
       if (!rt) return res.status(404).json({ message: "Record type not found" });
       res.json(rt);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1040,15 +1005,15 @@ export async function registerRoutes(
         return res.status(400).json({ message: "projectId is required" });
       }
       if (req.body.key) {
-        const rt = await recordTypeService.createRecordType(req.tenantContext, req.body);
+        const rt = await ec3l.recordType.createRecordType(req.tenantContext, req.body);
         return res.status(201).json(rt);
       }
       const parsed = insertRecordTypeSchema.parse(req.body);
-      const rt = await formService.createRecordType(req.tenantContext, parsed);
+      const rt = await ec3l.form.createRecordType(req.tenantContext, parsed);
       res.status(201).json(rt);
     } catch (err) {
-      if (err instanceof RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.recordType.RecordTypeServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       if (err instanceof Error && err.name === "ZodError") {
         return res.status(400).json({ message: "Invalid record type data", errors: err });
       }
@@ -1058,20 +1023,20 @@ export async function registerRoutes(
 
   app.post("/api/record-types/:id/activate", async (req, res) => {
     try {
-      const rt = await formService.updateRecordTypeStatus(req.tenantContext, req.params.id, "active");
+      const rt = await ec3l.form.updateRecordTypeStatus(req.tenantContext, req.params.id, "active");
       res.json(rt);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
 
   app.post("/api/record-types/:id/retire", async (req, res) => {
     try {
-      const rt = await formService.updateRecordTypeStatus(req.tenantContext, req.params.id, "retired");
+      const rt = await ec3l.form.updateRecordTypeStatus(req.tenantContext, req.params.id, "retired");
       res.json(rt);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1079,10 +1044,10 @@ export async function registerRoutes(
   // --- Field Definitions ---
   app.get("/api/record-types/:id/fields", async (req, res) => {
     try {
-      const fields = await formService.getFieldDefinitionsByRecordType(req.tenantContext, req.params.id);
+      const fields = await ec3l.form.getFieldDefinitionsByRecordType(req.tenantContext, req.params.id);
       res.json(fields);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1090,13 +1055,13 @@ export async function registerRoutes(
   app.post("/api/record-types/:id/fields", async (req, res) => {
     try {
       const parsed = insertFieldDefinitionSchema.omit({ recordTypeId: true }).parse(req.body);
-      const field = await formService.createFieldDefinition(req.tenantContext, {
+      const field = await ec3l.form.createFieldDefinition(req.tenantContext, {
         ...parsed,
         recordTypeId: req.params.id,
       });
       res.status(201).json(field);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1104,21 +1069,21 @@ export async function registerRoutes(
   // --- Choice Lists ---
   app.get("/api/choice-lists", async (req, res) => {
     try {
-      const lists = await formService.getChoiceListsByTenant(req.tenantContext);
+      const lists = await ec3l.form.getChoiceListsByTenant(req.tenantContext);
       res.json(lists);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
 
   app.get("/api/choice-lists/:id", async (req, res) => {
     try {
-      const cl = await formService.getChoiceList(req.tenantContext, req.params.id);
+      const cl = await ec3l.form.getChoiceList(req.tenantContext, req.params.id);
       if (!cl) return res.status(404).json({ message: "Choice list not found" });
       res.json(cl);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1126,10 +1091,10 @@ export async function registerRoutes(
   app.post("/api/choice-lists", async (req, res) => {
     try {
       const parsed = insertChoiceListSchema.parse(req.body);
-      const cl = await formService.createChoiceList(req.tenantContext, parsed);
+      const cl = await ec3l.form.createChoiceList(req.tenantContext, parsed);
       res.status(201).json(cl);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1137,10 +1102,10 @@ export async function registerRoutes(
   // --- Choice Items ---
   app.get("/api/choice-lists/:id/items", async (req, res) => {
     try {
-      const items = await formService.getChoiceItemsByList(req.tenantContext, req.params.id);
+      const items = await ec3l.form.getChoiceItemsByList(req.tenantContext, req.params.id);
       res.json(items);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1148,13 +1113,13 @@ export async function registerRoutes(
   app.post("/api/choice-lists/:id/items", async (req, res) => {
     try {
       const parsed = insertChoiceItemSchema.omit({ choiceListId: true }).parse(req.body);
-      const item = await formService.createChoiceItem(req.tenantContext, {
+      const item = await ec3l.form.createChoiceItem(req.tenantContext, {
         ...parsed,
         choiceListId: req.params.id,
       });
       res.status(201).json(item);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1162,21 +1127,21 @@ export async function registerRoutes(
   // --- Form Definitions ---
   app.get("/api/form-definitions", async (req, res) => {
     try {
-      const defs = await formService.getFormDefinitionsByTenant(req.tenantContext);
+      const defs = await ec3l.form.getFormDefinitionsByTenant(req.tenantContext);
       res.json(defs);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
 
   app.get("/api/form-definitions/:id", async (req, res) => {
     try {
-      const fd = await formService.getFormDefinition(req.tenantContext, req.params.id);
+      const fd = await ec3l.form.getFormDefinition(req.tenantContext, req.params.id);
       if (!fd) return res.status(404).json({ message: "Form definition not found" });
       res.json(fd);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1184,30 +1149,30 @@ export async function registerRoutes(
   app.post("/api/form-definitions", async (req, res) => {
     try {
       const parsed = insertFormDefinitionSchema.parse(req.body);
-      const fd = await formService.createFormDefinition(req.tenantContext, parsed);
+      const fd = await ec3l.form.createFormDefinition(req.tenantContext, parsed);
       res.status(201).json(fd);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
 
   app.post("/api/form-definitions/:id/activate", async (req, res) => {
     try {
-      const fd = await formService.updateFormDefinitionStatus(req.tenantContext, req.params.id, "active");
+      const fd = await ec3l.form.updateFormDefinitionStatus(req.tenantContext, req.params.id, "active");
       res.json(fd);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
 
   app.post("/api/form-definitions/:id/retire", async (req, res) => {
     try {
-      const fd = await formService.updateFormDefinitionStatus(req.tenantContext, req.params.id, "retired");
+      const fd = await ec3l.form.updateFormDefinitionStatus(req.tenantContext, req.params.id, "retired");
       res.json(fd);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1215,10 +1180,10 @@ export async function registerRoutes(
   // --- Form Sections ---
   app.get("/api/form-definitions/:id/sections", async (req, res) => {
     try {
-      const sections = await formService.getFormSectionsByDefinition(req.tenantContext, req.params.id);
+      const sections = await ec3l.form.getFormSectionsByDefinition(req.tenantContext, req.params.id);
       res.json(sections);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1226,13 +1191,13 @@ export async function registerRoutes(
   app.post("/api/form-definitions/:id/sections", async (req, res) => {
     try {
       const parsed = insertFormSectionSchema.omit({ formDefinitionId: true }).parse(req.body);
-      const section = await formService.createFormSection(req.tenantContext, {
+      const section = await ec3l.form.createFormSection(req.tenantContext, {
         ...parsed,
         formDefinitionId: req.params.id,
       });
       res.status(201).json(section);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1240,10 +1205,10 @@ export async function registerRoutes(
   // --- Form Field Placements ---
   app.get("/api/form-sections/:id/placements", async (req, res) => {
     try {
-      const placements = await formService.getFormFieldPlacementsBySection(req.tenantContext, req.params.id);
+      const placements = await ec3l.form.getFormFieldPlacementsBySection(req.tenantContext, req.params.id);
       res.json(placements);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1251,13 +1216,13 @@ export async function registerRoutes(
   app.post("/api/form-sections/:id/placements", async (req, res) => {
     try {
       const parsed = insertFormFieldPlacementSchema.omit({ formSectionId: true }).parse(req.body);
-      const placement = await formService.createFormFieldPlacement(req.tenantContext, {
+      const placement = await ec3l.form.createFormFieldPlacement(req.tenantContext, {
         ...parsed,
         formSectionId: req.params.id,
       });
       res.status(201).json(placement);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1265,10 +1230,10 @@ export async function registerRoutes(
   // --- Form Behavior Rules ---
   app.get("/api/form-definitions/:id/rules", async (req, res) => {
     try {
-      const rules = await formService.getFormBehaviorRulesByDefinition(req.tenantContext, req.params.id);
+      const rules = await ec3l.form.getFormBehaviorRulesByDefinition(req.tenantContext, req.params.id);
       res.json(rules);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1276,13 +1241,13 @@ export async function registerRoutes(
   app.post("/api/form-definitions/:id/rules", async (req, res) => {
     try {
       const parsed = insertFormBehaviorRuleSchema.omit({ formDefinitionId: true }).parse(req.body);
-      const rule = await formService.createFormBehaviorRule(req.tenantContext, {
+      const rule = await ec3l.form.createFormBehaviorRule(req.tenantContext, {
         ...parsed,
         formDefinitionId: req.params.id,
       });
       res.status(201).json(rule);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1290,14 +1255,14 @@ export async function registerRoutes(
   // --- Form Compilation ---
   app.get("/api/forms/:recordTypeName/:formName/compiled", async (req, res) => {
     try {
-      const compiled = await formService.compileForm(
+      const compiled = await ec3l.form.compileForm(
         req.tenantContext,
         req.params.recordTypeName,
         req.params.formName,
       );
       res.json(compiled);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1305,7 +1270,7 @@ export async function registerRoutes(
   // --- Form Studio: Save Override ---
   app.post("/api/forms/:recordTypeName/:formName/overrides", async (req, res) => {
     try {
-      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.FORM_EDIT, "form");
+      await ec3l.rbac.authorize(req.tenantContext, ec3l.rbac.actorFromContext(req.tenantContext), ec3l.rbac.PERMISSIONS.FORM_EDIT, "form");
       const { changeSummary, operations, projectId } = req.body;
       if (!changeSummary || typeof changeSummary !== "string") {
         return res.status(400).json({ message: "changeSummary is required" });
@@ -1316,12 +1281,12 @@ export async function registerRoutes(
 
       let parsedOps;
       try {
-        parsedOps = formService.parseAndValidateOperations({ operations });
+        parsedOps = ec3l.form.parseAndValidateOperations({ operations });
       } catch (parseErr: unknown) {
         return res.status(400).json({ message: "Invalid patch operations", errors: parseErr instanceof Error ? parseErr.message : String(parseErr) });
       }
 
-      const result = await formService.createFormOverrideDraft(
+      const result = await ec3l.form.createFormOverrideDraft(
         req.tenantContext,
         req.params.recordTypeName,
         req.params.formName,
@@ -1331,10 +1296,10 @@ export async function registerRoutes(
       );
       res.status(201).json(result);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1347,7 +1312,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "description is required" });
       }
 
-      const patchResult = await formService.generateVibePatch(
+      const patchResult = await ec3l.form.generateVibePatch(
         req.tenantContext,
         req.params.recordTypeName,
         req.params.formName,
@@ -1355,7 +1320,7 @@ export async function registerRoutes(
       );
       res.json(patchResult);
     } catch (err) {
-      if (err instanceof FormServiceError) return res.status(err.statusCode).json({ message: err.message });
+      if (err instanceof ec3l.form.FormServiceError) return res.status(err.statusCode).json({ message: err.message });
       throw err;
     }
   });
@@ -1364,10 +1329,10 @@ export async function registerRoutes(
 
   async function requireRbacAdmin(req: import("express").Request, res: import("express").Response): Promise<boolean> {
     try {
-      await rbacService.authorize(req.tenantContext, actorFromContext(req.tenantContext), PERMISSIONS.CHANGE_APPROVE);
+      await ec3l.rbac.authorize(req.tenantContext, ec3l.rbac.actorFromContext(req.tenantContext), ec3l.rbac.PERMISSIONS.CHANGE_APPROVE);
       return true;
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         res.status(403).json({ message: "RBAC administration requires admin privileges", permission: err.permission });
         return false;
       }
@@ -1526,7 +1491,7 @@ export async function registerRoutes(
     if (existingRoles.length > 0) {
       if (!(await requireRbacAdmin(req, res))) return;
     }
-    await seedDefaultRoles(req.tenantContext.tenantId);
+    await ec3l.rbac.seedDefaultRoles(req.tenantContext.tenantId);
     const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
     res.json({ message: "Default roles seeded", roles });
   });
@@ -1542,7 +1507,7 @@ export async function registerRoutes(
 
   app.post("/api/hr-lite/install", async (req, res) => {
     try {
-      const result = await installHrLite(req.tenantContext);
+      const result = await ec3l.hrLite.installHrLite(req.tenantContext);
       res.json({
         message: "HR Lite installed successfully",
         module: result.module,
@@ -1571,7 +1536,7 @@ export async function registerRoutes(
         workflows: result.workflows,
       });
     } catch (err) {
-      if (err instanceof HrLiteInstallError) {
+      if (err instanceof ec3l.hrLite.HrLiteInstallError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -1579,7 +1544,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/record-locks", async (req, res) => {
-    const locks = await formService.getRecordLocksByTenant(req.tenantContext);
+    const locks = await ec3l.form.getRecordLocksByTenant(req.tenantContext);
     res.json(locks);
   });
 
@@ -1588,7 +1553,7 @@ export async function registerRoutes(
     if (!recordTypeId || !recordId) {
       return res.status(400).json({ message: "recordTypeId and recordId are required" });
     }
-    const locked = await formService.isRecordLocked(
+    const locked = await ec3l.form.isRecordLocked(
       req.tenantContext,
       recordTypeId as string,
       recordId as string,
@@ -1602,16 +1567,16 @@ export async function registerRoutes(
     try {
       const { changeId } = req.query;
       if (changeId) {
-        const proposals = await agentProposalService.getProposalsByChange(
+        const proposals = await ec3l.agentProposal.getProposalsByChange(
           req.tenantContext,
           changeId as string,
         );
         return res.json(proposals);
       }
-      const proposals = await agentProposalService.getProposalsByTenant(req.tenantContext);
+      const proposals = await ec3l.agentProposal.getProposalsByTenant(req.tenantContext);
       res.json(proposals);
     } catch (err) {
-      if (err instanceof AgentProposalError) {
+      if (err instanceof ec3l.agentProposal.AgentProposalError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -1620,7 +1585,7 @@ export async function registerRoutes(
 
   app.get("/api/agent-proposals/:id", async (req, res) => {
     try {
-      const proposal = await agentProposalService.getProposal(
+      const proposal = await ec3l.agentProposal.getProposal(
         req.tenantContext,
         req.params.id,
       );
@@ -1630,7 +1595,7 @@ export async function registerRoutes(
       }
       res.json(proposal);
     } catch (err) {
-      if (err instanceof AgentProposalError) {
+      if (err instanceof ec3l.agentProposal.AgentProposalError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -1645,16 +1610,16 @@ export async function registerRoutes(
       if (!targetRef) return res.status(400).json({ message: "targetRef is required" });
       if (!payload) return res.status(400).json({ message: "payload is required" });
 
-      const proposal = await agentProposalService.createProposal(
+      const proposal = await ec3l.agentProposal.createProposal(
         req.tenantContext,
         { agentId, proposalType, targetRef, payload, summary, changeId, projectId },
       );
       res.status(201).json(proposal);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
-      if (err instanceof AgentProposalError) {
+      if (err instanceof ec3l.agentProposal.AgentProposalError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -1663,19 +1628,19 @@ export async function registerRoutes(
 
   app.post("/api/agent-proposals/:id/submit", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      assertNotAgent(actor, "submit proposals for activation");
-      const proposal = await agentProposalService.submitProposal(
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      ec3l.agentGuard.assertNotAgent(actor, "submit proposals for activation");
+      const proposal = await ec3l.agentProposal.submitProposal(
         req.tenantContext,
         req.params.id,
         actor,
       );
       res.json(proposal);
     } catch (err) {
-      if (err instanceof AgentGuardError) {
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
-      if (err instanceof AgentProposalError) {
+      if (err instanceof ec3l.agentProposal.AgentProposalError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -1684,13 +1649,13 @@ export async function registerRoutes(
 
   app.post("/api/agent-proposals/:id/review", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      assertNotAgent(actor, "review proposals");
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      ec3l.agentGuard.assertNotAgent(actor, "review proposals");
       const { decision } = req.body;
       if (!decision || !["accepted", "rejected"].includes(decision)) {
         return res.status(400).json({ message: "decision must be 'accepted' or 'rejected'" });
       }
-      const proposal = await agentProposalService.reviewProposal(
+      const proposal = await ec3l.agentProposal.reviewProposal(
         req.tenantContext,
         req.params.id,
         decision,
@@ -1698,13 +1663,13 @@ export async function registerRoutes(
       );
       res.json(proposal);
     } catch (err) {
-      if (err instanceof AgentGuardError) {
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
         return res.status(403).json({ message: err.message, action: err.action });
       }
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message, permission: err.permission });
       }
-      if (err instanceof AgentProposalError) {
+      if (err instanceof ec3l.agentProposal.AgentProposalError) {
         return res.status(err.statusCode).json({ message: err.message });
       }
       throw err;
@@ -1713,8 +1678,8 @@ export async function registerRoutes(
 
   app.get("/api/admin/changes", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const tenantId = req.tenantContext.tenantId;
 
       const projects = await storage.getProjectsByTenant(tenantId);
@@ -1766,7 +1731,7 @@ export async function registerRoutes(
       results.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       res.json(results);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1775,8 +1740,8 @@ export async function registerRoutes(
 
   app.get("/api/admin/approvals", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const tenantId = req.tenantContext.tenantId;
 
       const executions = await storage.getWorkflowExecutionsByTenant(tenantId);
@@ -1809,7 +1774,7 @@ export async function registerRoutes(
       }
       res.json(approvals);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1818,12 +1783,12 @@ export async function registerRoutes(
 
   app.get("/api/admin/workflows", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const definitions = await storage.getWorkflowDefinitionsByTenant(req.tenantContext.tenantId);
       res.json(definitions);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1832,8 +1797,8 @@ export async function registerRoutes(
 
   app.get("/api/admin/workflow-executions", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const executions = await storage.getWorkflowExecutionsByTenant(req.tenantContext.tenantId);
       const definitions = await storage.getWorkflowDefinitionsByTenant(req.tenantContext.tenantId);
       const defMap = new Map(definitions.map((d) => [d.id, d.name]));
@@ -1855,7 +1820,7 @@ export async function registerRoutes(
       });
       res.json(enriched);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1864,12 +1829,12 @@ export async function registerRoutes(
 
   app.get("/api/admin/overrides", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const overrides = await storage.getModuleOverridesByTenant(req.tenantContext.tenantId);
       res.json(overrides);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1878,8 +1843,8 @@ export async function registerRoutes(
 
   app.get("/api/admin/modules", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const tenantId = req.tenantContext.tenantId;
       const tenantProjects = await storage.getProjectsByTenant(tenantId);
       const allModules = [];
@@ -1898,7 +1863,7 @@ export async function registerRoutes(
       }
       res.json(allModules);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1907,15 +1872,15 @@ export async function registerRoutes(
 
   app.get("/api/admin/tenants", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const tenantList = await storage.getTenants();
       res.json(tenantList.map(t => ({
         ...t,
         status: t.plan || "active",
       })));
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1924,8 +1889,8 @@ export async function registerRoutes(
 
   app.get("/api/admin/execution-telemetry", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       const tenantId = req.tenantContext.tenantId;
       const from = req.query.from ? new Date(req.query.from as string) : undefined;
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
@@ -1933,7 +1898,7 @@ export async function registerRoutes(
       const events = await storage.getExecutionTelemetryEvents(tenantId, { from, to, limit });
       res.json(events);
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ message: err.message });
       }
       throw err;
@@ -1942,11 +1907,11 @@ export async function registerRoutes(
 
   app.get("/api/admin/check-access", async (req, res) => {
     try {
-      const actor = resolveActorFromContext(req.tenantContext);
-      await rbacService.authorize(req.tenantContext, actor, PERMISSIONS.ADMIN_VIEW);
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
       res.json({ allowed: true });
     } catch (err) {
-      if (err instanceof RbacDeniedError) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
         return res.status(403).json({ allowed: false, message: err.message });
       }
       throw err;
@@ -1955,11 +1920,11 @@ export async function registerRoutes(
 
   app.get("/api/audit-feed", async (req, res) => {
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
-    const feed = await auditFeedService.getAuditFeed(req.tenantContext, { limit });
+    const feed = await ec3l.auditFeed.getAuditFeed(req.tenantContext, { limit });
     res.json(feed);
   });
 
-  startScheduler();
+  ec3l.scheduler.startScheduler();
 
   return httpServer;
 }
