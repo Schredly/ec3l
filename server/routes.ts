@@ -944,7 +944,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/workflow-intents", async (req, res) => {
-    const intents = await storage.getWorkflowExecutionIntentsByTenant(req.tenantContext.tenantId);
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const intents = await storage.getWorkflowExecutionIntentsByTenant(req.tenantContext.tenantId, limit);
     res.json(intents);
   });
 

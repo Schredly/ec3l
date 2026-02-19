@@ -18,6 +18,7 @@ import Skills from "@/pages/skills";
 import Runner from "@/pages/runner";
 import FormStudio from "@/pages/form-studio";
 import AdminConsole from "@/pages/admin";
+import WorkflowMonitor from "@/pages/workflow-monitor";
 
 function Router() {
   return (
@@ -31,6 +32,7 @@ function Router() {
       <Route path="/runner" component={Runner} />
       <Route path="/studio/forms" component={FormStudio} />
       <Route path="/admin/:section?" component={AdminConsole} />
+      <Route path="/workflow-monitor" component={WorkflowMonitor} />
       <Route component={NotFound} />
     </Switch>
   );

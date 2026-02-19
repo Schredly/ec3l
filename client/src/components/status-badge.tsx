@@ -45,6 +45,25 @@ export function WorkspaceStatusBadge({ status }: { status: string }) {
   );
 }
 
+const intentStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive"; icon: React.ReactNode }> = {
+  pending: { label: "Pending", variant: "secondary", icon: <Clock className="w-3 h-3" /> },
+  running: { label: "Running", variant: "default", icon: <Loader2 className="w-3 h-3 animate-spin" /> },
+  dispatched: { label: "Dispatched", variant: "outline", icon: <Play className="w-3 h-3" /> },
+  completed: { label: "Completed", variant: "default", icon: <CheckCircle2 className="w-3 h-3" /> },
+  failed: { label: "Failed", variant: "destructive", icon: <XCircle className="w-3 h-3" /> },
+  duplicate: { label: "Duplicate", variant: "secondary", icon: <GitMerge className="w-3 h-3" /> },
+};
+
+export function IntentStatusBadge({ status }: { status: string }) {
+  const config = intentStatusConfig[status] || { label: status, variant: "secondary" as const, icon: <Circle className="w-3 h-3" /> };
+  return (
+    <Badge variant={config.variant} data-testid={`badge-intent-status-${status}`} className="gap-1">
+      {config.icon}
+      {config.label}
+    </Badge>
+  );
+}
+
 export function AgentRunStatusBadge({ status }: { status: string }) {
   const config = agentRunStatusConfig[status] || { label: status, variant: "secondary" as const, icon: <Circle className="w-3 h-3" /> };
   return (

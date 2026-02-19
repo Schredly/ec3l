@@ -7,6 +7,7 @@ import {
   Terminal,
   PenTool,
   Shield,
+  Activity,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,6 +33,7 @@ const toolItems = [
   { title: "Runner", url: "/runner", icon: Terminal },
   { title: "Form Studio", url: "/studio/forms", icon: PenTool },
   { title: "Admin", url: "/admin", icon: Shield },
+  { title: "Workflow Monitor", url: "/workflow-monitor", icon: Activity },
 ];
 
 export function AppSidebar() {

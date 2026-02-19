@@ -212,7 +212,7 @@ export interface IStorage {
   updateWorkflowTriggerStatus(id: string, status: WorkflowTrigger["status"]): Promise<WorkflowTrigger | undefined>;
 
   getWorkflowExecutionIntent(id: string): Promise<WorkflowExecutionIntent | undefined>;
-  getWorkflowExecutionIntentsByTenant(tenantId: string): Promise<WorkflowExecutionIntent[]>;
+  getWorkflowExecutionIntentsByTenant(tenantId: string, limit?: number): Promise<WorkflowExecutionIntent[]>;
   getPendingIntents(): Promise<WorkflowExecutionIntent[]>;
   getIntentByIdempotencyKey(key: string): Promise<WorkflowExecutionIntent | undefined>;
   createWorkflowExecutionIntent(data: InsertWorkflowExecutionIntent): Promise<WorkflowExecutionIntent>;
@@ -748,10 +748,11 @@ export class DatabaseStorage implements IStorage {
     return intent;
   }
 
-  async getWorkflowExecutionIntentsByTenant(tenantId: string): Promise<WorkflowExecutionIntent[]> {
+  async getWorkflowExecutionIntentsByTenant(tenantId: string, limit = 100): Promise<WorkflowExecutionIntent[]> {
     return db.select().from(workflowExecutionIntents)
       .where(eq(workflowExecutionIntents.tenantId, tenantId))
-      .orderBy(desc(workflowExecutionIntents.createdAt));
+      .orderBy(desc(workflowExecutionIntents.createdAt))
+      .limit(limit);
   }
 
   async getPendingIntents(): Promise<WorkflowExecutionIntent[]> {
