@@ -27,7 +27,7 @@ export async function createRecordInstance(
   }
 
   const createdBy = ctx.userId ?? ctx.agentId ?? "system";
-  const assignment = resolveAssignment(rt);
+  const assignment = resolveAssignment(rt, data.data);
 
   const instance = await storage.createRecordInstance({
     tenantId: ctx.tenantId,

@@ -33,6 +33,8 @@ import {
   createRecordInstance,
   RecordInstanceServiceError,
 } from "../services/recordInstanceService";
+import { resolveAssignment } from "../services/assignmentService";
+import type { RecordType } from "@shared/schema";
 
 const ctxA: TenantContext = { tenantId: "tenant-a", userId: "user-1", source: "header" };
 const ctxB: TenantContext = { tenantId: "tenant-b", userId: "user-2", source: "header" };
@@ -191,5 +193,47 @@ describe("assignment on record instance creation", () => {
         status: "assigned",
       }),
     );
+  });
+});
+
+describe("field_match assignment (resolveAssignment unit)", () => {
+  const makeRt = (assignmentConfig: unknown): RecordType =>
+    ({ ...baseRecordType, assignmentConfig }) as unknown as RecordType;
+
+  const fieldMatchConfig = {
+    type: "field_match",
+    field: "priority",
+    rules: [
+      { equals: "high", assignUser: "userA" },
+      { equals: "low", assignGroup: "groupOps" },
+    ],
+    default: { assignGroup: "defaultGroup" },
+  };
+
+  it("assigns correct user when field matches a user rule", () => {
+    const result = resolveAssignment(makeRt(fieldMatchConfig), { priority: "high" });
+    expect(result).toEqual({ assignedTo: "userA" });
+  });
+
+  it("assigns correct group when field matches a group rule", () => {
+    const result = resolveAssignment(makeRt(fieldMatchConfig), { priority: "low" });
+    expect(result).toEqual({ assignedGroup: "groupOps" });
+  });
+
+  it("applies default when no rule matches", () => {
+    const result = resolveAssignment(makeRt(fieldMatchConfig), { priority: "medium" });
+    expect(result).toEqual({ assignedGroup: "defaultGroup" });
+  });
+
+  it("returns null when field is missing from record data", () => {
+    const configNoDefault = { ...fieldMatchConfig, default: undefined };
+    const result = resolveAssignment(makeRt(configNoDefault), { title: "no priority field" });
+    expect(result).toBeNull();
+  });
+
+  it("returns null for malformed config (missing rules array)", () => {
+    const malformed = { type: "field_match", field: "priority" };
+    const result = resolveAssignment(makeRt(malformed), { priority: "high" });
+    expect(result).toBeNull();
   });
 });
