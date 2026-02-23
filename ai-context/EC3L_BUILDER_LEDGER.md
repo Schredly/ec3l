@@ -21,7 +21,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 1 | Guided Onboarding Builder | Sprint 1 | Complete (UI scaffolding) |
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
-| 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1 complete) |
+| 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
 | 5 | Tenant Awareness | Sprint 4 | Not Started |
 | 6 | Change Timeline Upgrade | — | Not Started |
 
@@ -70,7 +70,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | Deliverable | Description | Status |
 |-------------|-------------|--------|
 | 4.1 | Shared Primitives page: read-only view of tenant-level roles, assignments, SLAs, workflows | Complete |
-| 4.2 | Clearly differentiate tenant-global vs app-scoped primitives | Partial (scope badges shown in 4.1) |
+| 4.2 | Shared primitive references: drafts reference by key, validated in preflight, tracked in diff | Complete |
 | 4.3 | Encourage composition rather than siloed app creation | Not Started |
 
 **Backend dependencies:** Record types and workflow definitions are already tenant-scoped. May need a "shared" scope concept or tagging.
@@ -282,21 +282,47 @@ These backend services and UI components already exist and can be composed into 
   - BLD41: SLA policies and assignment rules are derived from record type configs — not stored in dedicated tables.
   - BLD42: All primitive cards display "Tenant" scope badge — visual differentiation from app-scoped draft data.
 
+### Sprint 4.2 — Shared Primitive References in Drafts
+- **Date:** 2026-02-23
+- **Files:**
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `SharedReference` interface (`{ entityType: "role" | "workflow" | "sla" | "assignment", key: string }`). Added `sharedReferences?: SharedReference[]` to `GraphPackageJson`. Updated `createBuilderDraft()` to accept optional `sharedReferences`. Added `sharedRefsAdded`/`sharedRefsRemoved` to `BuilderDiffResult.summary`. Added `"sharedReference"` to `PreflightCheck.type` union.
+  - `server/routes.ts` (MODIFIED) — `POST /api/builder/drafts`: accepts optional `sharedReferences` in body, merges into draft package JSONB after LLM-based creation. `GET /api/builder/drafts/:appId/preflight`: validates `sharedReferences` against tenant primitives (roles by name, workflows by name, SLAs by record type key, assignments by record type key). Missing references → error. `GET /api/builder/drafts/:appId/diff`: computes shared reference diff from version packages, adds `sharedRefsAdded`/`sharedRefsRemoved` to summary and "Shared Reference" entries to changes.
+  - `client/src/pages/BuilderProposal.tsx` (MODIFIED) — Added `SharedPrimitivesSelector` component: collapsible card with checkbox lists grouped by category (Roles, Workflows, SLAs, Assignments). Uses `useSharedPrimitives()` to populate. Selected count shown in header. Selections passed to `createBuilderDraft()` on "Create Draft App".
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — Overview tab: added "Shared References" card below summary badges, listing each reference with entity-type badge and key. Visible only when `pkg.sharedReferences` exists and is non-empty.
+- **Summary:** Sprint 4.2 enables drafts to reference shared tenant primitives by key rather than duplicating data. Users select primitives in the proposal flow, references are stored in `package.sharedReferences` JSONB, validated in preflight (checked against actual tenant data), and tracked in version diff. No migration needed — package is already flexible JSONB. No install logic changes — references are metadata only at this point.
+- **Package JSON structure update:**
+  ```json
+  {
+    "packageKey": "...",
+    "version": "...",
+    "recordTypes": [...],
+    "sharedReferences": [
+      { "entityType": "role", "key": "Admin" },
+      { "entityType": "workflow", "key": "ticket_triage" }
+    ]
+  }
+  ```
+- **Preflight changes:** New `sharedReference` check category. Each reference validated against tenant primitives (roles by name, workflows by name, SLAs/assignments by record type key). Missing → error.
+- **Diff changes:** `summary` gains `sharedRefsAdded`/`sharedRefsRemoved` counts. `changes.added`/`changes.removed` include `{ category: "Shared Reference", key: "role:Admin" }` entries.
+- **Invariants:**
+  - BLD43: Shared references stored in package JSONB — no schema migration, no new column.
+  - BLD44: References are by key only — no primitive data copied into draft.
+  - BLD45: Preflight validates reference existence against live tenant primitives — broken references → error.
+  - BLD46: Diff tracks shared reference add/remove across versions.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 4.1 — Shared Primitives Page (Phase 4 started)
-- **Status:** Sprint 4.1 complete. Shared Primitives page delivered.
-- **Files added:** `client/src/lib/api/primitives.ts`, `client/src/hooks/useSharedPrimitives.ts`, `client/src/pages/SharedPrimitives.tsx`
-- **Files modified:** `server/routes.ts` (1 endpoint), `App.tsx` (route), `Sidebar.tsx` (nav item)
-- **Endpoints added:** `GET /api/primitives/shared`
-- **Invariants:** BLD39–BLD42 established. All prior invariants remain valid.
-- **What's stubbed:** Nothing. Endpoint aggregates real data from RBAC, record types, and workflow definitions.
-- **Assumptions:** SLA policies and assignment rules are extracted from record type JSONB configs (no dedicated tables exist). Notifications excluded (no first-class notification entity in the platform).
-- **Next step:** Sprint 4.2+ — composition UX, shared primitive reuse in Builder drafts. Phase 5 — Tenant Awareness.
+- **Phase:** Sprint 4.2 — Shared Primitive References (Phase 4 in progress)
+- **Status:** Sprints 4.1–4.2 complete. Shared Primitives page + reference-by-key in drafts.
+- **Files modified:** `vibe.ts` (SharedReference type, GraphPackageJson, BuilderDiffResult, PreflightCheck, createBuilderDraft), `routes.ts` (draft creation, preflight, diff), `BuilderProposal.tsx` (SharedPrimitivesSelector), `AppDraftShell.tsx` (Shared References card)
+- **Endpoints modified:** `POST /api/builder/drafts` (accepts sharedReferences), `GET .../preflight` (validates refs), `GET .../diff` (includes ref changes)
+- **Invariants:** BLD43–BLD46 established. BLD39–BLD42 remain valid.
+- **What's stubbed:** Install logic does not yet resolve shared references. References are metadata-only until install handles them.
+- **Next step:** Sprint 4.3 — Composition UX. Phase 5 — Tenant Awareness.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

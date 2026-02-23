@@ -581,6 +581,25 @@ function OverviewTab({ pkg, prompt, status, createdAt, appId, lineage }: {
         </div>
       </div>
 
+      {pkg.sharedReferences && pkg.sharedReferences.length > 0 && (
+        <div className="border rounded-md p-4">
+          <span className="text-xs text-muted-foreground block mb-2">Shared References</span>
+          <div className="space-y-1.5">
+            {pkg.sharedReferences.map((ref) => (
+              <div
+                key={`${ref.entityType}:${ref.key}`}
+                className="flex items-center gap-2 text-sm"
+              >
+                <span className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                  {ref.entityType}
+                </span>
+                <span className="font-mono text-xs">{ref.key}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <RefinementPanel appId={appId} />
       <VersionHistoryPanel appId={appId} />
       <CompareVersionsPanel appId={appId} />

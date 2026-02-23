@@ -3104,7 +3104,7 @@ export async function registerRoutes(
    */
   app.post("/api/builder/drafts", async (req, res) => {
     try {
-      const { prompt } = req.body;
+      const { prompt, sharedReferences } = req.body;
       if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
         return res.status(400).json({ message: "prompt is required" });
       }
@@ -3127,6 +3127,17 @@ export async function registerRoutes(
         null, // environmentId — resolved later during install
         prompt.trim(),
       );
+
+      // Merge sharedReferences into package if provided
+      if (Array.isArray(sharedReferences) && sharedReferences.length > 0) {
+        const ts = getTenantStorage(req.tenantContext);
+        const pkg = draft.package as Record<string, unknown>;
+        pkg.sharedReferences = sharedReferences;
+        await ts.updateVibeDraft(draft.id, {
+          package: pkg,
+          updatedAt: new Date(),
+        });
+      }
 
       return res.status(201).json({
         appId: draft.id,
@@ -3333,6 +3344,53 @@ export async function registerRoutes(
         }
       }
 
+      // --- Shared reference checks ---
+      const sharedRefs = (pkg.sharedReferences ?? []) as Array<{
+        entityType: string; key: string;
+      }>;
+      if (sharedRefs.length > 0) {
+        const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
+        const tenantRoleNames = new Set(roles.map((r) => r.name.toLowerCase()));
+        const tenantWorkflowDefs = await ec3l.workflow.getWorkflowDefinitions(req.tenantContext);
+        const tenantWorkflowNames = new Set(tenantWorkflowDefs.map((w) => w.name.toLowerCase()));
+        const tenantRecordTypes = await ec3l.recordType.listRecordTypes(req.tenantContext);
+        const tenantSlaKeys = new Set(
+          tenantRecordTypes
+            .filter((rt) => {
+              const sla = rt.slaConfig as { durationMinutes?: number } | null;
+              return sla && sla.durationMinutes != null;
+            })
+            .map((rt) => rt.key.toLowerCase()),
+        );
+        const tenantAssignmentKeys = new Set(
+          tenantRecordTypes
+            .filter((rt) => {
+              const ac = rt.assignmentConfig as { strategy?: string } | null;
+              return ac && ac.strategy;
+            })
+            .map((rt) => rt.key.toLowerCase()),
+        );
+
+        for (const ref of sharedRefs) {
+          let found = false;
+          if (ref.entityType === "role") {
+            found = tenantRoleNames.has(ref.key.toLowerCase());
+          } else if (ref.entityType === "workflow") {
+            found = tenantWorkflowNames.has(ref.key.toLowerCase());
+          } else if (ref.entityType === "sla") {
+            found = tenantSlaKeys.has(ref.key.toLowerCase());
+          } else if (ref.entityType === "assignment") {
+            found = tenantAssignmentKeys.has(ref.key.toLowerCase());
+          }
+          if (!found) {
+            checks.push({
+              type: "sharedReference", entity: `${ref.entityType}:${ref.key}`, severity: "error",
+              message: `Shared reference "${ref.key}" (${ref.entityType}) does not exist in tenant primitives.`,
+            });
+          }
+        }
+      }
+
       // --- RBAC checks ---
       const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
       const roleNames = new Set(roles.map((r) => r.name.toLowerCase()));
@@ -3384,6 +3442,17 @@ export async function registerRoutes(
       const { diff } = result;
       const bc = diff.bindingChanges;
 
+      // Compute shared reference diff from version packages
+      const ts = getTenantStorage(req.tenantContext);
+      const fromVer = await ts.getVibeDraftVersion(req.params.appId, fromVersion);
+      const toVer = await ts.getVibeDraftVersion(req.params.appId, toVersion);
+      const fromRefs = ((fromVer?.package as Record<string, unknown>)?.sharedReferences ?? []) as Array<{ entityType: string; key: string }>;
+      const toRefs = ((toVer?.package as Record<string, unknown>)?.sharedReferences ?? []) as Array<{ entityType: string; key: string }>;
+      const fromRefKeys = new Set(fromRefs.map((r) => `${r.entityType}:${r.key}`));
+      const toRefKeys = new Set(toRefs.map((r) => `${r.entityType}:${r.key}`));
+      const refsAdded = toRefs.filter((r) => !fromRefKeys.has(`${r.entityType}:${r.key}`));
+      const refsRemoved = fromRefs.filter((r) => !toRefKeys.has(`${r.entityType}:${r.key}`));
+
       return res.json({
         summary: {
           recordTypesAdded: diff.addedRecordTypes.length,
@@ -3395,6 +3464,8 @@ export async function registerRoutes(
           slasRemoved: bc.slasRemoved.length,
           assignmentsAdded: bc.assignmentsAdded.length,
           assignmentsRemoved: bc.assignmentsRemoved.length,
+          sharedRefsAdded: refsAdded.length,
+          sharedRefsRemoved: refsRemoved.length,
         },
         changes: {
           added: [
@@ -3402,12 +3473,14 @@ export async function registerRoutes(
             ...bc.workflowsAdded.map((w) => ({ category: "Workflow", key: w })),
             ...bc.slasAdded.map((s) => ({ category: "SLA Policy", key: s })),
             ...bc.assignmentsAdded.map((a) => ({ category: "Assignment Rule", key: a })),
+            ...refsAdded.map((r) => ({ category: "Shared Reference", key: `${r.entityType}:${r.key}` })),
           ],
           removed: [
             ...diff.removedRecordTypes.map((rt) => ({ category: "Record Type", key: rt.key })),
             ...bc.workflowsRemoved.map((w) => ({ category: "Workflow", key: w })),
             ...bc.slasRemoved.map((s) => ({ category: "SLA Policy", key: s })),
             ...bc.assignmentsRemoved.map((a) => ({ category: "Assignment Rule", key: a })),
+            ...refsRemoved.map((r) => ({ category: "Shared Reference", key: `${r.entityType}:${r.key}` })),
           ],
           modified: diff.modifiedRecordTypes.map((rt) => ({
             category: "Record Type",

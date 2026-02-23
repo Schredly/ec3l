@@ -27,6 +27,11 @@ export interface DraftLineage {
   pulledAt: string;
 }
 
+export interface SharedReference {
+  entityType: "role" | "workflow" | "sla" | "assignment";
+  key: string;
+}
+
 export interface GraphPackageJson {
   packageKey: string;
   version: string;
@@ -45,6 +50,7 @@ export interface GraphPackageJson {
     triggerEvent?: string;
     steps?: Array<{ name: string; stepType: string; config?: Record<string, unknown>; ordering: number }>;
   }>;
+  sharedReferences?: SharedReference[];
 }
 
 export interface GraphDiffResult {
@@ -85,8 +91,15 @@ export interface BuilderDraftResult {
   environment: string;
 }
 
-export async function createBuilderDraft(prompt: string): Promise<BuilderDraftResult> {
-  const res = await apiRequest("POST", "/api/builder/drafts", { prompt });
+export async function createBuilderDraft(
+  prompt: string,
+  sharedReferences?: SharedReference[],
+): Promise<BuilderDraftResult> {
+  const body: Record<string, unknown> = { prompt };
+  if (sharedReferences && sharedReferences.length > 0) {
+    body.sharedReferences = sharedReferences;
+  }
+  const res = await apiRequest("POST", "/api/builder/drafts", body);
   return res.json();
 }
 
@@ -111,7 +124,7 @@ export async function fetchBuilderDraftVersion(appId: string, version: number): 
 }
 
 export interface PreflightCheck {
-  type: "recordType" | "workflow" | "sla" | "assignment" | "rbac";
+  type: "recordType" | "workflow" | "sla" | "assignment" | "rbac" | "sharedReference";
   entity: string;
   severity: "error" | "warning";
   message: string;
@@ -196,6 +209,8 @@ export interface BuilderDiffResult {
     slasRemoved: number;
     assignmentsAdded: number;
     assignmentsRemoved: number;
+    sharedRefsAdded: number;
+    sharedRefsRemoved: number;
   };
   changes: {
     added: BuilderDiffChange[];
