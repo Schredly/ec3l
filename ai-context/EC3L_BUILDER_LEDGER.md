@@ -22,7 +22,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
-| 5 | Tenant Awareness | Sprint 4 | Not Started |
+| 5 | Tenant Awareness | Sprint 5 | In Progress (5.1 complete) |
 | 6 | Change Timeline Upgrade | — | Not Started |
 
 ---
@@ -79,9 +79,9 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 
 | Deliverable | Description | Status |
 |-------------|-------------|--------|
-| 5.1 | Header includes Tenant selector dropdown | Not Started |
+| 5.1 | Tenant selector + header auto-injection: TenantProvider context, TenantSelector dropdown, queryClient.clear() on switch | Complete |
 | 5.2 | Environment indicator in top bar | Partial (EnvironmentSelector exists from UX Phase 1.2) |
-| 5.3 | Tenant drives X-Tenant-Id automatically | Partial (slug-based bootstrap exists, needs real selector) |
+| 5.3 | Tenant drives X-Tenant-Id automatically | Complete (centralized via localStorage + TenantProvider) |
 | 5.4 | Remove hardcoded tenant defaults | Not Started |
 
 **Backend dependencies:** `GET /api/tenants` (exists). Middleware resolves slug → UUID (exists). Hardcoded `"user-admin"` fallback noted for cleanup.
@@ -312,17 +312,39 @@ These backend services and UI components already exist and can be composed into 
 
 ---
 
+### Sprint 5.1 — Tenant Selector + Header Auto-Injection
+- **Date:** 2026-02-23
+- **Files:**
+  - `client/src/tenant/tenantStore.tsx` (NEW) — `TenantProvider` React context + `useTenantContext()` hook. Stores `activeTenant` (id, slug, name) in state. Initializes from localStorage on mount. `setActiveTenant()` persists slug to localStorage, calls `queryClient.clear()` to wipe all caches, and navigates to `/` via optional callback. No Redux, no external state library.
+  - `client/src/components/layout/TenantSelector.tsx` (NEW) — Dropdown component using shadcn Select. Fetches tenant list via `GET /api/tenants` (no tenant headers — endpoint is above middleware). Shows "Tenant" label + current selection. If only one tenant, renders as static label. On change, calls `setActiveTenant()` which clears caches and navigates to `/`.
+  - `client/src/components/layout/TopContextBar.tsx` (MODIFIED) — Inserted `TenantSelector` on left side next to page title, separated by vertical divider. Layout changed to flex with gap.
+  - `client/src/hooks/use-tenant.ts` (MODIFIED) — `useTenantBootstrap()` now uses `useTenantContext()` to populate the TenantProvider on initial load. Hydrates context from localStorage if valid slug exists, else fetches from `/api/tenants` and sets both localStorage and context. Bootstrap writes `tenantName` and `tenantUuid` to localStorage alongside slug.
+  - `client/src/App.tsx` (MODIFIED) — Wrapped app tree with `<TenantProvider>` inside `QueryClientProvider` so context has access to queryClient. Import added for `TenantProvider`.
+- **Summary:** Sprint 5.1 adds Vercel-like tenant switching to the top bar. The `TenantProvider` context is the single source of truth for tenant identity. The existing `queryClient.ts` `tenantHeaders()` function continues to read `localStorage.getItem("tenantId")` for header injection — `setActiveTenant()` writes to localStorage first, then clears the query cache. This means header injection remains centralized in `queryClient.ts` (the `tenantHeaders()` function used by both `apiRequest()` and `getQueryFn()`), and all downstream code benefits from the switch without per-call header manipulation. No cookies, no sessions, no server changes.
+- **Header injection centralization:** `client/src/lib/queryClient.ts` → `tenantHeaders()` reads `localStorage.getItem("tenantId")` and `localStorage.getItem("userId")`, returns `{ "x-tenant-id": slug, "x-user-id": userId }`. Used by both `apiRequest()` and `getQueryFn()`. No per-request header setting needed.
+- **Cache invalidation on switch:** `queryClient.clear()` in `tenantStore.tsx` → wipes all cached queries and mutations. Combined with navigation to `/`, ensures no stale cross-tenant data.
+- **Invariants:**
+  - BLD47: TenantProvider is the single source of truth for active tenant identity in the UI.
+  - BLD48: Header injection centralized in `queryClient.ts tenantHeaders()` — reads localStorage, not context directly, for simplicity.
+  - BLD49: Tenant switch calls `queryClient.clear()` + navigates to `/` — prevents stale cross-tenant data.
+  - BLD50: `GET /api/tenants` is above tenant middleware — no chicken-and-egg problem.
+  - BLD51: No cookies, no sessions — tenant identity is slug in localStorage + x-tenant-id header.
+
+---
+
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 4.2 — Shared Primitive References (Phase 4 in progress)
-- **Status:** Sprints 4.1–4.2 complete. Shared Primitives page + reference-by-key in drafts.
-- **Files modified:** `vibe.ts` (SharedReference type, GraphPackageJson, BuilderDiffResult, PreflightCheck, createBuilderDraft), `routes.ts` (draft creation, preflight, diff), `BuilderProposal.tsx` (SharedPrimitivesSelector), `AppDraftShell.tsx` (Shared References card)
-- **Endpoints modified:** `POST /api/builder/drafts` (accepts sharedReferences), `GET .../preflight` (validates refs), `GET .../diff` (includes ref changes)
-- **Invariants:** BLD43–BLD46 established. BLD39–BLD42 remain valid.
-- **What's stubbed:** Install logic does not yet resolve shared references. References are metadata-only until install handles them.
-- **Next step:** Sprint 4.3 — Composition UX. Phase 5 — Tenant Awareness.
+- **Phase:** Sprint 5.1 — Tenant Selector + Header Auto-Injection (Phase 5 started)
+- **Status:** Sprint 5.1 complete. Tenant selector in top bar with context-based switching.
+- **Files added:** `client/src/tenant/tenantStore.tsx`, `client/src/components/layout/TenantSelector.tsx`
+- **Files modified:** `TopContextBar.tsx` (TenantSelector inserted), `use-tenant.ts` (context hydration), `App.tsx` (TenantProvider wrapper)
+- **Endpoints reused:** `GET /api/tenants` (already existed above tenant middleware)
+- **Invariants:** BLD47–BLD51 established. All prior invariants remain valid.
+- **What's stubbed:** Nothing. Tenant selector is fully functional with real tenant list.
+- **Assumptions:** `queryClient.ts tenantHeaders()` remains the centralized header injection point. TenantProvider writes to localStorage first, then clears cache — `tenantHeaders()` reads localStorage synchronously so all subsequent requests use the new slug.
+- **Next step:** Sprint 5.2+ — remove hardcoded tenant defaults, real user identity. Phase 6 — Change Timeline.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

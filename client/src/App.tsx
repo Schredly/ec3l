@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppShell } from "@/components/layout/AppShell";
+import { TenantProvider } from "@/tenant/tenantStore";
 import { useTenantBootstrap } from "@/hooks/use-tenant";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
@@ -73,10 +74,12 @@ function App() {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <AppContent />
-          <Toaster />
-        </TooltipProvider>
+        <TenantProvider>
+          <TooltipProvider>
+            <AppContent />
+            <Toaster />
+          </TooltipProvider>
+        </TenantProvider>
       </QueryClientProvider>
     </ThemeProvider>
   );
