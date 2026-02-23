@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { IntentStatusBadge } from "@/components/status-badge";
+import { WorkflowStatusBadge } from "@/components/status/WorkflowStatusBadge";
 import { Activity, RefreshCw } from "lucide-react";
 import { queryClient } from "@/lib/queryClient";
 import { formatDistanceToNow } from "date-fns";
@@ -79,7 +79,7 @@ export default function WorkflowMonitor() {
                       {intent.workflowDefinitionId.slice(0, 8)}
                     </td>
                     <td className="px-4 py-2">
-                      <IntentStatusBadge status={intent.status} />
+                      <WorkflowStatusBadge status={intent.status} />
                     </td>
                     <td className="px-4 py-2 font-mono text-xs" title={recordId}>
                       {recordId ? recordId.slice(0, 8) : "—"}

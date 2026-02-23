@@ -298,6 +298,8 @@ export const environments = pgTable("environments", {
   projectId: varchar("project_id").notNull().references(() => projects.id),
   name: environmentNameEnum("name").notNull(),
   isDefault: boolean("is_default").notNull().default(false),
+  requiresPromotionApproval: boolean("requires_promotion_approval").notNull().default(false),
+  promotionWebhookUrl: text("promotion_webhook_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -731,6 +733,59 @@ export const rbacAuditLogs = pgTable("rbac_audit_logs", {
   timestamp: timestamp("timestamp").notNull().defaultNow(),
 });
 
+// Graph Package Installs — append-only audit trail for installed graph packages
+export const graphPackageInstalls = pgTable("graph_package_installs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  packageKey: text("package_key").notNull(),
+  version: text("version").notNull(),
+  checksum: text("checksum").notNull(),
+  installedBy: text("installed_by"),
+  installedAt: timestamp("installed_at").defaultNow().notNull(),
+  diff: jsonb("diff"),
+  packageContents: jsonb("package_contents").notNull(),
+});
+
+// Environment Package Installs — environment-scoped state ledger for promotion tracking
+export const environmentPackageInstalls = pgTable("environment_package_installs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  environmentId: varchar("environment_id").notNull().references(() => environments.id),
+  packageKey: text("package_key").notNull(),
+  version: text("version").notNull(),
+  checksum: text("checksum").notNull(),
+  installedBy: text("installed_by"),
+  installedAt: timestamp("installed_at").defaultNow().notNull(),
+  source: text("source").notNull(), // "install" | "promote"
+  diff: jsonb("diff"),
+  packageContents: jsonb("package_contents").notNull(),
+});
+
+// Promotion Intents — governed promotion lifecycle
+export const promotionIntentStatusEnum = pgEnum("promotion_intent_status", [
+  "draft", "previewed", "approved", "executed", "rejected",
+]);
+
+export const promotionIntents = pgTable("promotion_intents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  fromEnvironmentId: varchar("from_environment_id").notNull().references(() => environments.id),
+  toEnvironmentId: varchar("to_environment_id").notNull().references(() => environments.id),
+  status: promotionIntentStatusEnum("status").notNull().default("draft"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  diff: jsonb("diff"),
+  result: jsonb("result"),
+  notificationStatus: text("notification_status").default("pending"),
+  notificationLastError: text("notification_last_error"),
+  notificationLastAttemptAt: timestamp("notification_last_attempt_at"),
+});
+
 // Insert schemas
 export const insertTenantSchema = createInsertSchema(tenants).omit({
   id: true,
@@ -1105,6 +1160,51 @@ export const insertRbacPolicySchema = createInsertSchema(rbacPolicies).omit({
 });
 export type InsertRbacPolicy = z.infer<typeof insertRbacPolicySchema> & { tenantId: string };
 
+// Vibe Package Drafts — server-side draft persistence for iterative vibe authoring
+export const vibePackageDraftStatusEnum = pgEnum("vibe_package_draft_status", [
+  "draft", "previewed", "installed", "discarded",
+]);
+
+export const vibePackageDrafts = pgTable("vibe_package_drafts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  projectId: varchar("project_id").notNull().references(() => projects.id),
+  environmentId: varchar("environment_id").references(() => environments.id),
+  status: vibePackageDraftStatusEnum("status").notNull().default("draft"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  prompt: text("prompt").notNull(),
+  package: jsonb("package").notNull(),
+  checksum: text("checksum").notNull(),
+  lastPreviewDiff: jsonb("last_preview_diff"),
+  lastPreviewErrors: jsonb("last_preview_errors"),
+});
+
+// Vibe Package Draft Versions — version history for iterative draft editing
+export const vibePackageDraftVersions = pgTable("vibe_package_draft_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  draftId: varchar("draft_id").notNull().references(() => vibePackageDrafts.id),
+  versionNumber: integer("version_number").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdBy: text("created_by"),
+  reason: text("reason").notNull(),
+  package: jsonb("package").notNull(),
+  checksum: text("checksum").notNull(),
+  previewDiff: jsonb("preview_diff"),
+  previewErrors: jsonb("preview_errors"),
+});
+
+export type VibePackageDraftVersion = typeof vibePackageDraftVersions.$inferSelect;
+
+export const insertVibePackageDraftVersionSchema = createInsertSchema(vibePackageDraftVersions).omit({
+  id: true,
+  tenantId: true,
+  createdAt: true,
+});
+export type InsertVibePackageDraftVersion = z.infer<typeof insertVibePackageDraftVersionSchema> & { tenantId: string };
+
 // --- Execution Telemetry ---
 
 export const telemetryEventTypeEnum = pgEnum("telemetry_event_type", [
@@ -1117,6 +1217,39 @@ export const telemetryEventTypeEnum = pgEnum("telemetry_event_type", [
   "record.assigned",
   "record.sla.created",
   "record.sla.breached",
+  "graph.promotion_intent_created",
+  "graph.promotion_intent_previewed",
+  "graph.promotion_intent_approved",
+  "graph.promotion_intent_executed",
+  "graph.promotion_intent_rejected",
+  "vibe.package_generated",
+  "vibe.package_installed",
+  "vibe.draft_created",
+  "vibe.draft_refined",
+  "vibe.draft_previewed",
+  "vibe.draft_installed",
+  "vibe.llm_generation_requested",
+  "vibe.llm_generation_succeeded",
+  "vibe.llm_generation_failed",
+  "vibe.llm_repair_attempted",
+  "vibe.llm_refinement_requested",
+  "vibe.llm_refinement_succeeded",
+  "vibe.llm_refinement_failed",
+  "vibe.draft_discarded",
+  "vibe.draft_patched",
+  "vibe.draft_version_created",
+  "vibe.draft_restored",
+  "vibe.variant_generation_requested",
+  "vibe.variant_generation_completed",
+  "vibe.draft_created_from_variant",
+  "vibe.variant_diff_computed",
+  "vibe.draft_variant_adopted",
+  "vibe.llm_token_stream_started",
+  "vibe.llm_token_stream_completed",
+  "vibe.llm_token_stream_failed",
+  "vibe.draft_version_diff_computed",
+  "graph.promotion_notification_sent",
+  "graph.promotion_notification_failed",
 ]);
 
 export const telemetryExecutionTypeEnum = pgEnum("telemetry_execution_type", [
@@ -1157,6 +1290,50 @@ export const insertExecutionTelemetryEventSchema = createInsertSchema(executionT
 
 export type InsertExecutionTelemetryEvent = z.infer<typeof insertExecutionTelemetryEventSchema> & { tenantId: string };
 export type ExecutionTelemetryEvent = typeof executionTelemetryEvents.$inferSelect;
+
+export const insertGraphPackageInstallSchema = createInsertSchema(graphPackageInstalls).omit({
+  id: true,
+  installedAt: true,
+  tenantId: true,
+});
+export type InsertGraphPackageInstall = z.infer<typeof insertGraphPackageInstallSchema> & { tenantId: string };
+export type GraphPackageInstall = typeof graphPackageInstalls.$inferSelect;
+
+export const insertEnvironmentPackageInstallSchema = createInsertSchema(environmentPackageInstalls).omit({
+  id: true,
+  installedAt: true,
+  tenantId: true,
+});
+export type InsertEnvironmentPackageInstall = z.infer<typeof insertEnvironmentPackageInstallSchema> & { tenantId: string };
+export type EnvironmentPackageInstall = typeof environmentPackageInstalls.$inferSelect;
+
+export const insertPromotionIntentSchema = createInsertSchema(promotionIntents).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+  approvedBy: true,
+  approvedAt: true,
+  diff: true,
+  result: true,
+  notificationStatus: true,
+  notificationLastError: true,
+  notificationLastAttemptAt: true,
+  tenantId: true,
+});
+export type InsertPromotionIntent = z.infer<typeof insertPromotionIntentSchema> & { tenantId: string };
+export type PromotionIntent = typeof promotionIntents.$inferSelect;
+
+export const insertVibePackageDraftSchema = createInsertSchema(vibePackageDrafts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  status: true,
+  lastPreviewDiff: true,
+  lastPreviewErrors: true,
+  tenantId: true,
+});
+export type InsertVibePackageDraft = z.infer<typeof insertVibePackageDraftSchema> & { tenantId: string };
+export type VibePackageDraft = typeof vibePackageDrafts.$inferSelect;
 
 // --- Form Patch Operations (explicit, typed) ---
 

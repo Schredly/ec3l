@@ -1,7 +1,7 @@
 import type { TenantContext } from "../tenant";
 import { storage, type RecordInstanceWithSla } from "../storage";
 import type { RecordInstance } from "@shared/schema";
-import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
+import { emitDomainEvent } from "./domainEventService";
 import { emitRecordEvent } from "./triggerService";
 import { resolveAssignment } from "./assignmentService";
 
@@ -38,25 +38,23 @@ export async function createRecordInstance(
     ...(assignment?.assignedGroup && { assignedGroup: assignment.assignedGroup }),
   });
 
-  emitTelemetry(buildTelemetryParams(ctx, {
-    eventType: "execution_completed",
-    executionType: "task",
-    executionId: instance.id,
+  emitDomainEvent(ctx, {
+    type: "execution_completed",
     status: "created",
-  }));
+    entityId: instance.id,
+  });
 
   if (assignment) {
-    emitTelemetry(buildTelemetryParams(ctx, {
-      eventType: "record.assigned",
-      executionType: "task",
-      executionId: instance.id,
+    emitDomainEvent(ctx, {
+      type: "record.assigned",
       status: "assigned",
-      affectedRecordIds: {
+      entityId: instance.id,
+      affectedRecords: {
         recordId: instance.id,
         assignedTo: assignment.assignedTo ?? null,
         assignedGroup: assignment.assignedGroup ?? null,
       },
-    }));
+    });
   }
 
   // SLA timer creation
@@ -69,13 +67,12 @@ export async function createRecordInstance(
       type: "sla_due",
       dueAt,
     }).then(() => {
-      emitTelemetry(buildTelemetryParams(ctx, {
-        eventType: "record.sla.created",
-        executionType: "task",
-        executionId: instance.id,
+      emitDomainEvent(ctx, {
+        type: "record.sla.created",
         status: "timer_created",
-        affectedRecordIds: { recordId: instance.id, dueAt: dueAt.toISOString() },
-      }));
+        entityId: instance.id,
+        affectedRecords: { recordId: instance.id, dueAt: dueAt.toISOString() },
+      });
     }).catch(() => {});
   }
 
@@ -120,12 +117,11 @@ export async function updateRecordInstance(
     throw new RecordInstanceServiceError("Record instance not found", 404);
   }
 
-  emitTelemetry(buildTelemetryParams(ctx, {
-    eventType: "execution_completed",
-    executionType: "task",
-    executionId: id,
+  emitDomainEvent(ctx, {
+    type: "execution_completed",
     status: "updated",
-  }));
+    entityId: id,
+  });
 
   const rt = await storage.getRecordType(existing.recordTypeId);
   if (rt) {

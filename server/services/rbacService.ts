@@ -32,6 +32,7 @@ export const PERMISSIONS = {
   CHANGE_APPROVE: "change.approve",
   ADMIN_VIEW: "admin.view",
   ENVIRONMENT_RELEASE_CREATE: "environment.release_create",
+  ENVIRONMENT_PROMOTE: "environment.promote",
 } as const;
 
 export type PermissionName = typeof PERMISSIONS[keyof typeof PERMISSIONS];
@@ -45,6 +46,7 @@ const ALL_PERMISSIONS: { name: string; description: string }[] = [
   { name: PERMISSIONS.CHANGE_APPROVE, description: "Approve changes (transition to Ready/Merged)" },
   { name: PERMISSIONS.ADMIN_VIEW, description: "View the Admin Console" },
   { name: PERMISSIONS.ENVIRONMENT_RELEASE_CREATE, description: "Create environment release snapshots" },
+  { name: PERMISSIONS.ENVIRONMENT_PROMOTE, description: "Approve and execute environment promotions" },
 ];
 
 const DEFAULT_ROLES: { name: string; description: string; permissions: string[] }[] = [
@@ -101,6 +103,27 @@ export async function seedDefaultRoles(tenantId: string): Promise<void> {
       if (perm && !existingPermIds.has(perm.id)) {
         await storage.addRbacRolePermission(role.id, perm.id);
       }
+    }
+  }
+}
+
+/**
+ * Bootstrap RBAC for all existing tenants on server startup.
+ * Seeds default roles and assigns user-admin to the Admin role
+ * if not already assigned. Idempotent — safe to call on every boot.
+ */
+export async function bootstrapRbacForAllTenants(): Promise<void> {
+  const allTenants = await storage.getTenants();
+  for (const tenant of allTenants) {
+    await seedDefaultRoles(tenant.id);
+
+    const adminRole = await storage.getRbacRoleByTenantAndName(tenant.id, "Admin");
+    if (!adminRole) continue;
+
+    const existingRoles = await storage.getRbacUserRoles("user-admin");
+    const alreadyAssigned = existingRoles.some(ur => ur.roleId === adminRole.id);
+    if (!alreadyAssigned) {
+      await storage.addRbacUserRole("user-admin", adminRole.id);
     }
   }
 }

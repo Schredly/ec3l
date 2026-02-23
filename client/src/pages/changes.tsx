@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChangeStatusBadge } from "@/components/status-badge";
+import { ChangeStatusBadge } from "@/components/status/ChangeStatusBadge";
 import {
   GitPullRequestArrow,
   GitBranch,

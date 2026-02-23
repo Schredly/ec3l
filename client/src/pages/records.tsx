@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Database, User, Users, Timer, Play, ChevronRight } from "lucide-react";
+import { Database, User, Users, Play, ChevronRight } from "lucide-react";
+import { SlaStatusBadge } from "@/components/status/SlaStatusBadge";
 import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -36,26 +37,6 @@ function AssignedCell({ assignedTo, assignedGroup }: { assignedTo: string | null
   return <span className="text-xs text-muted-foreground">Unassigned</span>;
 }
 
-function SlaStatusBadge({ slaStatus }: { slaStatus: string | null }) {
-  if (!slaStatus) {
-    return <span className="text-xs text-muted-foreground">—</span>;
-  }
-  if (slaStatus === "breached") {
-    return (
-      <Badge variant="destructive" className="gap-1 text-xs">
-        <Timer className="w-3 h-3" />
-        Breached
-      </Badge>
-    );
-  }
-  return (
-    <Badge className="gap-1 text-xs bg-green-600 hover:bg-green-700">
-      <Timer className="w-3 h-3" />
-      Pending
-    </Badge>
-  );
-}
-
 export default function Records() {
   const [selectedTypeId, setSelectedTypeId] = useState<string>("");
   const [selectedInstance, setSelectedInstance] = useState<RecordInstanceWithSla | null>(null);
@@ -66,10 +47,22 @@ export default function Records() {
     queryKey: ["/api/record-types"],
   });
 
+  useEffect(() => {
+    if (!selectedTypeId && recordTypes && recordTypes.length > 0) {
+      setSelectedTypeId(recordTypes[0].id);
+    }
+  }, [recordTypes, selectedTypeId]);
+
   const { data: instances, isLoading: instancesLoading } = useQuery<RecordInstanceWithSla[]>({
     queryKey: [`/api/record-instances?recordTypeId=${selectedTypeId}`],
     enabled: !!selectedTypeId,
   });
+
+  useEffect(() => {
+    if (selectedTypeId && instances && instances.length === 0) {
+      console.warn(`[records] No instances returned for recordTypeId=${selectedTypeId}`);
+    }
+  }, [instances, selectedTypeId]);
 
   async function handleProcessTimers() {
     setProcessing(true);
@@ -151,11 +144,11 @@ export default function Records() {
 
       {!selectedTypeId ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-10">
-            <Database className="w-10 h-10 text-muted-foreground mb-3" />
-            <h3 className="text-lg font-medium mb-1">Select a record type</h3>
+          <CardContent className="flex flex-col items-center justify-center py-16" data-testid="empty-no-type">
+            <Database className="w-10 h-10 text-muted-foreground/50 mb-3" />
+            <h3 className="text-lg font-medium mb-1">No record type selected</h3>
             <p className="text-sm text-muted-foreground">
-              Choose a record type above to view its instances
+              Choose a record type from the dropdown to browse instances
             </p>
           </CardContent>
         </Card>
@@ -167,11 +160,13 @@ export default function Records() {
         </div>
       ) : !instances || instances.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-10">
-            <Database className="w-10 h-10 text-muted-foreground mb-3" />
-            <h3 className="text-lg font-medium mb-1">No instances</h3>
+          <CardContent className="flex flex-col items-center justify-center py-16" data-testid="empty-no-instances">
+            <Database className="w-10 h-10 text-muted-foreground/50 mb-3" />
+            <h3 className="text-lg font-medium mb-1">No records found</h3>
             <p className="text-sm text-muted-foreground">
-              No record instances found for this type
+              {recordTypeName
+                ? `No instances exist for ${recordTypeName}`
+                : "No record instances found for this type"}
             </p>
           </CardContent>
         </Card>
@@ -212,7 +207,7 @@ export default function Records() {
                       : "—"}
                   </td>
                   <td className="px-4 py-2.5">
-                    <SlaStatusBadge slaStatus={instance.slaStatus} />
+                    <SlaStatusBadge status={instance.slaStatus} />
                   </td>
                   <td className="px-4 py-2.5 text-xs">
                     {instance.createdBy}

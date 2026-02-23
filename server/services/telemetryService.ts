@@ -6,7 +6,8 @@ import type { InsertExecutionTelemetryEvent } from "@shared/schema";
 type TelemetryParams = Omit<InsertExecutionTelemetryEvent, "tenantId"> & { tenantId: string };
 
 /**
- * Fire-and-forget telemetry writer. Never throws.
+ * @internal Low-level telemetry writer — prefer `emitDomainEvent` from domainEventService.
+ * Fire-and-forget. Never throws.
  */
 export function emitTelemetry(params: TelemetryParams): void {
   storage.createExecutionTelemetryEvent(params).catch((err) => {
@@ -17,8 +18,8 @@ export function emitTelemetry(params: TelemetryParams): void {
 }
 
 /**
+ * @internal Low-level param builder — prefer `emitDomainEvent` from domainEventService.
  * Build common telemetry fields from a TenantContext.
- * Call-sites spread overrides on top.
  */
 export function buildTelemetryParams(
   ctx: TenantContext,

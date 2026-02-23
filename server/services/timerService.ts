@@ -1,5 +1,5 @@
 import { storage } from "../storage";
-import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
+import { emitDomainEvent } from "./domainEventService";
 import type { TenantContext } from "../tenant";
 
 /**
@@ -20,13 +20,12 @@ export async function processDueTimers(now?: Date, tenantId?: string): Promise<n
       await storage.updateTimerStatus(timer.id, "breached");
 
       const ctx: TenantContext = { tenantId: timer.tenantId, source: "header" };
-      emitTelemetry(buildTelemetryParams(ctx, {
-        eventType: "record.sla.breached",
-        executionType: "task",
-        executionId: timer.recordId,
+      emitDomainEvent(ctx, {
+        type: "record.sla.breached",
         status: "breached",
-        affectedRecordIds: { recordId: timer.recordId, timerId: timer.id },
-      }));
+        entityId: timer.recordId,
+        affectedRecords: { recordId: timer.recordId, timerId: timer.id },
+      });
 
       processed++;
     } catch (_err) {

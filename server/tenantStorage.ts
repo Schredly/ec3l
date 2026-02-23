@@ -54,6 +54,21 @@ import {
   environmentReleaseChanges,
   type EnvironmentRelease,
   type InsertEnvironmentRelease,
+  graphPackageInstalls,
+  type GraphPackageInstall,
+  type InsertGraphPackageInstall,
+  environmentPackageInstalls,
+  type EnvironmentPackageInstall,
+  type InsertEnvironmentPackageInstall,
+  promotionIntents,
+  type PromotionIntent,
+  type InsertPromotionIntent,
+  vibePackageDrafts,
+  type VibePackageDraft,
+  type InsertVibePackageDraft,
+  vibePackageDraftVersions,
+  type VibePackageDraftVersion,
+  type InsertVibePackageDraftVersion,
 } from "@shared/schema";
 import type { TenantContext } from "./tenant";
 
@@ -721,6 +736,44 @@ export function getTenantStorage(ctx: TenantContext) {
       return updated;
     },
 
+    async updateRecordTypeSlaConfig(
+      id: string,
+      slaConfig: unknown,
+    ): Promise<RecordType | undefined> {
+      const [existing] = await db
+        .select()
+        .from(recordTypes)
+        .where(
+          and(eq(recordTypes.id, id), eq(recordTypes.tenantId, tenantId)),
+        );
+      if (!existing) return undefined;
+      const [updated] = await db
+        .update(recordTypes)
+        .set({ slaConfig })
+        .where(eq(recordTypes.id, id))
+        .returning();
+      return updated;
+    },
+
+    async updateRecordTypeAssignmentConfig(
+      id: string,
+      assignmentConfig: unknown,
+    ): Promise<RecordType | undefined> {
+      const [existing] = await db
+        .select()
+        .from(recordTypes)
+        .where(
+          and(eq(recordTypes.id, id), eq(recordTypes.tenantId, tenantId)),
+        );
+      if (!existing) return undefined;
+      const [updated] = await db
+        .update(recordTypes)
+        .set({ assignmentConfig })
+        .where(eq(recordTypes.id, id))
+        .returning();
+      return updated;
+    },
+
     async updateChangePatchOpSnapshot(
       id: string,
       previousSnapshot: unknown,
@@ -834,6 +887,226 @@ export function getTenantStorage(ctx: TenantContext) {
       await db
         .insert(environmentReleaseChanges)
         .values(changeIds.map((changeId) => ({ releaseId, changeId })));
+    },
+
+    // --- Graph Package Installs ---
+
+    async createGraphPackageInstall(data: InsertGraphPackageInstall): Promise<GraphPackageInstall> {
+      const [row] = await db
+        .insert(graphPackageInstalls)
+        .values({ ...data, tenantId })
+        .returning();
+      return row;
+    },
+
+    async listGraphPackageInstalls(projectId: string): Promise<GraphPackageInstall[]> {
+      return db
+        .select()
+        .from(graphPackageInstalls)
+        .where(and(eq(graphPackageInstalls.tenantId, tenantId), eq(graphPackageInstalls.projectId, projectId)))
+        .orderBy(desc(graphPackageInstalls.installedAt));
+    },
+
+    async getLatestGraphPackageInstall(projectId: string, packageKey: string): Promise<GraphPackageInstall | undefined> {
+      const [row] = await db
+        .select()
+        .from(graphPackageInstalls)
+        .where(and(
+          eq(graphPackageInstalls.tenantId, tenantId),
+          eq(graphPackageInstalls.projectId, projectId),
+          eq(graphPackageInstalls.packageKey, packageKey),
+        ))
+        .orderBy(desc(graphPackageInstalls.installedAt))
+        .limit(1);
+      return row;
+    },
+
+    async getGraphPackageInstallByVersion(projectId: string, packageKey: string, version: string): Promise<GraphPackageInstall | undefined> {
+      const [row] = await db
+        .select()
+        .from(graphPackageInstalls)
+        .where(and(
+          eq(graphPackageInstalls.tenantId, tenantId),
+          eq(graphPackageInstalls.projectId, projectId),
+          eq(graphPackageInstalls.packageKey, packageKey),
+          eq(graphPackageInstalls.version, version),
+        ));
+      return row;
+    },
+
+    // --- Environment Package Installs ---
+
+    async createEnvironmentPackageInstall(data: InsertEnvironmentPackageInstall): Promise<EnvironmentPackageInstall> {
+      const [row] = await db
+        .insert(environmentPackageInstalls)
+        .values({ ...data, tenantId })
+        .returning();
+      return row;
+    },
+
+    async listEnvironmentPackageInstalls(environmentId: string): Promise<EnvironmentPackageInstall[]> {
+      return db
+        .select()
+        .from(environmentPackageInstalls)
+        .where(and(
+          eq(environmentPackageInstalls.tenantId, tenantId),
+          eq(environmentPackageInstalls.environmentId, environmentId),
+        ))
+        .orderBy(desc(environmentPackageInstalls.installedAt));
+    },
+
+    async getLatestEnvironmentPackageInstall(environmentId: string, packageKey: string): Promise<EnvironmentPackageInstall | undefined> {
+      const [row] = await db
+        .select()
+        .from(environmentPackageInstalls)
+        .where(and(
+          eq(environmentPackageInstalls.tenantId, tenantId),
+          eq(environmentPackageInstalls.environmentId, environmentId),
+          eq(environmentPackageInstalls.packageKey, packageKey),
+        ))
+        .orderBy(desc(environmentPackageInstalls.installedAt))
+        .limit(1);
+      return row;
+    },
+
+    // --- Promotion Intents ---
+
+    async createPromotionIntent(data: InsertPromotionIntent): Promise<PromotionIntent> {
+      const [row] = await db
+        .insert(promotionIntents)
+        .values({ ...data, tenantId })
+        .returning();
+      return row;
+    },
+
+    async getPromotionIntent(id: string): Promise<PromotionIntent | undefined> {
+      const [row] = await db
+        .select()
+        .from(promotionIntents)
+        .where(and(eq(promotionIntents.id, id), eq(promotionIntents.tenantId, tenantId)));
+      return row;
+    },
+
+    async updatePromotionIntent(
+      id: string,
+      updates: Partial<Pick<PromotionIntent, "status" | "approvedBy" | "approvedAt" | "diff" | "result" | "notificationStatus" | "notificationLastError" | "notificationLastAttemptAt">>,
+    ): Promise<PromotionIntent | undefined> {
+      const existing = await this.getPromotionIntent(id);
+      if (!existing) return undefined;
+      const [row] = await db
+        .update(promotionIntents)
+        .set(updates)
+        .where(eq(promotionIntents.id, id))
+        .returning();
+      return row;
+    },
+
+    async listPromotionIntents(projectId?: string): Promise<PromotionIntent[]> {
+      const conditions = [eq(promotionIntents.tenantId, tenantId)];
+      if (projectId) {
+        conditions.push(eq(promotionIntents.projectId, projectId));
+      }
+      return db
+        .select()
+        .from(promotionIntents)
+        .where(and(...conditions))
+        .orderBy(desc(promotionIntents.createdAt));
+    },
+
+    // --- Vibe Package Drafts ---
+
+    async createVibeDraft(data: InsertVibePackageDraft): Promise<VibePackageDraft> {
+      const [row] = await db
+        .insert(vibePackageDrafts)
+        .values({ ...data, tenantId })
+        .returning();
+      return row;
+    },
+
+    async getVibeDraft(id: string): Promise<VibePackageDraft | undefined> {
+      const [row] = await db
+        .select()
+        .from(vibePackageDrafts)
+        .where(and(eq(vibePackageDrafts.id, id), eq(vibePackageDrafts.tenantId, tenantId)));
+      return row;
+    },
+
+    async updateVibeDraft(
+      id: string,
+      updates: Partial<Pick<VibePackageDraft, "status" | "prompt" | "package" | "checksum" | "lastPreviewDiff" | "lastPreviewErrors" | "updatedAt">>,
+    ): Promise<VibePackageDraft | undefined> {
+      const existing = await this.getVibeDraft(id);
+      if (!existing) return undefined;
+      const [row] = await db
+        .update(vibePackageDrafts)
+        .set(updates)
+        .where(eq(vibePackageDrafts.id, id))
+        .returning();
+      return row;
+    },
+
+    async listVibeDrafts(projectId?: string): Promise<VibePackageDraft[]> {
+      const conditions = [eq(vibePackageDrafts.tenantId, tenantId)];
+      if (projectId) {
+        conditions.push(eq(vibePackageDrafts.projectId, projectId));
+      }
+      return db
+        .select()
+        .from(vibePackageDrafts)
+        .where(and(...conditions))
+        .orderBy(desc(vibePackageDrafts.updatedAt));
+    },
+
+    // --- Vibe Package Draft Versions ---
+
+    async createVibeDraftVersion(data: InsertVibePackageDraftVersion): Promise<VibePackageDraftVersion> {
+      const [row] = await db
+        .insert(vibePackageDraftVersions)
+        .values({ ...data, tenantId })
+        .returning();
+      return row;
+    },
+
+    async listVibeDraftVersions(draftId: string): Promise<VibePackageDraftVersion[]> {
+      return db
+        .select()
+        .from(vibePackageDraftVersions)
+        .where(
+          and(
+            eq(vibePackageDraftVersions.tenantId, tenantId),
+            eq(vibePackageDraftVersions.draftId, draftId),
+          ),
+        )
+        .orderBy(desc(vibePackageDraftVersions.versionNumber));
+    },
+
+    async getVibeDraftVersion(draftId: string, versionNumber: number): Promise<VibePackageDraftVersion | undefined> {
+      const [row] = await db
+        .select()
+        .from(vibePackageDraftVersions)
+        .where(
+          and(
+            eq(vibePackageDraftVersions.tenantId, tenantId),
+            eq(vibePackageDraftVersions.draftId, draftId),
+            eq(vibePackageDraftVersions.versionNumber, versionNumber),
+          ),
+        );
+      return row;
+    },
+
+    async getLatestVibeDraftVersionNumber(draftId: string): Promise<number> {
+      const [row] = await db
+        .select({ versionNumber: vibePackageDraftVersions.versionNumber })
+        .from(vibePackageDraftVersions)
+        .where(
+          and(
+            eq(vibePackageDraftVersions.tenantId, tenantId),
+            eq(vibePackageDraftVersions.draftId, draftId),
+          ),
+        )
+        .orderBy(desc(vibePackageDraftVersions.versionNumber))
+        .limit(1);
+      return row?.versionNumber ?? 0;
     },
   };
 }

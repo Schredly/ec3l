@@ -72,9 +72,8 @@ vi.mock("../../tenantStorage", () => ({
   getTenantStorage: () => mockTenantStorage,
 }));
 
-vi.mock("../telemetryService", () => ({
-  emitTelemetry: vi.fn(),
-  buildTelemetryParams: vi.fn(() => ({})),
+vi.mock("../domainEventService", () => ({
+  emitDomainEvent: vi.fn(),
 }));
 
 const mockExecutePatchOps = vi.fn();

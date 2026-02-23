@@ -19,12 +19,10 @@ vi.mock("../storage", () => ({
   },
 }));
 
-const mockEmitTelemetry = vi.fn();
-const mockBuildTelemetryParams = vi.fn((_ctx: unknown, overrides: Record<string, unknown>) => overrides);
+const mockEmitDomainEvent = vi.fn();
 
-vi.mock("../services/telemetryService", () => ({
-  emitTelemetry: (...args: unknown[]) => mockEmitTelemetry(...args),
-  buildTelemetryParams: (...args: unknown[]) => mockBuildTelemetryParams(...args),
+vi.mock("../services/domainEventService", () => ({
+  emitDomainEvent: (...args: unknown[]) => mockEmitDomainEvent(...args),
 }));
 
 vi.mock("../services/triggerService", () => ({
@@ -161,10 +159,11 @@ describe("processDueTimers", () => {
 
     expect(count).toBe(1);
     expect(mockUpdateTimerStatus).toHaveBeenCalledWith("timer-1", "breached");
-    expect(mockEmitTelemetry).toHaveBeenCalledWith(
+    expect(mockEmitDomainEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-a" }),
       expect.objectContaining({
-        eventType: "record.sla.breached",
-        executionId: "ri-1",
+        type: "record.sla.breached",
+        entityId: "ri-1",
         status: "breached",
       }),
     );
@@ -177,7 +176,7 @@ describe("processDueTimers", () => {
 
     expect(count).toBe(0);
     expect(mockUpdateTimerStatus).not.toHaveBeenCalled();
-    expect(mockEmitTelemetry).not.toHaveBeenCalled();
+    expect(mockEmitDomainEvent).not.toHaveBeenCalled();
   });
 
   it("is idempotent — breached timers are not returned by getDueTimers", async () => {
@@ -245,13 +244,13 @@ describe("processDueTimers", () => {
     expect(count).toBe(2);
 
     // Each timer's telemetry is scoped to its own tenantId
-    expect(mockBuildTelemetryParams).toHaveBeenCalledWith(
+    expect(mockEmitDomainEvent).toHaveBeenCalledWith(
       expect.objectContaining({ tenantId: "tenant-a" }),
-      expect.objectContaining({ executionId: "ri-a" }),
+      expect.objectContaining({ entityId: "ri-a" }),
     );
-    expect(mockBuildTelemetryParams).toHaveBeenCalledWith(
+    expect(mockEmitDomainEvent).toHaveBeenCalledWith(
       expect.objectContaining({ tenantId: "tenant-b" }),
-      expect.objectContaining({ executionId: "ri-b" }),
+      expect.objectContaining({ entityId: "ri-b" }),
     );
   });
 });

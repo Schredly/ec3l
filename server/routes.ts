@@ -13,6 +13,13 @@ import { ec3l } from "./ec3l";
 import { insertWorkflowTriggerSchema, insertRecordTypeSchema, insertFieldDefinitionSchema, insertChoiceListSchema, insertChoiceItemSchema, insertFormDefinitionSchema, insertFormSectionSchema, insertFormFieldPlacementSchema, insertFormBehaviorRuleSchema } from "@shared/schema";
 import { insertRbacRoleSchema, insertRbacPolicySchema } from "@shared/schema";
 import { insertChangeTargetSchema } from "@shared/schema";
+import type { GraphPackage } from "./graph/installGraphService";
+import { DraftPatchOpError } from "./vibe/draftPatchOps";
+import { generateAndPreviewWithRepair, generateAndPreviewWithRepairStreaming } from "./vibe/repairService";
+import type { StreamStageEvent } from "./vibe/repairService";
+import type { TokenStreamEvent } from "./vibe/tokenStreamService";
+import { MultiStreamError } from "./vibe/tokenStreamService";
+import { DraftVersionDiffError } from "./vibe/draftVersionDiffService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -20,6 +27,7 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   await ec3l.rbac.seedPermissions();
+  await ec3l.rbac.bootstrapRbacForAllTenants();
 
   app.get("/api/tenants", async (_req, res) => {
     const tenantList = await storage.getTenants();
@@ -1328,6 +1336,44 @@ export async function registerRoutes(
 
   // --- RBAC Routes ---
 
+  // Self-introspection — no admin permission required.
+  // Returns only the calling user's own roles and permissions within the current tenant.
+  app.get("/api/rbac/me", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      const actorId = actor.actorId;
+      if (!actorId) {
+        return res.status(401).json({ message: "Missing actor identity" });
+      }
+      const tenantId = req.tenantContext.tenantId;
+      const userRoles = await storage.getRbacUserRolesByTenant(actorId, tenantId);
+      const activeRoles = userRoles.filter(r => r.status === "active");
+
+      const allPerms = await storage.getRbacPermissions();
+      const permById = new Map(allPerms.map(p => [p.id, p.name]));
+
+      const permissionKeys = new Set<string>();
+      for (const role of activeRoles) {
+        const rolePerms = await storage.getRbacRolePermissions(role.id);
+        for (const rp of rolePerms) {
+          const name = permById.get(rp.permissionId);
+          if (name) permissionKeys.add(name);
+        }
+      }
+
+      res.json({
+        userId: actorId,
+        roles: activeRoles.map(r => ({ id: r.id, name: r.name, status: r.status })),
+        permissions: Array.from(permissionKeys),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("Missing actor identity")) {
+        return res.status(401).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   async function requireRbacAdmin(req: import("express").Request, res: import("express").Response): Promise<boolean> {
     try {
       await ec3l.rbac.authorize(req.tenantContext, ec3l.rbac.actorFromContext(req.tenantContext), ec3l.rbac.PERMISSIONS.CHANGE_APPROVE);
@@ -1919,6 +1965,1003 @@ export async function registerRoutes(
     }
   });
 
+  // --- Graph Introspection (admin-only) ---
+
+  app.get("/api/admin/graph/snapshot", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId, full } = req.query;
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      if (full === "1") {
+        const snapshot = await ec3l.graph.getProjectGraphSnapshot(req.tenantContext, projectId);
+        return res.json(snapshot);
+      }
+      const summary = await ec3l.graph.getProjectGraphSummary(req.tenantContext, projectId);
+      res.json(summary);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/graph/validate", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId } = req.query;
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      const result = await ec3l.graph.validateProjectGraph(req.tenantContext, projectId);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/graph/diff", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId, changeId } = req.query;
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      if (!changeId || typeof changeId !== "string") {
+        return res.status(400).json({ message: "changeId query parameter is required" });
+      }
+      const diff = await ec3l.graph.getChangeDiff(req.tenantContext, projectId, changeId);
+      res.json(diff);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/graph/install", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId } = req.query;
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      const preview = req.query.preview === "true";
+      const allowDowngrade = req.query.allowDowngrade === "true";
+      const graphPackage = req.body;
+      if (!graphPackage || !Array.isArray(graphPackage.recordTypes)) {
+        return res.status(400).json({ message: "Body must include recordTypes array" });
+      }
+      if (!graphPackage.packageKey || typeof graphPackage.packageKey !== "string") {
+        return res.status(400).json({ message: "Body must include packageKey (string)" });
+      }
+      if (!graphPackage.version || typeof graphPackage.version !== "string") {
+        return res.status(400).json({ message: "Body must include version (string)" });
+      }
+      const environmentId = typeof req.query.environmentId === "string" ? req.query.environmentId : undefined;
+      const result = await ec3l.graph.installGraphPackage(
+        req.tenantContext,
+        projectId,
+        graphPackage,
+        { previewOnly: preview, allowDowngrade, environmentId },
+      );
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/graph/packages", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId, packageKey } = req.query;
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      const history = await ec3l.graph.getPackageHistory(
+        req.tenantContext,
+        projectId,
+        typeof packageKey === "string" ? packageKey : undefined,
+      );
+      res.json(history);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/graph/packages/diff", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId, packageKey, fromVersion, toVersion } = req.query;
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      if (!packageKey || typeof packageKey !== "string") {
+        return res.status(400).json({ message: "packageKey query parameter is required" });
+      }
+      if (!fromVersion || typeof fromVersion !== "string") {
+        return res.status(400).json({ message: "fromVersion query parameter is required" });
+      }
+      if (!toVersion || typeof toVersion !== "string") {
+        return res.status(400).json({ message: "toVersion query parameter is required" });
+      }
+      const diff = await ec3l.graph.getVersionDiff(
+        req.tenantContext,
+        projectId,
+        packageKey,
+        fromVersion,
+        toVersion,
+      );
+      res.json(diff);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/graph/built-in", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      res.json(ec3l.graph.listBuiltInPackages());
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/graph/install-built-in", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId, packageKey } = req.query;
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      if (!packageKey || typeof packageKey !== "string") {
+        return res.status(400).json({ message: "packageKey query parameter is required" });
+      }
+      const preview = req.query.preview === "true";
+      const builtIn = ec3l.graph.getBuiltInPackage(packageKey);
+      if (!builtIn) {
+        return res.status(404).json({
+          message: `Built-in package "${packageKey}" not found`,
+          available: ec3l.graph.listBuiltInPackages().map((p) => p.packageKey),
+        });
+      }
+      const result = await ec3l.graph.installGraphPackages(
+        req.tenantContext,
+        projectId,
+        [builtIn],
+        { previewOnly: preview },
+      );
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // --- Environment Package State & Promotion ---
+
+  app.get("/api/admin/environments/:envId/packages", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const state = await ec3l.graph.getEnvironmentPackageState(
+        req.tenantContext,
+        req.params.envId,
+      );
+      res.json(state);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/admin/environments/diff", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { fromEnvId, toEnvId } = req.query;
+      if (!fromEnvId || typeof fromEnvId !== "string") {
+        return res.status(400).json({ message: "fromEnvId query parameter is required" });
+      }
+      if (!toEnvId || typeof toEnvId !== "string") {
+        return res.status(400).json({ message: "toEnvId query parameter is required" });
+      }
+      const diff = await ec3l.graph.diffEnvironments(
+        req.tenantContext,
+        fromEnvId,
+        toEnvId,
+      );
+      res.json(diff);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/environments/promote", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { fromEnvId, toEnvId, projectId } = req.query;
+      // Gate check: if target environment requires approval, block direct promotion
+      if (toEnvId && typeof toEnvId === "string") {
+        const ts = getTenantStorage(req.tenantContext);
+        const targetEnv = await ts.getEnvironment(toEnvId);
+        if (targetEnv?.requiresPromotionApproval) {
+          return res.status(403).json({
+            message: "Target environment requires promotion approval. Use the promotion intent workflow instead.",
+          });
+        }
+      }
+      if (!fromEnvId || typeof fromEnvId !== "string") {
+        return res.status(400).json({ message: "fromEnvId query parameter is required" });
+      }
+      if (!toEnvId || typeof toEnvId !== "string") {
+        return res.status(400).json({ message: "toEnvId query parameter is required" });
+      }
+      if (!projectId || typeof projectId !== "string") {
+        return res.status(400).json({ message: "projectId query parameter is required" });
+      }
+      const preview = req.query.preview === "true";
+      const result = await ec3l.graph.promoteEnvironmentPackages(
+        req.tenantContext,
+        fromEnvId,
+        toEnvId,
+        projectId,
+        { previewOnly: preview },
+      );
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // --- Promotion Intents ---
+
+  app.get("/api/admin/environments/promotions", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
+      const intents = await ec3l.graph.listPromotionIntents(req.tenantContext, projectId);
+      res.json(intents);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/environments/promotions", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId, fromEnvironmentId, toEnvironmentId } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!fromEnvironmentId) return res.status(400).json({ message: "fromEnvironmentId is required" });
+      if (!toEnvironmentId) return res.status(400).json({ message: "toEnvironmentId is required" });
+      const intent = await ec3l.graph.createPromotionIntent(req.tenantContext, {
+        projectId,
+        fromEnvironmentId,
+        toEnvironmentId,
+        createdBy: actor.actorId ?? undefined,
+      });
+      res.status(201).json(intent);
+    } catch (err) {
+      if (err instanceof ec3l.graph.PromotionIntentError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/environments/promotions/:id/preview", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const intent = await ec3l.graph.previewPromotionIntent(req.tenantContext, req.params.id);
+      res.json(intent);
+    } catch (err) {
+      if (err instanceof ec3l.graph.PromotionIntentError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/environments/promotions/:id/approve", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      ec3l.agentGuard.assertNotAgent(actor, "approve promotion intents");
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ENVIRONMENT_PROMOTE);
+      const intent = await ec3l.graph.approvePromotionIntent(
+        req.tenantContext,
+        req.params.id,
+        actor.actorId!,
+      );
+      res.json(intent);
+    } catch (err) {
+      if (err instanceof ec3l.graph.PromotionIntentError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err instanceof ec3l.agentGuard.AgentGuardError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/environments/promotions/:id/execute", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ENVIRONMENT_PROMOTE);
+      const intent = await ec3l.graph.executePromotionIntent(req.tenantContext, req.params.id);
+      res.json(intent);
+    } catch (err) {
+      if (err instanceof ec3l.graph.PromotionIntentError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/admin/environments/promotions/:id/reject", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const intent = await ec3l.graph.rejectPromotionIntent(req.tenantContext, req.params.id);
+      res.json(intent);
+    } catch (err) {
+      if (err instanceof ec3l.graph.PromotionIntentError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // --- Vibe Authoring Layer ---
+
+  /**
+   * GET /api/vibe/proposal?prompt=...
+   * Read-only proposal generation — maps a GraphPackage to a human-readable
+   * proposal summary for the Builder UI. No DB writes, no admin auth.
+   */
+  app.get("/api/vibe/proposal", async (req, res) => {
+    try {
+      const prompt = typeof req.query.prompt === "string" ? req.query.prompt.trim() : "";
+      if (!prompt) {
+        return res.status(400).json({ message: "prompt query parameter is required" });
+      }
+
+      const pkg = await ec3l.vibe.generatePackageFromPrompt(prompt, undefined, req.tenantContext);
+
+      // Derive human-readable appName from packageKey
+      const appName = pkg.packageKey
+        .replace(/^vibe\./, "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+
+      const recordTypes = pkg.recordTypes.map((rt) => rt.name || rt.key);
+
+      const workflows = (pkg.workflows || []).map((w) => w.name);
+
+      // Derive roles from assignment rule group keys
+      const roleSet = new Set<string>();
+      for (const rule of pkg.assignmentRules || []) {
+        const group = (rule.config as Record<string, unknown>)?.groupKey;
+        if (typeof group === "string") {
+          roleSet.add(group.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()));
+        }
+      }
+      const roles = Array.from(roleSet);
+
+      // Derive approvals from SLA policies (implied oversight)
+      const approvals = (pkg.slaPolicies || []).map((sla) => {
+        const hours = Math.round(sla.durationMinutes / 60);
+        const rtName = pkg.recordTypes.find((r) => r.key === sla.recordTypeKey)?.name || sla.recordTypeKey;
+        return `SLA: ${hours}h response on ${rtName}`;
+      });
+
+      // Derive notifications from workflow notification steps
+      const notifications: string[] = [];
+      for (const wf of pkg.workflows || []) {
+        for (const step of wf.steps || []) {
+          if (step.stepType === "notification") {
+            notifications.push(step.name);
+          }
+        }
+      }
+
+      return res.json({ appName, recordTypes, roles, workflows, approvals, notifications });
+    } catch (err) {
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/preview", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { prompt, appName, projectId, package: existingPackage, refinementPrompt } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+
+      if (existingPackage && refinementPrompt) {
+        // Refine mode: apply refinement to an existing package
+        const pkg: GraphPackage = await ec3l.vibe.refinePackageFromPrompt(existingPackage, refinementPrompt, req.tenantContext);
+        const preview = await ec3l.vibe.previewVibePackage(req.tenantContext, projectId, pkg);
+        return res.json(preview);
+      }
+
+      if (prompt) {
+        // Generate mode: use repair loop for LLM generation → preview
+        const result = await generateAndPreviewWithRepair(
+          req.tenantContext, projectId, prompt, { appName },
+        );
+        return res.json(result);
+      }
+
+      return res.status(400).json({ message: "Either 'prompt' or both 'package' and 'refinementPrompt' are required" });
+    } catch (err) {
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/preview/stream", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { prompt, appName, projectId } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!prompt) return res.status(400).json({ message: "prompt is required for streaming preview" });
+
+      // SSE headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      const sendEvent = (event: StreamStageEvent) => {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      try {
+        await generateAndPreviewWithRepairStreaming(
+          req.tenantContext,
+          projectId,
+          prompt,
+          sendEvent,
+          { appName },
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        sendEvent({ stage: "error", error: message });
+      }
+
+      res.end();
+    } catch (err) {
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/preview/stream-tokens", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { prompt, appName, projectId } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!prompt) return res.status(400).json({ message: "prompt is required for token streaming" });
+
+      // SSE headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      const sendEvent = (event: TokenStreamEvent) => {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      try {
+        await ec3l.tokenStream.generateAndPreviewWithTokenStreaming(
+          req.tenantContext,
+          projectId,
+          prompt,
+          sendEvent,
+          { appName },
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        sendEvent({ type: "error", error: message });
+      }
+
+      res.end();
+    } catch (err) {
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/generate-multi/stream", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { prompt, count, appName, projectId } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!prompt) return res.status(400).json({ message: "prompt is required" });
+      const variantCount = typeof count === "number" ? count : 3;
+      if (variantCount < 1 || variantCount > 3) {
+        return res.status(400).json({ message: "count must be between 1 and 3 for streaming" });
+      }
+
+      // SSE headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      const sendEvent = (event: TokenStreamEvent & { variantIndex?: number }) => {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      try {
+        await ec3l.tokenStream.generateMultiWithTokenStreaming(
+          req.tenantContext,
+          projectId,
+          prompt,
+          variantCount,
+          sendEvent,
+          { appName },
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        sendEvent({ type: "error", error: message });
+      }
+
+      res.end();
+    } catch (err) {
+      if (err instanceof MultiStreamError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/install", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { package: pkg, projectId, environmentId } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!pkg) return res.status(400).json({ message: "package is required" });
+      if (!pkg.packageKey || !pkg.version || !Array.isArray(pkg.recordTypes)) {
+        return res.status(400).json({ message: "package must have packageKey, version, and recordTypes" });
+      }
+
+      const result = await ec3l.vibe.installVibePackage(req.tenantContext, projectId, pkg, { environmentId });
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  // --- Vibe Drafts ---
+
+  app.post("/api/vibe/drafts", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId, environmentId, prompt, appName } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!prompt) return res.status(400).json({ message: "prompt is required" });
+
+      const draft = await ec3l.vibeDraft.createDraftFromPrompt(
+        req.tenantContext, projectId, environmentId ?? null, prompt, appName,
+      );
+      res.status(201).json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/vibe/drafts", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { projectId } = req.query;
+      const ts = getTenantStorage(req.tenantContext);
+      const drafts = await ts.listVibeDrafts(
+        typeof projectId === "string" ? projectId : undefined,
+      );
+      res.json(drafts);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/refine", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+      const { refinementPrompt } = req.body;
+      if (!refinementPrompt) return res.status(400).json({ message: "refinementPrompt is required" });
+
+      const draft = await ec3l.vibeDraft.refineDraft(
+        req.tenantContext, req.params.draftId, refinementPrompt,
+      );
+      res.json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/preview", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const draft = await ec3l.vibeDraft.previewDraft(req.tenantContext, req.params.draftId);
+      res.json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/install", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const result = await ec3l.vibeDraft.installDraft(req.tenantContext, req.params.draftId);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/discard", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const draft = await ec3l.vibeDraft.discardDraft(req.tenantContext, req.params.draftId);
+      res.json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/patch", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const { ops } = req.body;
+      if (!Array.isArray(ops) || ops.length === 0) {
+        return res.status(400).json({ message: "ops array is required and must be non-empty" });
+      }
+
+      const draft = await ec3l.vibeDraft.applyDraftPatchOps(req.tenantContext, req.params.draftId, ops);
+      res.json(draft);
+    } catch (err) {
+      if (err instanceof DraftPatchOpError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.get("/api/vibe/drafts/:draftId/versions", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const versions = await ec3l.vibeDraft.listDraftVersions(req.tenantContext, req.params.draftId);
+      res.json(versions);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/restore", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const { versionNumber } = req.body;
+      if (typeof versionNumber !== "number" || versionNumber < 1) {
+        return res.status(400).json({ message: "versionNumber is required and must be a positive integer" });
+      }
+
+      const draft = await ec3l.vibeDraft.restoreDraftVersion(req.tenantContext, req.params.draftId, versionNumber);
+      res.json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/versions/diff", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const { fromVersion, toVersion } = req.body;
+      if (typeof fromVersion !== "number" || fromVersion < 1) {
+        return res.status(400).json({ message: "fromVersion is required and must be a positive integer" });
+      }
+      if (typeof toVersion !== "number" || toVersion < 1) {
+        return res.status(400).json({ message: "toVersion is required and must be a positive integer" });
+      }
+
+      const result = await ec3l.draftVersionDiff.diffDraftVersions(
+        req.tenantContext, req.params.draftId, fromVersion, toVersion,
+      );
+      res.json(result);
+    } catch (err) {
+      if (err instanceof DraftVersionDiffError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/generate-multi", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const { prompt, count, appName } = req.body;
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ message: "prompt is required" });
+      }
+      const variantCount = typeof count === "number" ? count : 3;
+      if (variantCount < 1 || variantCount > 5) {
+        return res.status(400).json({ message: "count must be between 1 and 5" });
+      }
+
+      const projectId = req.query.projectId as string || req.body.projectId;
+      if (!projectId) {
+        return res.status(400).json({ message: "projectId is required" });
+      }
+
+      const variants = await ec3l.multiVariant.generateVariantsWithPreview(
+        req.tenantContext, projectId, prompt, variantCount, appName,
+      );
+      res.json({ variants });
+    } catch (err) {
+      if (err instanceof ec3l.multiVariant.MultiVariantError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/from-variant", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const { projectId, environmentId, prompt } = req.body;
+      const pkg = req.body.package;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!pkg || typeof pkg !== "object") return res.status(400).json({ message: "package is required" });
+      if (!prompt || typeof prompt !== "string") return res.status(400).json({ message: "prompt is required" });
+
+      const draft = await ec3l.vibeDraft.createDraftFromVariant(
+        req.tenantContext, projectId, environmentId ?? null, pkg as GraphPackage, prompt,
+      );
+      res.status(201).json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/variants/diff", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const { projectId, packageA, packageB } = req.body;
+      if (!projectId) return res.status(400).json({ message: "projectId is required" });
+      if (!packageA || typeof packageA !== "object") return res.status(400).json({ message: "packageA is required" });
+      if (!packageB || typeof packageB !== "object") return res.status(400).json({ message: "packageB is required" });
+
+      const result = await ec3l.variantDiff.diffPackages(
+        req.tenantContext, projectId, packageA as GraphPackage, packageB as GraphPackage,
+      );
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  app.post("/api/vibe/drafts/:draftId/adopt-variant", async (req, res) => {
+    try {
+      const actor = ec3l.rbac.resolveActorFromContext(req.tenantContext);
+      await ec3l.rbac.authorize(req.tenantContext, actor, ec3l.rbac.PERMISSIONS.ADMIN_VIEW);
+
+      const pkg = req.body.package;
+      const prompt = req.body.prompt;
+      if (!pkg || typeof pkg !== "object") return res.status(400).json({ message: "package is required" });
+
+      const draft = await ec3l.vibeDraft.adoptVariant(
+        req.tenantContext, req.params.draftId, pkg as GraphPackage, prompt,
+      );
+      res.json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.rbac.RbacDeniedError) {
+        return res.status(403).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
   // --- Timers ---
   app.post("/api/timers/process", async (req, res) => {
     const processedCount = await ec3l.timer.processDueTimers(undefined, req.tenantContext.tenantId);
@@ -1978,6 +3021,73 @@ export async function registerRoutes(
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
     const feed = await ec3l.auditFeed.getAuditFeed(req.tenantContext, { limit });
     res.json(feed);
+  });
+
+  // --- Builder UI ---
+
+  /**
+   * POST /api/builder/drafts
+   * Creates a vibe draft for the Builder flow. Resolves (or creates) a default
+   * project so the Builder landing page doesn't require project selection.
+   * No admin auth — mirrors the proposal endpoint's access level.
+   */
+  app.post("/api/builder/drafts", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+        return res.status(400).json({ message: "prompt is required" });
+      }
+
+      // Resolve or create a default "Builder Apps" project for this tenant
+      const projects = await ec3l.project.getProjects(req.tenantContext);
+      let project = projects.find((p) => p.name === "Builder Apps") ?? projects[0];
+      if (!project) {
+        project = await ec3l.project.createProject(req.tenantContext, {
+          name: "Builder Apps",
+          githubRepo: "local/builder",
+          defaultBranch: "main",
+          description: "Auto-created project for Builder-generated apps",
+        });
+      }
+
+      const draft = await ec3l.vibeDraft.createDraftFromPrompt(
+        req.tenantContext,
+        project.id,
+        null, // environmentId — resolved later during install
+        prompt.trim(),
+      );
+
+      return res.status(201).json({
+        appId: draft.id,
+        environment: "dev",
+      });
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * GET /api/builder/drafts/:appId
+   * Retrieves a single vibe draft with its full package for the Draft Shell UI.
+   * No admin auth — mirrors other builder endpoints.
+   */
+  app.get("/api/builder/drafts/:appId", async (req, res) => {
+    try {
+      const ts = getTenantStorage(req.tenantContext);
+      const draft = await ts.getVibeDraft(req.params.appId);
+      if (!draft) {
+        return res.status(404).json({ message: "Draft not found" });
+      }
+      return res.json(draft);
+    } catch (err) {
+      throw err;
+    }
   });
 
   ec3l.scheduler.startScheduler();

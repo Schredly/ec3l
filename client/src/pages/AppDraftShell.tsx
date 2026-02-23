@@ -1,0 +1,420 @@
+import { useParams } from "wouter";
+import { StatusBadge } from "@/components/status/StatusBadge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { AlertCircle } from "lucide-react";
+import { useAppDraft } from "@/hooks/useAppDraft";
+import type { GraphPackageJson } from "@/lib/api/vibe";
+import type { StatusTone } from "@/components/status/StatusBadge";
+
+function EnvironmentPipeline({ active }: { active: "DEV" | "TEST" | "PROD" }) {
+  const stages: { label: "DEV" | "TEST" | "PROD"; color: string; activeColor: string }[] = [
+    { label: "DEV", color: "bg-gray-100 text-gray-500", activeColor: "bg-amber-100 text-amber-700 border-amber-300" },
+    { label: "TEST", color: "bg-gray-100 text-gray-500", activeColor: "bg-blue-100 text-blue-700 border-blue-300" },
+    { label: "PROD", color: "bg-gray-100 text-gray-500", activeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+  ];
+
+  return (
+    <div className="flex items-center gap-2">
+      {stages.map((stage, i) => (
+        <div key={stage.label} className="flex items-center gap-2">
+          <div
+            className={`px-3 py-1.5 rounded-md border text-xs font-mono font-medium ${
+              stage.label === active ? stage.activeColor : stage.color
+            }`}
+          >
+            {stage.label}
+          </div>
+          {i < stages.length - 1 && (
+            <span className="text-gray-300 text-xs">&rarr;</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// --- Helpers ---
+
+function humanizeKey(key: string): string {
+  return key.replace(/^vibe\./, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const STATUS_TONE: Record<string, StatusTone> = {
+  draft: "warning",
+  previewed: "info",
+  installed: "success",
+  discarded: "neutral",
+};
+
+// --- Tab Content Components ---
+
+function OverviewTab({ pkg, prompt, status, createdAt }: {
+  pkg: GraphPackageJson;
+  prompt: string;
+  status: string;
+  createdAt: string;
+}) {
+  return (
+    <div className="border rounded-md p-6 mt-2 space-y-6">
+      <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        <div>
+          <span className="text-xs text-muted-foreground">App Name</span>
+          <p className="font-medium">{humanizeKey(pkg.packageKey)}</p>
+        </div>
+        <div>
+          <span className="text-xs text-muted-foreground">Environment</span>
+          <p className="font-medium">DEV</p>
+        </div>
+        <div>
+          <span className="text-xs text-muted-foreground">Status</span>
+          <p className="font-medium capitalize">{status}</p>
+        </div>
+        <div>
+          <span className="text-xs text-muted-foreground">Created</span>
+          <p className="font-medium">{new Date(createdAt).toLocaleDateString()}</p>
+        </div>
+        <div>
+          <span className="text-xs text-muted-foreground">Package Version</span>
+          <p className="font-medium font-mono text-xs">{pkg.version}</p>
+        </div>
+        <div>
+          <span className="text-xs text-muted-foreground">Package Key</span>
+          <p className="font-medium font-mono text-xs">{pkg.packageKey}</p>
+        </div>
+      </div>
+
+      <div>
+        <span className="text-xs text-muted-foreground">Original Prompt</span>
+        <p className="text-sm mt-1 whitespace-pre-wrap bg-muted/50 rounded-md p-3">{prompt}</p>
+      </div>
+
+      <div>
+        <span className="text-xs text-muted-foreground block mb-2">Summary</span>
+        <div className="flex gap-3 flex-wrap">
+          <CountBadge label="Record Types" count={pkg.recordTypes.length} />
+          <CountBadge label="Workflows" count={pkg.workflows?.length ?? 0} />
+          <CountBadge label="SLA Policies" count={pkg.slaPolicies?.length ?? 0} />
+          <CountBadge label="Assignment Rules" count={pkg.assignmentRules?.length ?? 0} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CountBadge({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 border rounded-md px-3 py-2">
+      <span className="text-lg font-semibold">{count}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+function DataModelTab({ pkg }: { pkg: GraphPackageJson }) {
+  if (pkg.recordTypes.length === 0) {
+    return <EmptyState message="No record types defined." />;
+  }
+
+  return (
+    <div className="space-y-3 mt-2">
+      {pkg.recordTypes.map((rt) => (
+        <Card key={rt.key}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <p className="text-sm font-medium">{rt.name || humanizeKey(rt.key)}</p>
+                <p className="text-xs text-muted-foreground font-mono">{rt.key}</p>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {rt.fields.length} field{rt.fields.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="border-t pt-2">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="text-left font-medium py-1 pr-4">Field</th>
+                    <th className="text-left font-medium py-1 pr-4">Type</th>
+                    <th className="text-left font-medium py-1">Required</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rt.fields.map((f) => (
+                    <tr key={f.name} className="border-t border-dashed">
+                      <td className="py-1 pr-4 font-mono">{f.name}</td>
+                      <td className="py-1 pr-4 text-muted-foreground">{f.type}</td>
+                      <td className="py-1">{f.required ? "Yes" : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function WorkflowsTab({ pkg }: { pkg: GraphPackageJson }) {
+  const workflows = pkg.workflows ?? [];
+  if (workflows.length === 0) {
+    return <EmptyState message="No workflows defined." />;
+  }
+
+  return (
+    <div className="space-y-3 mt-2">
+      {workflows.map((wf) => (
+        <Card key={wf.key}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-medium">{wf.name}</p>
+              <span className="text-xs text-muted-foreground font-mono">{wf.key}</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">
+              Trigger: <span className="font-mono">{wf.triggerEvent || "manual"}</span>
+              {" on "}
+              <span className="font-mono">{wf.recordTypeKey}</span>
+            </p>
+            {wf.steps && wf.steps.length > 0 && (
+              <div className="border-t pt-2 space-y-1">
+                {wf.steps
+                  .slice()
+                  .sort((a, b) => a.ordering - b.ordering)
+                  .map((step) => (
+                    <div key={step.ordering} className="flex items-center gap-2 text-xs">
+                      <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium shrink-0">
+                        {step.ordering}
+                      </span>
+                      <span>{step.name}</span>
+                      <span className="text-muted-foreground font-mono ml-auto">{step.stepType}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function RolesTab({ pkg }: { pkg: GraphPackageJson }) {
+  const rules = pkg.assignmentRules ?? [];
+  const slas = pkg.slaPolicies ?? [];
+
+  if (rules.length === 0 && slas.length === 0) {
+    return <EmptyState message="No assignment rules or SLA policies defined." />;
+  }
+
+  return (
+    <div className="space-y-4 mt-2">
+      {rules.length > 0 && (
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
+            Assignment Rules
+          </p>
+          <div className="space-y-2">
+            {rules.map((rule, i) => {
+              const group = (rule.config as Record<string, unknown> | undefined)?.groupKey;
+              return (
+                <Card key={i}>
+                  <CardContent className="p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium font-mono">{rule.recordTypeKey}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Strategy: {rule.strategyType}
+                        {typeof group === "string" && ` \u2192 ${group}`}
+                      </p>
+                    </div>
+                    {typeof group === "string" && (
+                      <StatusBadge label={group.replace(/_/g, " ")} tone="info" size="sm" />
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {slas.length > 0 && (
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
+            SLA Policies
+          </p>
+          <div className="space-y-2">
+            {slas.map((sla, i) => {
+              const hours = Math.round(sla.durationMinutes / 60);
+              const rtName = pkg.recordTypes.find((r) => r.key === sla.recordTypeKey)?.name || sla.recordTypeKey;
+              return (
+                <Card key={i}>
+                  <CardContent className="p-3 flex items-center justify-between">
+                    <p className="text-sm">{rtName}</p>
+                    <span className="text-xs font-mono text-muted-foreground">
+                      {hours >= 24 ? `${Math.round(hours / 24)}d` : `${hours}h`} response
+                    </span>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChangesTab({ status, createdAt, checksum, createdBy }: {
+  status: string;
+  createdAt: string;
+  checksum: string;
+  createdBy: string | null;
+}) {
+  return (
+    <div className="mt-2">
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-medium">Draft Created</p>
+            <StatusBadge label={status} tone={STATUS_TONE[status] ?? "neutral"} size="sm" />
+          </div>
+          <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs">
+            <div>
+              <span className="text-muted-foreground">Created At</span>
+              <p className="font-medium">{new Date(createdAt).toLocaleString()}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Created By</span>
+              <p className="font-medium">{createdBy || "system"}</p>
+            </div>
+            <div className="col-span-2">
+              <span className="text-muted-foreground">Checksum</span>
+              <p className="font-mono truncate">{checksum}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex items-center justify-center py-16 text-muted-foreground text-sm mt-2">
+      {message}
+    </div>
+  );
+}
+
+// --- Loading Skeleton ---
+
+function DraftSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-6 w-16 rounded-full" />
+        <Skeleton className="h-6 w-12 rounded-full" />
+      </div>
+      <Skeleton className="h-10 w-80" />
+      <Skeleton className="h-8 w-96" />
+      <Skeleton className="h-64 w-full rounded-md" />
+    </div>
+  );
+}
+
+// --- Main Component ---
+
+export default function AppDraftShell() {
+  const { appId } = useParams<{ appId: string }>();
+  const { data: draft, isLoading, isError, error } = useAppDraft(appId);
+
+  if (isLoading) {
+    return <DraftSkeleton />;
+  }
+
+  if (isError || !draft) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <AlertCircle className="w-10 h-10 text-destructive" />
+        <p className="text-sm font-medium">Failed to load draft</p>
+        <p className="text-xs text-muted-foreground max-w-md text-center">
+          {error instanceof Error ? error.message : "Draft not found"}
+        </p>
+      </div>
+    );
+  }
+
+  const pkg = draft.package as unknown as GraphPackageJson;
+  const appName = humanizeKey(pkg.packageKey);
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">{appName}</h1>
+          <StatusBadge
+            label={draft.status.charAt(0).toUpperCase() + draft.status.slice(1)}
+            tone={STATUS_TONE[draft.status] ?? "neutral"}
+            size="md"
+          />
+          <StatusBadge label="DEV" tone="info" size="md" />
+        </div>
+      </div>
+
+      {/* Environment pipeline */}
+      <EnvironmentPipeline active="DEV" />
+
+      {/* Tabs */}
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="data-model">
+            Data Model
+            <span className="ml-1 text-xs text-muted-foreground">({pkg.recordTypes.length})</span>
+          </TabsTrigger>
+          <TabsTrigger value="workflows">
+            Workflows
+            <span className="ml-1 text-xs text-muted-foreground">({pkg.workflows?.length ?? 0})</span>
+          </TabsTrigger>
+          <TabsTrigger value="roles">Roles &amp; Access</TabsTrigger>
+          <TabsTrigger value="changes">Changes</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview">
+          <OverviewTab
+            pkg={pkg}
+            prompt={draft.prompt}
+            status={draft.status}
+            createdAt={draft.createdAt}
+          />
+        </TabsContent>
+
+        <TabsContent value="data-model">
+          <DataModelTab pkg={pkg} />
+        </TabsContent>
+
+        <TabsContent value="workflows">
+          <WorkflowsTab pkg={pkg} />
+        </TabsContent>
+
+        <TabsContent value="roles">
+          <RolesTab pkg={pkg} />
+        </TabsContent>
+
+        <TabsContent value="changes">
+          <ChangesTab
+            status={draft.status}
+            createdAt={draft.createdAt}
+            checksum={draft.checksum}
+            createdBy={draft.createdBy}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

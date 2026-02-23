@@ -26,6 +26,14 @@ import * as hrLite from "../services/hrLiteInstaller";
 import * as agentGuard from "../services/agentGuardService";
 import * as recordInstance from "../services/recordInstanceService";
 import * as timer from "../services/timerService";
+import * as graph from "../graph/graphService";
+import * as vibe from "../vibe/vibeService";
+import * as vibeDraft from "../vibe/vibeDraftService";
+import * as multiVariant from "../vibe/multiVariantService";
+import * as variantDiff from "../vibe/variantDiffService";
+import * as tokenStream from "../vibe/tokenStreamService";
+import * as draftVersionDiff from "../vibe/draftVersionDiffService";
+import * as notification from "../services/notificationService";
 
 export const ec3l = {
   project,
@@ -53,4 +61,12 @@ export const ec3l = {
   agentGuard,
   recordInstance,
   timer,
+  graph,
+  vibe,
+  vibeDraft,
+  multiVariant,
+  variantDiff,
+  tokenStream,
+  draftVersionDiff,
+  notification,
 } as const;

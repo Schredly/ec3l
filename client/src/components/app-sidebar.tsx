@@ -9,6 +9,7 @@ import {
   Shield,
   Activity,
   Database,
+  Sparkles,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,6 +34,7 @@ const toolItems = [
   { title: "Agent Skills", url: "/skills", icon: Bot },
   { title: "Runner", url: "/runner", icon: Terminal },
   { title: "Form Studio", url: "/studio/forms", icon: PenTool },
+  { title: "Vibe Studio", url: "/vibe-studio", icon: Sparkles },
   { title: "Admin", url: "/admin", icon: Shield },
   { title: "Workflow Monitor", url: "/workflow-monitor", icon: Activity },
   { title: "Records", url: "/records", icon: Database },

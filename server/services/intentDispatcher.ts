@@ -1,7 +1,7 @@
 import { storage } from "../storage";
 import { buildModuleExecutionContext } from "../moduleContext";
 import { executeWorkflow } from "./workflowEngine";
-import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
+import { emitDomainEvent } from "./domainEventService";
 import type { WorkflowExecutionIntent } from "@shared/schema";
 import type { CapabilityProfileName } from "../capabilityProfiles";
 
@@ -44,14 +44,13 @@ export async function dispatchIntent(
   const payload = (claimed.triggerPayload as Record<string, unknown>) || {};
   const recordId = (payload.recordId as string) ?? null;
 
-  emitTelemetry(buildTelemetryParams(tenantCtx, {
-    eventType: "workflow.intent.started",
-    executionType: "task",
-    executionId: claimed.id,
-    workflowId: claimed.workflowDefinitionId,
+  emitDomainEvent(tenantCtx, {
+    type: "workflow.intent.started",
     status: "running",
-    affectedRecordIds: recordId ? [recordId] : null,
-  }));
+    entityId: claimed.id,
+    workflowId: claimed.workflowDefinitionId,
+    affectedRecords: recordId ? [recordId] : null,
+  });
 
   // Validate workflow definition
   const wf = await storage.getWorkflowDefinition(claimed.workflowDefinitionId);
@@ -116,14 +115,13 @@ export async function dispatchIntent(
     // STEP 4: Mark completed (running → completed)
     const completed = await storage.completeIntent(claimed.id, execution.id);
 
-    emitTelemetry(buildTelemetryParams(tenantCtx, {
-      eventType: "workflow.intent.completed",
-      executionType: "task",
-      executionId: claimed.id,
-      workflowId: claimed.workflowDefinitionId,
+    emitDomainEvent(tenantCtx, {
+      type: "workflow.intent.completed",
       status: "completed",
-      affectedRecordIds: recordId ? [recordId] : null,
-    }));
+      entityId: claimed.id,
+      workflowId: claimed.workflowDefinitionId,
+      affectedRecords: recordId ? [recordId] : null,
+    });
 
     return completed ?? claimed;
   } catch (err) {
@@ -140,14 +138,13 @@ async function failIntent(
 ): Promise<WorkflowExecutionIntent> {
   const failed = await storage.updateIntentFailed(intent.id, error);
 
-  emitTelemetry(buildTelemetryParams(tenantCtx, {
-    eventType: "workflow.intent.failed",
-    executionType: "task",
-    executionId: intent.id,
-    workflowId: intent.workflowDefinitionId,
+  emitDomainEvent(tenantCtx, {
+    type: "workflow.intent.failed",
     status: "failed",
-    affectedRecordIds: opts?.recordId ? [opts.recordId] : null,
-  }));
+    entityId: intent.id,
+    workflowId: intent.workflowDefinitionId,
+    affectedRecords: opts?.recordId ? [opts.recordId] : null,
+  });
 
   return failed ?? intent;
 }

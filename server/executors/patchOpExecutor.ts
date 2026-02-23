@@ -1,7 +1,9 @@
 import type { TenantContext } from "../tenant";
 import { getTenantStorage } from "../tenantStorage";
 import type { ChangePatchOp, ChangeTarget } from "@shared/schema";
-import { emitTelemetry, buildTelemetryParams } from "../services/telemetryService";
+import { emitDomainEvent } from "../services/domainEventService";
+import { validateGraphForMerge } from "../graph/mergeGraphValidator";
+import { diffGraphSnapshots } from "../graph/graphDiffService";
 
 export class PatchOpExecutionError extends Error {
   public readonly statusCode: number;
@@ -197,7 +199,7 @@ export interface ExecutionResult {
   error?: string;
 }
 
-interface CachedRecordType {
+export interface CachedRecordType {
   rt: { id: string; projectId: string; baseType: string | null; [key: string]: unknown };
   originalSchema: RecordTypeSchema;
   currentSchema: RecordTypeSchema;
@@ -243,12 +245,11 @@ export async function executeChange(
 
   logExec(changeId, `executing ${ops.length} patch op(s)`);
 
-  emitTelemetry(buildTelemetryParams(ctx, {
-    eventType: "execution_started",
-    executionType: "task",
-    executionId: changeId,
+  emitDomainEvent(ctx, {
+    type: "execution_started",
     status: "started",
-  }));
+    entityId: changeId,
+  });
 
   // --- Phase 1: Load ---
   // Cache record types by key; validates targets upfront
@@ -271,13 +272,12 @@ export async function executeChange(
     if (!cache.has(recordTypeKey)) {
       const rt = await ts.getRecordTypeByKey(recordTypeKey);
       if (!rt) {
-        emitTelemetry(buildTelemetryParams(ctx, {
-          eventType: "execution_failed",
-          executionType: "task",
-          executionId: changeId,
+        emitDomainEvent(ctx, {
+          type: "execution_failed",
           status: "failed",
-          errorMessage: `Record type "${recordTypeKey}" not found`,
-        }));
+          entityId: changeId,
+          error: { message: `Record type "${recordTypeKey}" not found` },
+        });
         return {
           success: false,
           appliedCount: 0,
@@ -304,6 +304,48 @@ export async function executeChange(
       });
     }
   }
+
+  // --- Phase 1.5: Graph validation (pre-mutation) ---
+  const {
+    errors: graphErrors,
+    current: currentSnapshot,
+    projected: projectedSnapshot,
+  } = await validateGraphForMerge(ctx, cache, ops, changeProjectId);
+  if (graphErrors.length > 0) {
+    const summary = graphErrors.map((e) => e.message).join("; ");
+    logExec(changeId, `graph validation failed: ${summary}`);
+    emitDomainEvent(ctx, {
+      type: "graph.validation_failed",
+      status: "failed",
+      entityId: changeId,
+      error: { code: graphErrors[0].code, message: summary },
+    });
+    return {
+      success: false,
+      appliedCount: 0,
+      error: `Graph validation failed: ${summary}`,
+    };
+  }
+
+  // Compute graph diff between current and projected snapshots
+  const graphDiff = diffGraphSnapshots(currentSnapshot, projectedSnapshot);
+  logExec(
+    changeId,
+    `graph diff: +${graphDiff.addedRecordTypes.length} types, ${graphDiff.modifiedRecordTypes.length} modified, ${graphDiff.baseTypeChanges.length} baseType changes`,
+  );
+
+  emitDomainEvent(ctx, {
+    type: "graph.validation_succeeded",
+    status: "completed",
+    entityId: changeId,
+  });
+
+  emitDomainEvent(ctx, {
+    type: "graph.diff_computed",
+    status: "completed",
+    entityId: changeId,
+    affectedRecords: graphDiff as unknown as Record<string, unknown>,
+  });
 
   // --- Phase 2: Transform (in memory) ---
   // Track per-op previous schemas for snapshot stamping
@@ -357,13 +399,12 @@ export async function executeChange(
     } catch (err) {
       logExec(changeId, `FAILED at op ${op.id} (${op.opType}): ${err instanceof Error ? err.message : "unknown"}`);
       const message = err instanceof Error ? err.message : "Unknown execution error";
-      emitTelemetry(buildTelemetryParams(ctx, {
-        eventType: "execution_failed",
-        executionType: "task",
-        executionId: changeId,
+      emitDomainEvent(ctx, {
+        type: "execution_failed",
         status: "failed",
-        errorMessage: message,
-      }));
+        entityId: changeId,
+        error: { message },
+      });
       return {
         success: false,
         appliedCount: 0,
@@ -406,12 +447,11 @@ export async function executeChange(
 
   logExec(changeId, `completed — ${opSnapshots.length} op(s) applied`);
 
-  emitTelemetry(buildTelemetryParams(ctx, {
-    eventType: "execution_completed",
-    executionType: "task",
-    executionId: changeId,
+  emitDomainEvent(ctx, {
+    type: "execution_completed",
     status: "completed",
-  }));
+    entityId: changeId,
+  });
 
   return { success: true, appliedCount: opSnapshots.length };
 }

@@ -61,8 +61,8 @@ function TenantsPanel() {
     queryKey: ["/api/admin/tenants"],
   });
 
-  const handleSelectTenant = (tenantId: string) => {
-    setTenantId(tenantId);
+  const handleSelectTenant = (slug: string) => {
+    setTenantId(slug);
     queryClient.invalidateQueries();
   };
 
@@ -98,11 +98,11 @@ function TenantsPanel() {
         </thead>
         <tbody>
           {tenants.map((tenant) => {
-            const isSelected = tenant.id === currentTenantId;
+            const isSelected = tenant.slug === currentTenantId;
             return (
               <tr
                 key={tenant.id}
-                onClick={() => handleSelectTenant(tenant.id)}
+                onClick={() => handleSelectTenant(tenant.slug)}
                 className={`border-b last:border-b-0 cursor-pointer hover-elevate ${isSelected ? "bg-sidebar-accent" : ""}`}
                 data-testid={`tenant-row-${tenant.id}`}
                 data-active={isSelected}

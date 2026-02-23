@@ -114,6 +114,9 @@ import {
   recordTimers,
   type RecordTimer,
   type InsertRecordTimer,
+  graphPackageInstalls,
+  type GraphPackageInstall,
+  type InsertGraphPackageInstall,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -316,6 +319,12 @@ export interface IStorage {
   getDueTimersByTenant(tenantId: string, now: Date): Promise<RecordTimer[]>;
   updateTimerStatus(id: string, status: RecordTimer["status"]): Promise<RecordTimer | undefined>;
   listRecordInstancesWithSla(tenantId: string, recordTypeId: string): Promise<RecordInstanceWithSla[]>;
+
+  // Graph Package Installs
+  createGraphPackageInstall(data: InsertGraphPackageInstall): Promise<GraphPackageInstall>;
+  listGraphPackageInstalls(tenantId: string, projectId: string): Promise<GraphPackageInstall[]>;
+  getLatestGraphPackageInstall(tenantId: string, projectId: string, packageKey: string): Promise<GraphPackageInstall | undefined>;
+  getGraphPackageInstallByVersion(tenantId: string, projectId: string, packageKey: string, version: string): Promise<GraphPackageInstall | undefined>;
 }
 
 export type RecordInstanceWithSla = RecordInstance & {
@@ -1238,6 +1247,41 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(recordInstances.tenantId, tenantId), eq(recordInstances.recordTypeId, recordTypeId)))
       .orderBy(desc(recordInstances.createdAt));
     return rows;
+  }
+  // --- Graph Package Installs ---
+
+  async createGraphPackageInstall(data: InsertGraphPackageInstall): Promise<GraphPackageInstall> {
+    const [row] = await db.insert(graphPackageInstalls).values(data).returning();
+    return row;
+  }
+
+  async listGraphPackageInstalls(tenantId: string, projectId: string): Promise<GraphPackageInstall[]> {
+    return db.select().from(graphPackageInstalls)
+      .where(and(eq(graphPackageInstalls.tenantId, tenantId), eq(graphPackageInstalls.projectId, projectId)))
+      .orderBy(desc(graphPackageInstalls.installedAt));
+  }
+
+  async getLatestGraphPackageInstall(tenantId: string, projectId: string, packageKey: string): Promise<GraphPackageInstall | undefined> {
+    const [row] = await db.select().from(graphPackageInstalls)
+      .where(and(
+        eq(graphPackageInstalls.tenantId, tenantId),
+        eq(graphPackageInstalls.projectId, projectId),
+        eq(graphPackageInstalls.packageKey, packageKey),
+      ))
+      .orderBy(desc(graphPackageInstalls.installedAt))
+      .limit(1);
+    return row;
+  }
+
+  async getGraphPackageInstallByVersion(tenantId: string, projectId: string, packageKey: string, version: string): Promise<GraphPackageInstall | undefined> {
+    const [row] = await db.select().from(graphPackageInstalls)
+      .where(and(
+        eq(graphPackageInstalls.tenantId, tenantId),
+        eq(graphPackageInstalls.projectId, projectId),
+        eq(graphPackageInstalls.packageKey, packageKey),
+        eq(graphPackageInstalls.version, version),
+      ));
+    return row;
   }
 }
 

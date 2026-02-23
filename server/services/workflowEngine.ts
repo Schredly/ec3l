@@ -4,7 +4,7 @@ import { storage } from "../storage";
 import type { WorkflowStep, WorkflowExecution, WorkflowStepExecution } from "@shared/schema";
 import { checkRecordLock } from "./formService";
 import { getRunnerExecution, buildExecutionRequest } from "../execution";
-import { emitTelemetry, buildTelemetryParams } from "./telemetryService";
+import { emitDomainEvent, subscribe } from "./domainEventService";
 
 export class WorkflowExecutionError extends Error {
   public readonly statusCode: number;
@@ -220,6 +220,12 @@ const stepHandlers: Record<string, StepHandler> = {
   record_lock: recordLockHandler,
 };
 
+subscribe("record.sla.breached", (ctx, event) => {
+  console.log(
+    `[workflow-engine] SLA breach detected for entity ${event.entityId} in tenant ${ctx.tenantId}`,
+  );
+});
+
 export function validateDecisionSteps(steps: WorkflowStep[]): string[] {
   const violations: string[] = [];
   const orderIndexSet = new Set(steps.map((s) => s.orderIndex));
@@ -295,14 +301,13 @@ export async function executeWorkflow(
     input,
   });
 
-  emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
-    eventType: "execution_started",
-    executionType: "workflow_step",
-    executionId: execution.id,
-    moduleId: moduleCtx.moduleId,
-    workflowId: workflowDefinitionId,
+  emitDomainEvent(moduleCtx.tenantContext, {
+    type: "execution_started",
     status: "started",
-  }));
+    entityId: execution.id,
+    workflowId: workflowDefinitionId,
+    moduleId: moduleCtx.moduleId,
+  });
 
   return runStepsFromIndex(execution, steps, { ...input }, 0, moduleCtx);
 }
@@ -422,15 +427,14 @@ async function runStepsFromIndex(
 
       if (stepExec.status === "failed") {
         const errorMsg = `Step "${step.stepType}" (order ${step.orderIndex}) failed`;
-        emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
-          eventType: "execution_failed",
-          executionType: "workflow_step",
-          executionId: execution.id,
-          moduleId: moduleCtx.moduleId,
-          workflowId: execution.workflowDefinitionId,
+        emitDomainEvent(moduleCtx.tenantContext, {
+          type: "execution_failed",
           status: "failed",
-          errorMessage: errorMsg,
-        }));
+          entityId: execution.id,
+          workflowId: execution.workflowDefinitionId,
+          moduleId: moduleCtx.moduleId,
+          error: { message: errorMsg },
+        });
         await storage.updateWorkflowExecutionStatus(execution.id, "failed", errorMsg);
         const failed = await storage.getWorkflowExecution(execution.id);
         return failed!;
@@ -501,27 +505,25 @@ async function runStepsFromIndex(
     }
 
     await storage.completeWorkflowExecution(execution.id);
-    emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
-      eventType: "execution_completed",
-      executionType: "workflow_step",
-      executionId: execution.id,
-      moduleId: moduleCtx.moduleId,
-      workflowId: execution.workflowDefinitionId,
+    emitDomainEvent(moduleCtx.tenantContext, {
+      type: "execution_completed",
       status: "completed",
-    }));
+      entityId: execution.id,
+      workflowId: execution.workflowDefinitionId,
+      moduleId: moduleCtx.moduleId,
+    });
     const completed = await storage.getWorkflowExecution(execution.id);
     return completed!;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown execution error";
-    emitTelemetry(buildTelemetryParams(moduleCtx.tenantContext, {
-      eventType: "execution_failed",
-      executionType: "workflow_step",
-      executionId: execution.id,
-      moduleId: moduleCtx.moduleId,
-      workflowId: execution.workflowDefinitionId,
+    emitDomainEvent(moduleCtx.tenantContext, {
+      type: "execution_failed",
       status: "failed",
-      errorMessage: errorMsg,
-    }));
+      entityId: execution.id,
+      workflowId: execution.workflowDefinitionId,
+      moduleId: moduleCtx.moduleId,
+      error: { message: errorMsg },
+    });
     await storage.updateWorkflowExecutionStatus(execution.id, "failed", errorMsg);
     const failed = await storage.getWorkflowExecution(execution.id);
     return failed!;

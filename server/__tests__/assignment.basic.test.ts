@@ -17,12 +17,10 @@ vi.mock("../storage", () => ({
   },
 }));
 
-const mockEmitTelemetry = vi.fn();
-const mockBuildTelemetryParams = vi.fn((_ctx: unknown, overrides: Record<string, unknown>) => overrides);
+const mockEmitDomainEvent = vi.fn();
 
-vi.mock("../services/telemetryService", () => ({
-  emitTelemetry: (...args: unknown[]) => mockEmitTelemetry(...args),
-  buildTelemetryParams: (...args: unknown[]) => mockBuildTelemetryParams(...args),
+vi.mock("../services/domainEventService", () => ({
+  emitDomainEvent: (...args: unknown[]) => mockEmitDomainEvent(...args),
 }));
 
 vi.mock("../services/triggerService", () => ({
@@ -184,12 +182,13 @@ describe("assignment on record instance creation", () => {
       data: { title: "Alert" },
     });
 
-    // Should emit two telemetry calls: execution_completed + record.assigned
-    expect(mockEmitTelemetry).toHaveBeenCalledTimes(2);
-    expect(mockEmitTelemetry).toHaveBeenCalledWith(
+    // Should emit two domain events: execution_completed + record.assigned
+    expect(mockEmitDomainEvent).toHaveBeenCalledTimes(2);
+    expect(mockEmitDomainEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-a" }),
       expect.objectContaining({
-        eventType: "record.assigned",
-        executionId: "ri-4",
+        type: "record.assigned",
+        entityId: "ri-4",
         status: "assigned",
       }),
     );

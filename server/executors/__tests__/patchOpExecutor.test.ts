@@ -11,15 +11,15 @@ const mockTenantStorage = {
   updateChangePatchOpSnapshot: vi.fn(),
   createRecordTypeSnapshot: vi.fn(),
   getSnapshotByChangeAndKey: vi.fn(),
+  listRecordTypes: vi.fn(),
 };
 
 vi.mock("../../tenantStorage", () => ({
   getTenantStorage: () => mockTenantStorage,
 }));
 
-vi.mock("../../services/telemetryService", () => ({
-  emitTelemetry: vi.fn(),
-  buildTelemetryParams: vi.fn(() => ({})),
+vi.mock("../../services/domainEventService", () => ({
+  emitDomainEvent: vi.fn(),
 }));
 
 import {
@@ -104,6 +104,7 @@ function setupDefaults() {
   mockTenantStorage.getChangeTarget.mockResolvedValue(fakeTarget);
   mockTenantStorage.getSnapshotByChangeAndKey.mockResolvedValue(undefined);
   mockTenantStorage.createRecordTypeSnapshot.mockResolvedValue({});
+  mockTenantStorage.listRecordTypes.mockResolvedValue([fakeRecordType]);
 }
 
 // --- Pure Transform Tests ---
