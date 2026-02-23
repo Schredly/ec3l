@@ -84,6 +84,21 @@ export async function fetchBuilderDraft(appId: string): Promise<VibeDraft> {
   return res.json();
 }
 
+export async function refineBuilderDraft(appId: string, prompt: string): Promise<VibeDraft> {
+  const res = await apiRequest("POST", `/api/builder/drafts/${appId}/refine`, { prompt });
+  return res.json();
+}
+
+export async function fetchBuilderDraftVersions(appId: string): Promise<DraftVersion[]> {
+  const res = await apiRequest("GET", `/api/builder/drafts/${appId}/versions`);
+  return res.json();
+}
+
+export async function fetchBuilderDraftVersion(appId: string, version: number): Promise<DraftVersion> {
+  const res = await apiRequest("GET", `/api/builder/drafts/${appId}/versions/${version}`);
+  return res.json();
+}
+
 export async function createDraft(body: {
   projectId: string;
   environmentId?: string;

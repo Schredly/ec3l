@@ -1,10 +1,17 @@
+import { useState } from "react";
 import { useParams } from "wouter";
 import { StatusBadge } from "@/components/status/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { useAppDraft } from "@/hooks/useAppDraft";
+import { useRefineDraft } from "@/hooks/useRefineDraft";
+import { useDraftVersions } from "@/hooks/useDraftVersions";
+import { useDraftVersion } from "@/hooks/useDraftVersion";
 import type { GraphPackageJson } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
 
@@ -41,6 +48,20 @@ function humanizeKey(key: string): string {
   return key.replace(/^vibe\./, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function relativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
 const STATUS_TONE: Record<string, StatusTone> = {
   draft: "warning",
   previewed: "info",
@@ -48,57 +69,243 @@ const STATUS_TONE: Record<string, StatusTone> = {
   discarded: "neutral",
 };
 
+const REASON_LABEL: Record<string, string> = {
+  create: "Created",
+  refine: "Refined",
+  patch: "Patched",
+  restore: "Restored",
+  create_variant: "Variant",
+  adopt_variant: "Adopted",
+};
+
+// --- Refinement Panel ---
+
+function RefinementPanel({ appId }: { appId: string }) {
+  const [prompt, setPrompt] = useState("");
+  const { toast } = useToast();
+  const refine = useRefineDraft(appId);
+
+  function handleRefine() {
+    if (!prompt.trim()) return;
+    refine.mutate(prompt.trim(), {
+      onSuccess: (draft) => {
+        const pkg = draft.package as unknown as GraphPackageJson;
+        toast({
+          title: "Draft updated",
+          description: `Package ${pkg.packageKey} refined successfully.`,
+        });
+        setPrompt("");
+      },
+      onError: (err: Error) => {
+        toast({ title: "Refinement failed", description: err.message, variant: "destructive" });
+      },
+    });
+  }
+
+  return (
+    <div className="border rounded-md p-4 space-y-3">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Refine Draft
+      </p>
+      <Textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder='e.g. "add field priority to ticket", "add sla 120 on vendor", "rename to helpdesk"'
+        className="min-h-[80px] resize-y text-sm"
+      />
+      <Button
+        onClick={handleRefine}
+        disabled={!prompt.trim() || refine.isPending}
+        size="sm"
+        className="w-full"
+      >
+        {refine.isPending ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            Refining...
+          </>
+        ) : (
+          "Generate Refinement"
+        )}
+      </Button>
+    </div>
+  );
+}
+
+// --- Version History ---
+
+function VersionHistoryPanel({ appId }: { appId: string }) {
+  const { data: versions, isLoading } = useDraftVersions(appId);
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (!versions || versions.length === 0) {
+    return null;
+  }
+
+  const sorted = [...versions].sort((a, b) => b.versionNumber - a.versionNumber);
+  const latestVersion = sorted[0]!.versionNumber;
+
+  return (
+    <div className="border rounded-md p-4 space-y-3">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Version History
+      </p>
+      <div className="space-y-1">
+        {sorted.map((v) => (
+          <button
+            key={v.versionNumber}
+            type="button"
+            onClick={() => setSelectedVersion(
+              selectedVersion === v.versionNumber ? null : v.versionNumber,
+            )}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-left text-xs transition-colors ${
+              selectedVersion === v.versionNumber
+                ? "bg-blue-50 border border-blue-200"
+                : "hover:bg-muted/50 border border-transparent"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-medium">v{v.versionNumber}</span>
+              <span className="text-muted-foreground">
+                {REASON_LABEL[v.reason] || v.reason}
+              </span>
+              {v.versionNumber === latestVersion && (
+                <StatusBadge label="current" tone="success" size="sm" />
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-muted-foreground">
+              <span className="font-mono">{v.checksum.slice(0, 8)}</span>
+              <span>{relativeTime(v.createdAt)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {selectedVersion !== null && (
+        <VersionPreview appId={appId} version={selectedVersion} />
+      )}
+    </div>
+  );
+}
+
+function VersionPreview({ appId, version }: { appId: string; version: number }) {
+  const { data, isLoading } = useDraftVersion(appId, version);
+
+  if (isLoading) {
+    return (
+      <div className="border-t pt-3 space-y-2">
+        <Skeleton className="h-3 w-48" />
+        <Skeleton className="h-3 w-32" />
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const pkg = data.package as unknown as GraphPackageJson;
+  const rules = pkg.assignmentRules ?? [];
+  const roleCount = new Set(
+    rules
+      .map((r) => (r.config as Record<string, unknown> | undefined)?.groupKey)
+      .filter((g): g is string => typeof g === "string"),
+  ).size;
+
+  return (
+    <div className="border-t pt-3">
+      <div className="grid grid-cols-4 gap-3">
+        <MiniCount label="Record Types" count={pkg.recordTypes.length} />
+        <MiniCount label="Workflows" count={pkg.workflows?.length ?? 0} />
+        <MiniCount label="Roles" count={roleCount} />
+        <MiniCount label="SLA Policies" count={pkg.slaPolicies?.length ?? 0} />
+      </div>
+      <div className="mt-2 text-xs text-muted-foreground">
+        <span className="font-mono">{pkg.packageKey}</span>
+        {" v"}
+        {pkg.version}
+        {data.createdBy && (
+          <span> by {data.createdBy}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MiniCount({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="text-center">
+      <p className="text-lg font-semibold">{count}</p>
+      <p className="text-[10px] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
 // --- Tab Content Components ---
 
-function OverviewTab({ pkg, prompt, status, createdAt }: {
+function OverviewTab({ pkg, prompt, status, createdAt, appId }: {
   pkg: GraphPackageJson;
   prompt: string;
   status: string;
   createdAt: string;
+  appId: string;
 }) {
   return (
-    <div className="border rounded-md p-6 mt-2 space-y-6">
-      <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-        <div>
-          <span className="text-xs text-muted-foreground">App Name</span>
-          <p className="font-medium">{humanizeKey(pkg.packageKey)}</p>
+    <div className="mt-2 space-y-4">
+      <div className="border rounded-md p-6 space-y-6">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <span className="text-xs text-muted-foreground">App Name</span>
+            <p className="font-medium">{humanizeKey(pkg.packageKey)}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Environment</span>
+            <p className="font-medium">DEV</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Status</span>
+            <p className="font-medium capitalize">{status}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Created</span>
+            <p className="font-medium">{new Date(createdAt).toLocaleDateString()}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Package Version</span>
+            <p className="font-medium font-mono text-xs">{pkg.version}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Package Key</span>
+            <p className="font-medium font-mono text-xs">{pkg.packageKey}</p>
+          </div>
         </div>
+
         <div>
-          <span className="text-xs text-muted-foreground">Environment</span>
-          <p className="font-medium">DEV</p>
+          <span className="text-xs text-muted-foreground">Latest Prompt</span>
+          <p className="text-sm mt-1 whitespace-pre-wrap bg-muted/50 rounded-md p-3">{prompt}</p>
         </div>
+
         <div>
-          <span className="text-xs text-muted-foreground">Status</span>
-          <p className="font-medium capitalize">{status}</p>
-        </div>
-        <div>
-          <span className="text-xs text-muted-foreground">Created</span>
-          <p className="font-medium">{new Date(createdAt).toLocaleDateString()}</p>
-        </div>
-        <div>
-          <span className="text-xs text-muted-foreground">Package Version</span>
-          <p className="font-medium font-mono text-xs">{pkg.version}</p>
-        </div>
-        <div>
-          <span className="text-xs text-muted-foreground">Package Key</span>
-          <p className="font-medium font-mono text-xs">{pkg.packageKey}</p>
+          <span className="text-xs text-muted-foreground block mb-2">Summary</span>
+          <div className="flex gap-3 flex-wrap">
+            <CountBadge label="Record Types" count={pkg.recordTypes.length} />
+            <CountBadge label="Workflows" count={pkg.workflows?.length ?? 0} />
+            <CountBadge label="SLA Policies" count={pkg.slaPolicies?.length ?? 0} />
+            <CountBadge label="Assignment Rules" count={pkg.assignmentRules?.length ?? 0} />
+          </div>
         </div>
       </div>
 
-      <div>
-        <span className="text-xs text-muted-foreground">Original Prompt</span>
-        <p className="text-sm mt-1 whitespace-pre-wrap bg-muted/50 rounded-md p-3">{prompt}</p>
-      </div>
-
-      <div>
-        <span className="text-xs text-muted-foreground block mb-2">Summary</span>
-        <div className="flex gap-3 flex-wrap">
-          <CountBadge label="Record Types" count={pkg.recordTypes.length} />
-          <CountBadge label="Workflows" count={pkg.workflows?.length ?? 0} />
-          <CountBadge label="SLA Policies" count={pkg.slaPolicies?.length ?? 0} />
-          <CountBadge label="Assignment Rules" count={pkg.assignmentRules?.length ?? 0} />
-        </div>
-      </div>
+      <RefinementPanel appId={appId} />
+      <VersionHistoryPanel appId={appId} />
     </div>
   );
 }
@@ -391,6 +598,7 @@ export default function AppDraftShell() {
             prompt={draft.prompt}
             status={draft.status}
             createdAt={draft.createdAt}
+            appId={appId!}
           />
         </TabsContent>
 

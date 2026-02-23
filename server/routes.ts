@@ -3090,6 +3090,70 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * POST /api/builder/drafts/:appId/refine
+   * Refines a draft with a new prompt. No admin auth.
+   */
+  app.post("/api/builder/drafts/:appId/refine", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+        return res.status(400).json({ message: "prompt is required" });
+      }
+      const draft = await ec3l.vibeDraft.refineDraft(
+        req.tenantContext, req.params.appId, prompt.trim(),
+      );
+      return res.json(draft);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      if (err instanceof ec3l.vibe.VibeServiceError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * GET /api/builder/drafts/:appId/versions
+   * Lists all version snapshots for a draft. No admin auth.
+   */
+  app.get("/api/builder/drafts/:appId/versions", async (req, res) => {
+    try {
+      const versions = await ec3l.vibeDraft.listDraftVersions(
+        req.tenantContext, req.params.appId,
+      );
+      return res.json(versions);
+    } catch (err) {
+      if (err instanceof ec3l.vibeDraft.VibeDraftError) {
+        return res.status(err.statusCode).json({ message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * GET /api/builder/drafts/:appId/versions/:version
+   * Retrieves a single version snapshot. No admin auth.
+   */
+  app.get("/api/builder/drafts/:appId/versions/:version", async (req, res) => {
+    try {
+      const versionNumber = parseInt(req.params.version, 10);
+      if (isNaN(versionNumber) || versionNumber < 1) {
+        return res.status(400).json({ message: "version must be a positive integer" });
+      }
+      const ts = getTenantStorage(req.tenantContext);
+      const version = await ts.getVibeDraftVersion(req.params.appId, versionNumber);
+      if (!version) {
+        return res.status(404).json({ message: "Version not found" });
+      }
+      return res.json(version);
+    } catch (err) {
+      throw err;
+    }
+  });
+
   ec3l.scheduler.startScheduler();
 
   return httpServer;
