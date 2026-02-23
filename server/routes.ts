@@ -3154,6 +3154,78 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * GET /api/builder/drafts/:appId/diff?from=1&to=3
+   * Version-to-version structural diff. Read-only, no admin auth.
+   */
+  app.get("/api/builder/drafts/:appId/diff", async (req, res) => {
+    try {
+      const fromVersion = parseInt(req.query.from as string, 10);
+      const toVersion = parseInt(req.query.to as string, 10);
+      if (isNaN(fromVersion) || isNaN(toVersion) || fromVersion < 1 || toVersion < 1) {
+        return res.status(400).json({ message: "from and to must be positive integers" });
+      }
+      if (fromVersion === toVersion) {
+        return res.status(400).json({ message: "from and to must be different versions" });
+      }
+
+      const result = await ec3l.draftVersionDiff.diffDraftVersions(
+        req.tenantContext,
+        req.params.appId,
+        fromVersion,
+        toVersion,
+      );
+
+      const { diff } = result;
+      const bc = diff.bindingChanges;
+
+      return res.json({
+        summary: {
+          recordTypesAdded: diff.addedRecordTypes.length,
+          recordTypesRemoved: diff.removedRecordTypes.length,
+          recordTypesModified: diff.modifiedRecordTypes.length,
+          workflowsAdded: bc.workflowsAdded.length,
+          workflowsRemoved: bc.workflowsRemoved.length,
+          slasAdded: bc.slasAdded.length,
+          slasRemoved: bc.slasRemoved.length,
+          assignmentsAdded: bc.assignmentsAdded.length,
+          assignmentsRemoved: bc.assignmentsRemoved.length,
+        },
+        changes: {
+          added: [
+            ...diff.addedRecordTypes.map((rt) => ({ category: "Record Type", key: rt.key })),
+            ...bc.workflowsAdded.map((w) => ({ category: "Workflow", key: w })),
+            ...bc.slasAdded.map((s) => ({ category: "SLA Policy", key: s })),
+            ...bc.assignmentsAdded.map((a) => ({ category: "Assignment Rule", key: a })),
+          ],
+          removed: [
+            ...diff.removedRecordTypes.map((rt) => ({ category: "Record Type", key: rt.key })),
+            ...bc.workflowsRemoved.map((w) => ({ category: "Workflow", key: w })),
+            ...bc.slasRemoved.map((s) => ({ category: "SLA Policy", key: s })),
+            ...bc.assignmentsRemoved.map((a) => ({ category: "Assignment Rule", key: a })),
+          ],
+          modified: diff.modifiedRecordTypes.map((rt) => ({
+            category: "Record Type",
+            key: rt.recordTypeKey,
+            details: [
+              ...rt.fieldAdds.map((f) => `+ ${f}`),
+              ...rt.fieldRemovals.map((f) => `- ${f}`),
+              ...rt.fieldTypeChanges.map((f) => `~ ${f} (type changed)`),
+            ],
+          })),
+        },
+        fromVersion: result.fromVersion,
+        toVersion: result.toVersion,
+      });
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "statusCode" in err) {
+        const e = err as { statusCode: number; message: string };
+        return res.status(e.statusCode).json({ message: e.message });
+      }
+      throw err;
+    }
+  });
+
   ec3l.scheduler.startScheduler();
 
   return httpServer;

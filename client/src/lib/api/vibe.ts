@@ -99,6 +99,45 @@ export async function fetchBuilderDraftVersion(appId: string, version: number): 
   return res.json();
 }
 
+export interface BuilderDiffChange {
+  category: string;
+  key: string;
+  details?: string[];
+}
+
+export interface BuilderDiffResult {
+  summary: {
+    recordTypesAdded: number;
+    recordTypesRemoved: number;
+    recordTypesModified: number;
+    workflowsAdded: number;
+    workflowsRemoved: number;
+    slasAdded: number;
+    slasRemoved: number;
+    assignmentsAdded: number;
+    assignmentsRemoved: number;
+  };
+  changes: {
+    added: BuilderDiffChange[];
+    removed: BuilderDiffChange[];
+    modified: BuilderDiffChange[];
+  };
+  fromVersion: number;
+  toVersion: number;
+}
+
+export async function fetchBuilderDraftDiff(
+  appId: string,
+  fromVersion: number,
+  toVersion: number,
+): Promise<BuilderDiffResult> {
+  const res = await apiRequest(
+    "GET",
+    `/api/builder/drafts/${appId}/diff?from=${fromVersion}&to=${toVersion}`,
+  );
+  return res.json();
+}
+
 export async function createDraft(body: {
   projectId: string;
   environmentId?: string;

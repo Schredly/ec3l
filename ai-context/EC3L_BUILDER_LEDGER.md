@@ -57,7 +57,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | Deliverable | Description | Status |
 |-------------|-------------|--------|
 | 3.1 | Draft state allows AI + manual modifications | Complete (refinement loop + version history) |
-| 3.2 | Every modification generates Patch + Snapshot + Change record | Partial (version snapshots created on refine) |
+| 3.2 | Every modification generates Patch + Snapshot + Change record | Complete (version snapshots + version diff) |
 | 3.3 | Testing mode: simulate workflows, validate access, automated test hooks | Not Started |
 | 3.4 | Publish modal shows diff from PROD with impact summary | Not Started |
 | 3.5 | Pull Down Production: clone PROD snapshot to new DEV draft with lineage tracking | Not Started |
@@ -186,20 +186,35 @@ These backend services and UI components already exist and can be composed into 
   - BLD14: Refinement resets draft status to "draft" if previously "previewed" — forces re-preview before install.
   - BLD15: Version history is read-only — no restore or rollback from the Builder UI in Sprint 3.1.
 
+### Sprint 3.2 — Version-to-Version Diff
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added `GET /api/builder/drafts/:appId/diff?from=N&to=M` endpoint. Calls `diffDraftVersions()` from `draftVersionDiffService`, maps the full `GraphDiffResult` (record types, workflows, SLAs, assignments) into a builder-friendly response with `summary` (counts per category) and `changes` (added/removed/modified entity lists with field-level details for modified record types). No admin auth. Validates query params. Returns 400 for same-version or invalid params, 404 for missing draft/version.
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `BuilderDiffChange` interface, `BuilderDiffResult` interface, `fetchBuilderDraftDiff()` function.
+  - `client/src/hooks/useDraftDiff.ts` (NEW) — `useQuery` hook for version diff. 30-second stale time. Enabled only when both versions selected and different.
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — Added `CompareVersionsPanel` (two Select dropdowns for from/to version, Compare button, disabled unless valid selection), `DiffDisplay` (summary grid with per-category added/removed/modified counts, color-coded expandable sections with entity names and field-level details), `DiffSummaryCell`, `DiffChangeSection` helper components. Panel renders below Version History in Overview tab. Hidden when fewer than 2 versions exist.
+- **Summary:** Sprint 3.2 adds read-only version-to-version structural comparison. The diff endpoint reuses the existing `diffDraftVersions()` service which projects both version packages onto a shared graph snapshot and computes deterministic diffs. The builder endpoint maps the raw `GraphDiffResult` (with `bindingChanges` for workflows/SLAs/assignments and `modifiedRecordTypes` with field-level adds/removes/type changes) into a human-readable format. The UI displays a summary grid (5 columns: Record Types, Workflows, SLA Policies, Assignments, Total) with green/red/amber counts, plus expandable detail sections listing each changed entity by name.
+- **Invariants:**
+  - BLD16: Builder diff endpoint does not require admin RBAC — consistent with BLD6, BLD11.
+  - BLD17: Diff is read-only — no DB writes, no side effects beyond domain event emission.
+  - BLD18: Diff reuses `diffDraftVersions()` from `draftVersionDiffService` — same projection and comparison logic as admin diff endpoint.
+  - BLD19: Compare panel hidden when fewer than 2 versions exist — no diff possible without version history.
+  - BLD20: No restore, merge, or promotion from diff view — read-only structural comparison only.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 2 — Wire Proposal + Draft Creation + Real Data Tabs
-- **Status:** Complete. All 3 sub-sprints delivered (2.1 proposal fetch, 2.2 draft creation, 2.3 real data tabs).
-- **Files added:** `useBuilderProposal.ts`, `useAppDraft.ts`
-- **Files modified:** `routes.ts` (3 endpoints), `vibe.ts` (3 API functions), `BuilderProposal.tsx` (full replacement), `AppDraftShell.tsx` (full replacement)
-- **Endpoints added:** `GET /api/vibe/proposal`, `POST /api/builder/drafts`, `GET /api/builder/drafts/:appId`
-- **Invariants:** BLD6–BLD10 established. BLD1–BLD5 from Sprint 1 remain valid.
-- **What's stubbed:** Nothing in the builder flow is stubbed anymore. Draft Shell tabs are read-only (no inline editing). Environment pipeline is static (DEV always active). Changes tab shows creation event only (no version history).
-- **Next step:** Sprint 3 — Draft modifications (AI refinement + manual patch ops), testing mode, publish flow with diff.
+- **Phase:** Sprint 3.2 — Version-to-Version Diff
+- **Status:** Complete. Version diff endpoint + Compare Versions UI delivered.
+- **Files added:** `useDraftDiff.ts`
+- **Files modified:** `routes.ts` (1 endpoint), `vibe.ts` (3 types + 1 function), `AppDraftShell.tsx` (4 new components + wiring)
+- **Endpoints added:** `GET /api/builder/drafts/:appId/diff?from=N&to=M`
+- **Invariants:** BLD16–BLD20 established. BLD1–BLD15 from prior sprints remain valid.
+- **What's stubbed:** Nothing. All diff data is real (projected graph snapshots via `diffDraftVersions`). No restore/merge/promotion from diff view.
+- **Next step:** Sprint 3.3 — Testing mode (simulate workflows, validate access, automated test hooks), Sprint 3.4 — Publish flow with diff.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

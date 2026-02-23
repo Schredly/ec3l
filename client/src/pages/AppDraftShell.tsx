@@ -8,11 +8,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAppDraft } from "@/hooks/useAppDraft";
 import { useRefineDraft } from "@/hooks/useRefineDraft";
 import { useDraftVersions } from "@/hooks/useDraftVersions";
 import { useDraftVersion } from "@/hooks/useDraftVersion";
-import type { GraphPackageJson } from "@/lib/api/vibe";
+import { useDraftDiff } from "@/hooks/useDraftDiff";
+import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
 
 function EnvironmentPipeline({ active }: { active: "DEV" | "TEST" | "PROD" }) {
@@ -249,6 +251,262 @@ function MiniCount({ label, count }: { label: string; count: number }) {
   );
 }
 
+// --- Compare Versions ---
+
+function CompareVersionsPanel({ appId }: { appId: string }) {
+  const { data: versions, isLoading: versionsLoading } = useDraftVersions(appId);
+  const [fromVersion, setFromVersion] = useState<number | null>(null);
+  const [toVersion, setToVersion] = useState<number | null>(null);
+  const [compareTriggered, setCompareTriggered] = useState(false);
+
+  const canCompare = fromVersion !== null && toVersion !== null && fromVersion !== toVersion;
+  const { data: diff, isLoading: diffLoading, isError, error } = useDraftDiff(
+    appId,
+    compareTriggered ? fromVersion : null,
+    compareTriggered ? toVersion : null,
+  );
+
+  if (versionsLoading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-36" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (!versions || versions.length < 2) {
+    return null;
+  }
+
+  const sorted = [...versions].sort((a, b) => a.versionNumber - b.versionNumber);
+
+  function handleCompare() {
+    setCompareTriggered(true);
+  }
+
+  function handleVersionChange(which: "from" | "to", value: string) {
+    const num = parseInt(value, 10);
+    if (which === "from") {
+      setFromVersion(num);
+    } else {
+      setToVersion(num);
+    }
+    setCompareTriggered(false);
+  }
+
+  return (
+    <div className="border rounded-md p-4 space-y-4">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Compare Versions
+      </p>
+      <div className="flex items-end gap-3">
+        <div className="flex-1 space-y-1">
+          <label className="text-xs text-muted-foreground">From</label>
+          <Select
+            value={fromVersion?.toString() ?? ""}
+            onValueChange={(v) => handleVersionChange("from", v)}
+          >
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="Select version" />
+            </SelectTrigger>
+            <SelectContent>
+              {sorted.map((v) => (
+                <SelectItem key={v.versionNumber} value={v.versionNumber.toString()}>
+                  v{v.versionNumber} — {REASON_LABEL[v.reason] || v.reason}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex-1 space-y-1">
+          <label className="text-xs text-muted-foreground">To</label>
+          <Select
+            value={toVersion?.toString() ?? ""}
+            onValueChange={(v) => handleVersionChange("to", v)}
+          >
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="Select version" />
+            </SelectTrigger>
+            <SelectContent>
+              {sorted.map((v) => (
+                <SelectItem key={v.versionNumber} value={v.versionNumber.toString()}>
+                  v{v.versionNumber} — {REASON_LABEL[v.reason] || v.reason}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          onClick={handleCompare}
+          disabled={!canCompare || diffLoading}
+          size="sm"
+          variant="outline"
+        >
+          {diffLoading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              Comparing...
+            </>
+          ) : (
+            "Compare"
+          )}
+        </Button>
+      </div>
+
+      {isError && (
+        <div className="text-xs text-destructive flex items-center gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5" />
+          {error instanceof Error ? error.message : "Diff failed"}
+        </div>
+      )}
+
+      {diff && compareTriggered && <DiffDisplay diff={diff} />}
+    </div>
+  );
+}
+
+function DiffDisplay({ diff }: { diff: BuilderDiffResult }) {
+  const { summary, changes } = diff;
+  const [expandedSection, setExpandedSection] = useState<"added" | "removed" | "modified" | null>(null);
+
+  const totalAdded = summary.recordTypesAdded + summary.workflowsAdded + summary.slasAdded + summary.assignmentsAdded;
+  const totalRemoved = summary.recordTypesRemoved + summary.workflowsRemoved + summary.slasRemoved + summary.assignmentsRemoved;
+  const totalModified = summary.recordTypesModified;
+
+  if (totalAdded === 0 && totalRemoved === 0 && totalModified === 0) {
+    return (
+      <div className="text-xs text-muted-foreground text-center py-4 border-t">
+        No structural changes between v{diff.fromVersion} and v{diff.toVersion}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t pt-4 space-y-4">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Diff Summary — v{diff.fromVersion} → v{diff.toVersion}
+      </p>
+
+      {/* Summary Grid */}
+      <div className="grid grid-cols-5 gap-2 text-xs">
+        <DiffSummaryCell label="Record Types" added={summary.recordTypesAdded} removed={summary.recordTypesRemoved} modified={summary.recordTypesModified} />
+        <DiffSummaryCell label="Workflows" added={summary.workflowsAdded} removed={summary.workflowsRemoved} modified={0} />
+        <DiffSummaryCell label="SLA Policies" added={summary.slasAdded} removed={summary.slasRemoved} modified={0} />
+        <DiffSummaryCell label="Assignments" added={summary.assignmentsAdded} removed={summary.assignmentsRemoved} modified={0} />
+        <div className="border rounded-md p-2 text-center">
+          <p className="text-[10px] text-muted-foreground mb-1">Total</p>
+          <div className="flex justify-center gap-2">
+            {totalAdded > 0 && <span className="text-emerald-600 font-medium">+{totalAdded}</span>}
+            {totalRemoved > 0 && <span className="text-red-600 font-medium">-{totalRemoved}</span>}
+            {totalModified > 0 && <span className="text-amber-600 font-medium">~{totalModified}</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Expandable Change Lists */}
+      {changes.added.length > 0 && (
+        <DiffChangeSection
+          label="Added"
+          tone="emerald"
+          items={changes.added}
+          expanded={expandedSection === "added"}
+          onToggle={() => setExpandedSection(expandedSection === "added" ? null : "added")}
+        />
+      )}
+      {changes.removed.length > 0 && (
+        <DiffChangeSection
+          label="Removed"
+          tone="red"
+          items={changes.removed}
+          expanded={expandedSection === "removed"}
+          onToggle={() => setExpandedSection(expandedSection === "removed" ? null : "removed")}
+        />
+      )}
+      {changes.modified.length > 0 && (
+        <DiffChangeSection
+          label="Modified"
+          tone="amber"
+          items={changes.modified}
+          expanded={expandedSection === "modified"}
+          onToggle={() => setExpandedSection(expandedSection === "modified" ? null : "modified")}
+        />
+      )}
+    </div>
+  );
+}
+
+function DiffSummaryCell({ label, added, removed, modified }: {
+  label: string;
+  added: number;
+  removed: number;
+  modified: number;
+}) {
+  const hasChanges = added > 0 || removed > 0 || modified > 0;
+  return (
+    <div className="border rounded-md p-2 text-center">
+      <p className="text-[10px] text-muted-foreground mb-1">{label}</p>
+      {hasChanges ? (
+        <div className="flex justify-center gap-1.5">
+          {added > 0 && <span className="text-emerald-600 font-medium">+{added}</span>}
+          {removed > 0 && <span className="text-red-600 font-medium">-{removed}</span>}
+          {modified > 0 && <span className="text-amber-600 font-medium">~{modified}</span>}
+        </div>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )}
+    </div>
+  );
+}
+
+function DiffChangeSection({ label, tone, items, expanded, onToggle }: {
+  label: string;
+  tone: "emerald" | "red" | "amber";
+  items: BuilderDiffChange[];
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const colorMap = {
+    emerald: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", dot: "bg-emerald-500" },
+    red: { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", dot: "bg-red-500" },
+    amber: { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700", dot: "bg-amber-500" },
+  };
+  const c = colorMap[tone];
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-medium transition-colors ${c.bg} ${c.border} border ${c.text}`}
+      >
+        <span>{label} ({items.length})</span>
+        <span>{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-0.5 pl-2">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-start gap-2 text-xs py-1">
+              <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${c.dot}`} />
+              <div>
+                <span className="text-muted-foreground">{item.category}:</span>{" "}
+                <span className="font-mono">{item.key}</span>
+                {item.details && item.details.length > 0 && (
+                  <div className="mt-0.5 pl-2 text-[11px] text-muted-foreground space-y-0.5">
+                    {item.details.map((d, j) => (
+                      <div key={j} className="font-mono">{d}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Tab Content Components ---
 
 function OverviewTab({ pkg, prompt, status, createdAt, appId }: {
@@ -306,6 +564,7 @@ function OverviewTab({ pkg, prompt, status, createdAt, appId }: {
 
       <RefinementPanel appId={appId} />
       <VersionHistoryPanel appId={appId} />
+      <CompareVersionsPanel appId={appId} />
     </div>
   );
 }
