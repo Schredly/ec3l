@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAppDraft } from "@/hooks/useAppDraft";
@@ -14,7 +14,8 @@ import { useRefineDraft } from "@/hooks/useRefineDraft";
 import { useDraftVersions } from "@/hooks/useDraftVersions";
 import { useDraftVersion } from "@/hooks/useDraftVersion";
 import { useDraftDiff } from "@/hooks/useDraftDiff";
-import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange } from "@/lib/api/vibe";
+import { useDraftPreflight } from "@/hooks/useDraftPreflight";
+import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange, PreflightCheck } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
 
 function EnvironmentPipeline({ active }: { active: "DEV" | "TEST" | "PROD" }) {
@@ -767,6 +768,118 @@ function ChangesTab({ status, createdAt, checksum, createdBy }: {
   );
 }
 
+// --- Preflight Tab ---
+
+const PREFLIGHT_TYPE_LABEL: Record<string, string> = {
+  recordType: "Record Types",
+  workflow: "Workflows",
+  sla: "SLA Policies",
+  assignment: "Assignment Rules",
+  rbac: "RBAC / Roles",
+};
+
+function PreflightTab({ appId }: { appId: string }) {
+  const [triggered, setTriggered] = useState(false);
+  const { data, isLoading, isError, error, refetch } = useDraftPreflight(appId, triggered);
+
+  function handleRun() {
+    if (triggered) {
+      refetch();
+    } else {
+      setTriggered(true);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-4">
+      <div className="flex items-center gap-3">
+        <Button onClick={handleRun} disabled={isLoading} size="sm">
+          {isLoading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              Running...
+            </>
+          ) : (
+            "Run Preflight"
+          )}
+        </Button>
+        {!triggered && (
+          <span className="text-xs text-muted-foreground">
+            Run structural validation to check this draft before promotion.
+          </span>
+        )}
+      </div>
+
+      {isError && (
+        <div className="text-sm text-destructive flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" />
+          {error instanceof Error ? error.message : "Preflight failed"}
+        </div>
+      )}
+
+      {data && <PreflightResults result={data} />}
+    </div>
+  );
+}
+
+function PreflightResults({ result }: { result: { status: string; summary: { errors: number; warnings: number }; checks: PreflightCheck[] } }) {
+  const bannerConfig = {
+    ready: { bg: "bg-emerald-50 border-emerald-200", icon: <CheckCircle2 className="w-5 h-5 text-emerald-600" />, text: "text-emerald-800", label: "Ready for promotion" },
+    warning: { bg: "bg-amber-50 border-amber-200", icon: <TriangleAlert className="w-5 h-5 text-amber-600" />, text: "text-amber-800", label: `${result.summary.warnings} warning${result.summary.warnings !== 1 ? "s" : ""} found` },
+    error: { bg: "bg-red-50 border-red-200", icon: <ShieldAlert className="w-5 h-5 text-red-600" />, text: "text-red-800", label: `${result.summary.errors} error${result.summary.errors !== 1 ? "s" : ""}${result.summary.warnings > 0 ? `, ${result.summary.warnings} warning${result.summary.warnings !== 1 ? "s" : ""}` : ""}` },
+  };
+  const banner = bannerConfig[result.status as keyof typeof bannerConfig] ?? bannerConfig.error;
+
+  // Group checks by type
+  const grouped = new Map<string, PreflightCheck[]>();
+  for (const check of result.checks) {
+    const list = grouped.get(check.type) ?? [];
+    list.push(check);
+    grouped.set(check.type, list);
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Status Banner */}
+      <div className={`flex items-center gap-3 px-4 py-3 rounded-md border ${banner.bg}`}>
+        {banner.icon}
+        <span className={`text-sm font-medium ${banner.text}`}>{banner.label}</span>
+      </div>
+
+      {result.checks.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-6">
+          All validation checks passed. This draft is structurally ready for promotion.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {Array.from(grouped.entries()).map(([type, checks]) => (
+            <Card key={type}>
+              <CardContent className="p-4">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
+                  {PREFLIGHT_TYPE_LABEL[type] ?? type}
+                </p>
+                <div className="space-y-1.5">
+                  {checks.map((check, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <StatusBadge
+                        label={check.severity}
+                        tone={check.severity === "error" ? "danger" : "warning"}
+                        size="sm"
+                      />
+                      <span className="font-mono text-muted-foreground shrink-0">{check.entity}</span>
+                      <span>{check.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex items-center justify-center py-16 text-muted-foreground text-sm mt-2">
@@ -849,6 +962,7 @@ export default function AppDraftShell() {
           </TabsTrigger>
           <TabsTrigger value="roles">Roles &amp; Access</TabsTrigger>
           <TabsTrigger value="changes">Changes</TabsTrigger>
+          <TabsTrigger value="preflight">Preflight</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview">
@@ -880,6 +994,10 @@ export default function AppDraftShell() {
             checksum={draft.checksum}
             createdBy={draft.createdBy}
           />
+        </TabsContent>
+
+        <TabsContent value="preflight">
+          <PreflightTab appId={appId!} />
         </TabsContent>
       </Tabs>
     </div>

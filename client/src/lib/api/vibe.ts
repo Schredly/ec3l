@@ -99,6 +99,24 @@ export async function fetchBuilderDraftVersion(appId: string, version: number): 
   return res.json();
 }
 
+export interface PreflightCheck {
+  type: "recordType" | "workflow" | "sla" | "assignment" | "rbac";
+  entity: string;
+  severity: "error" | "warning";
+  message: string;
+}
+
+export interface PreflightResult {
+  status: "ready" | "warning" | "error";
+  summary: { errors: number; warnings: number };
+  checks: PreflightCheck[];
+}
+
+export async function fetchBuilderDraftPreflight(appId: string): Promise<PreflightResult> {
+  const res = await apiRequest("GET", `/api/builder/drafts/${appId}/preflight`);
+  return res.json();
+}
+
 export interface BuilderDiffChange {
   category: string;
   key: string;

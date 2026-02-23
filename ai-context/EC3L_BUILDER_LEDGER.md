@@ -58,7 +58,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 |-------------|-------------|--------|
 | 3.1 | Draft state allows AI + manual modifications | Complete (refinement loop + version history) |
 | 3.2 | Every modification generates Patch + Snapshot + Change record | Complete (version snapshots + version diff) |
-| 3.3 | Testing mode: simulate workflows, validate access, automated test hooks | Not Started |
+| 3.3 | Testing mode: simulate workflows, validate access, automated test hooks | Complete (preflight validation) |
 | 3.4 | Publish modal shows diff from PROD with impact summary | Not Started |
 | 3.5 | Pull Down Production: clone PROD snapshot to new DEV draft with lineage tracking | Not Started |
 
@@ -201,20 +201,35 @@ These backend services and UI components already exist and can be composed into 
   - BLD19: Compare panel hidden when fewer than 2 versions exist — no diff possible without version history.
   - BLD20: No restore, merge, or promotion from diff view — read-only structural comparison only.
 
+### Sprint 3.3 — Draft Preflight Validation
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added `GET /api/builder/drafts/:appId/preflight` endpoint. Loads current draft package and runs pure structural validation: record types (fields exist, field uniqueness, baseType references), workflows (record type references, step existence), SLAs (record type references, positive duration), assignments (record type references, valid strategy), RBAC (assignment group keys matched against tenant roles). Returns `{ status, summary, checks }`. No admin auth, no DB writes.
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `PreflightCheck` interface, `PreflightResult` interface, `fetchBuilderDraftPreflight()` function.
+  - `client/src/hooks/useDraftPreflight.ts` (NEW) — `useQuery` hook for preflight. `staleTime: 0` (always recompute). Accepts `enabled` flag so fetch only triggers on "Run Preflight" click.
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — Added "Preflight" tab to tab system. `PreflightTab` component with "Run Preflight" button, loading spinner, error display. `PreflightResults` component with color-coded status banner (green/amber/red with icon), checks grouped by category in cards, each check shows severity badge + entity + message. Empty state: "All validation checks passed. This draft is structurally ready for promotion."
+- **Summary:** Sprint 3.3 adds draft preflight validation. The endpoint performs pure structural checks on the current draft package — no graph projection, no DB writes, no domain events. Validation covers 5 categories: record types (fields, uniqueness, baseType), workflows (target references, steps), SLAs (target references, duration), assignments (target references, strategy validity), and RBAC (assignment group keys matched against tenant roles with case-insensitive + underscore-to-space normalization). RBAC mismatches are warnings, not errors, since group keys and role names may intentionally diverge.
+- **Invariants:**
+  - BLD21: Builder preflight endpoint does not require admin RBAC — consistent with BLD6, BLD11, BLD16.
+  - BLD22: Preflight is pure compute — no DB writes, no domain events, no state changes.
+  - BLD23: Preflight runs against current draft package only — does not project onto graph snapshot or consider installed state.
+  - BLD24: RBAC group-to-role matching is a warning, not an error — groups and roles are conceptually separate.
+  - BLD25: Preflight result is not cached (`staleTime: 0`) — always reflects current draft state.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 3.2 — Version-to-Version Diff
-- **Status:** Complete. Version diff endpoint + Compare Versions UI delivered.
-- **Files added:** `useDraftDiff.ts`
-- **Files modified:** `routes.ts` (1 endpoint), `vibe.ts` (3 types + 1 function), `AppDraftShell.tsx` (4 new components + wiring)
-- **Endpoints added:** `GET /api/builder/drafts/:appId/diff?from=N&to=M`
-- **Invariants:** BLD16–BLD20 established. BLD1–BLD15 from prior sprints remain valid.
-- **What's stubbed:** Nothing. All diff data is real (projected graph snapshots via `diffDraftVersions`). No restore/merge/promotion from diff view.
-- **Next step:** Sprint 3.3 — Testing mode (simulate workflows, validate access, automated test hooks), Sprint 3.4 — Publish flow with diff.
+- **Phase:** Sprint 3.3 — Draft Preflight Validation
+- **Status:** Complete. Preflight endpoint + Preflight tab UI delivered.
+- **Files added:** `useDraftPreflight.ts`
+- **Files modified:** `routes.ts` (1 endpoint), `vibe.ts` (3 types + 1 function), `AppDraftShell.tsx` (Preflight tab + 2 components)
+- **Endpoints added:** `GET /api/builder/drafts/:appId/preflight`
+- **Invariants:** BLD21–BLD25 established. BLD1–BLD20 from prior sprints remain valid.
+- **What's stubbed:** Nothing. Preflight runs real structural validation against draft package and real tenant RBAC roles.
+- **Next step:** Sprint 3.4 — Publish modal with diff from PROD + impact summary. Sprint 3.5 — Pull Down Production.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

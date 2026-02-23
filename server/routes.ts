@@ -3155,6 +3155,140 @@ export async function registerRoutes(
   });
 
   /**
+   * GET /api/builder/drafts/:appId/preflight
+   * Structural validation of current draft package. Read-only, no admin auth.
+   */
+  app.get("/api/builder/drafts/:appId/preflight", async (req, res) => {
+    try {
+      const ts = getTenantStorage(req.tenantContext);
+      const draft = await ts.getVibeDraft(req.params.appId);
+      if (!draft) {
+        return res.status(404).json({ message: "Draft not found" });
+      }
+
+      const pkg = draft.package as Record<string, unknown>;
+      const recordTypes = (pkg.recordTypes ?? []) as Array<{
+        key: string; name?: string; baseType?: string;
+        fields: Array<{ name: string; type: string; required?: boolean }>;
+      }>;
+      const workflows = (pkg.workflows ?? []) as Array<{
+        key: string; name: string; recordTypeKey: string; triggerEvent?: string;
+        steps?: Array<{ name: string; stepType: string; ordering: number }>;
+      }>;
+      const slaPolicies = (pkg.slaPolicies ?? []) as Array<{
+        recordTypeKey: string; durationMinutes: number;
+      }>;
+      const assignmentRules = (pkg.assignmentRules ?? []) as Array<{
+        recordTypeKey: string; strategyType: string; config?: Record<string, unknown>;
+      }>;
+
+      const rtKeys = new Set(recordTypes.map((rt) => rt.key));
+      const checks: Array<{
+        type: string; entity: string; severity: "error" | "warning"; message: string;
+      }> = [];
+
+      // --- Record Type checks ---
+      for (const rt of recordTypes) {
+        if (!rt.fields || rt.fields.length === 0) {
+          checks.push({
+            type: "recordType", entity: rt.key, severity: "error",
+            message: `Record type "${rt.key}" has no fields defined.`,
+          });
+        }
+        const fieldNames = new Set<string>();
+        for (const f of rt.fields ?? []) {
+          if (fieldNames.has(f.name)) {
+            checks.push({
+              type: "recordType", entity: rt.key, severity: "error",
+              message: `Record type "${rt.key}" has duplicate field "${f.name}".`,
+            });
+          }
+          fieldNames.add(f.name);
+        }
+        if (rt.baseType && !rtKeys.has(rt.baseType)) {
+          checks.push({
+            type: "recordType", entity: rt.key, severity: "error",
+            message: `Record type "${rt.key}" declares baseType "${rt.baseType}" which does not exist in this package.`,
+          });
+        }
+      }
+
+      // --- Workflow checks ---
+      for (const wf of workflows) {
+        if (!rtKeys.has(wf.recordTypeKey)) {
+          checks.push({
+            type: "workflow", entity: wf.key, severity: "error",
+            message: `Workflow "${wf.name}" references record type "${wf.recordTypeKey}" which does not exist.`,
+          });
+        }
+        if (!wf.steps || wf.steps.length === 0) {
+          checks.push({
+            type: "workflow", entity: wf.key, severity: "warning",
+            message: `Workflow "${wf.name}" has no steps defined.`,
+          });
+        }
+      }
+
+      // --- SLA checks ---
+      for (const sla of slaPolicies) {
+        if (!rtKeys.has(sla.recordTypeKey)) {
+          checks.push({
+            type: "sla", entity: sla.recordTypeKey, severity: "error",
+            message: `SLA policy references record type "${sla.recordTypeKey}" which does not exist.`,
+          });
+        }
+        if (!sla.durationMinutes || sla.durationMinutes <= 0) {
+          checks.push({
+            type: "sla", entity: sla.recordTypeKey, severity: "error",
+            message: `SLA policy for "${sla.recordTypeKey}" has invalid duration (${sla.durationMinutes}).`,
+          });
+        }
+      }
+
+      // --- Assignment checks ---
+      const validStrategies = new Set(["round_robin", "group_round_robin", "field_match", "direct", "manual"]);
+      for (const rule of assignmentRules) {
+        if (!rtKeys.has(rule.recordTypeKey)) {
+          checks.push({
+            type: "assignment", entity: rule.recordTypeKey, severity: "error",
+            message: `Assignment rule references record type "${rule.recordTypeKey}" which does not exist.`,
+          });
+        }
+        if (!validStrategies.has(rule.strategyType)) {
+          checks.push({
+            type: "assignment", entity: rule.recordTypeKey, severity: "warning",
+            message: `Assignment rule for "${rule.recordTypeKey}" uses unknown strategy "${rule.strategyType}".`,
+          });
+        }
+      }
+
+      // --- RBAC checks ---
+      const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
+      const roleNames = new Set(roles.map((r) => r.name.toLowerCase()));
+      for (const rule of assignmentRules) {
+        const groupKey = (rule.config as Record<string, unknown> | undefined)?.groupKey;
+        if (typeof groupKey === "string") {
+          const normalized = groupKey.replace(/_/g, " ").toLowerCase();
+          if (!roleNames.has(normalized) && !roleNames.has(groupKey.toLowerCase())) {
+            checks.push({
+              type: "rbac", entity: groupKey, severity: "warning",
+              message: `Assignment group "${groupKey}" does not match any tenant role. Ensure a matching role exists before promotion.`,
+            });
+          }
+        }
+      }
+
+      const errorCount = checks.filter((c) => c.severity === "error").length;
+      const warningCount = checks.filter((c) => c.severity === "warning").length;
+      const status = errorCount > 0 ? "error" : warningCount > 0 ? "warning" : "ready";
+
+      return res.json({ status, summary: { errors: errorCount, warnings: warningCount }, checks });
+    } catch (err) {
+      throw err;
+    }
+  });
+
+  /**
    * GET /api/builder/drafts/:appId/diff?from=1&to=3
    * Version-to-version structural diff. Read-only, no admin auth.
    */
