@@ -3023,6 +3023,77 @@ export async function registerRoutes(
     res.json(feed);
   });
 
+  // --- Shared Primitives ---
+
+  /**
+   * GET /api/primitives/shared
+   * Aggregates tenant-level primitives: roles, workflows, SLA policies,
+   * and assignment rules extracted from installed record types.
+   * Read-only. No admin auth required.
+   */
+  app.get("/api/primitives/shared", async (req, res) => {
+    try {
+      const roles = await storage.getRbacRolesByTenant(req.tenantContext.tenantId);
+      const recordTypes = await ec3l.recordType.listRecordTypes(req.tenantContext);
+      const workflowDefs = await ec3l.workflow.getWorkflowDefinitions(req.tenantContext);
+
+      const slaPolicies = recordTypes
+        .filter((rt) => {
+          const sla = rt.slaConfig as { durationMinutes?: number } | null;
+          return sla && sla.durationMinutes != null;
+        })
+        .map((rt) => {
+          const sla = rt.slaConfig as { durationMinutes: number };
+          return {
+            recordTypeKey: rt.key,
+            recordTypeName: rt.name,
+            durationMinutes: sla.durationMinutes,
+            recordTypeStatus: rt.status,
+          };
+        });
+
+      const assignmentRules = recordTypes
+        .filter((rt) => {
+          const ac = rt.assignmentConfig as { strategy?: string } | null;
+          return ac && ac.strategy;
+        })
+        .map((rt) => {
+          const ac = rt.assignmentConfig as { strategy: string; group?: string; field?: string; userId?: string };
+          return {
+            recordTypeKey: rt.key,
+            recordTypeName: rt.name,
+            strategyType: ac.strategy,
+            groupKey: ac.group ?? null,
+            field: ac.field ?? null,
+            userId: ac.userId ?? null,
+            recordTypeStatus: rt.status,
+          };
+        });
+
+      const workflows = workflowDefs.map((wd) => ({
+        id: wd.id,
+        name: wd.name,
+        description: wd.description,
+        status: wd.status,
+        createdAt: wd.createdAt,
+      }));
+
+      return res.json({
+        roles: roles.map((r) => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          status: r.status,
+        })),
+        assignmentRules,
+        slaPolicies,
+        workflows,
+      });
+    } catch (err) {
+      throw err;
+    }
+  });
+
   // --- Builder UI ---
 
   /**

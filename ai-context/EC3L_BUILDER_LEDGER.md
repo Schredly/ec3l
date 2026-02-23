@@ -21,7 +21,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 1 | Guided Onboarding Builder | Sprint 1 | Complete (UI scaffolding) |
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
-| 4 | Shared Enterprise Primitives | Sprint 4 | Not Started |
+| 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1 complete) |
 | 5 | Tenant Awareness | Sprint 4 | Not Started |
 | 6 | Change Timeline Upgrade | — | Not Started |
 
@@ -69,8 +69,8 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 
 | Deliverable | Description | Status |
 |-------------|-------------|--------|
-| 4.1 | Allow reuse of global workflows, approvals, assignment engines, notifications | Not Started |
-| 4.2 | Clearly differentiate tenant-global vs app-scoped primitives | Not Started |
+| 4.1 | Shared Primitives page: read-only view of tenant-level roles, assignments, SLAs, workflows | Complete |
+| 4.2 | Clearly differentiate tenant-global vs app-scoped primitives | Partial (scope badges shown in 4.1) |
 | 4.3 | Encourage composition rather than siloed app creation | Not Started |
 
 **Backend dependencies:** Record types and workflow definitions are already tenant-scoped. May need a "shared" scope concept or tagging.
@@ -266,20 +266,37 @@ These backend services and UI components already exist and can be composed into 
   - BLD37: Lineage column is nullable — existing drafts without lineage are unaffected (`null`).
   - BLD38: Pull-down prompt is now human-readable — no longer contains machine-parseable lineage markers.
 
+### Sprint 4.1 — Shared Primitives Page
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added `GET /api/primitives/shared` endpoint. Aggregates tenant-level primitives from three sources: roles from `storage.getRbacRolesByTenant()`, SLA policies and assignment rules extracted from `recordTypes` JSONB configs (`slaConfig`, `assignmentConfig`), and workflow definitions from `ec3l.workflow.getWorkflowDefinitions()`. Returns `{ roles, assignmentRules, slaPolicies, workflows }`. No admin auth. No DB writes.
+  - `client/src/lib/api/primitives.ts` (NEW) — `SharedRole`, `SharedAssignmentRule`, `SharedSlaPolicy`, `SharedWorkflow`, `SharedPrimitivesResult` interfaces. `fetchSharedPrimitives()` function.
+  - `client/src/hooks/useSharedPrimitives.ts` (NEW) — `useQuery` hook for shared primitives. 30-second staleTime.
+  - `client/src/pages/SharedPrimitives.tsx` (NEW) — Full page at `/shared-primitives`. Header: "Shared Enterprise Primitives". 4 tabs: Roles (card grid with name, status badge, "Tenant" scope badge, description), Assignments (card grid with record type name, strategy, group/field/user details, status), SLAs (card grid with record type name, formatted duration, status), Workflows (card grid with name, status, description, created date). All cards show "Tenant" scope badge. Empty states with icons per category. Loading skeleton. Error state.
+  - `client/src/App.tsx` (MODIFIED) — Added import for `SharedPrimitives`, added `<Route path="/shared-primitives" component={SharedPrimitives} />`.
+  - `client/src/components/layout/Sidebar.tsx` (MODIFIED) — Added `{ title: "Shared Primitives", url: "/shared-primitives" }` to Build section nav items.
+- **Summary:** Sprint 4.1 adds a dedicated Shared Primitives page that surfaces tenant-level primitives in a read-only tabbed view. The aggregation endpoint queries three data sources (RBAC roles, record types for embedded SLA/assignment configs, workflow definitions) and returns a single response. SLA policies and assignment rules are extracted from the `slaConfig` and `assignmentConfig` JSONB fields on record types — there are no dedicated tables for these. All cards display a "Tenant" scope badge to clearly differentiate from app-scoped draft data. No mutation capability. No RBAC errors (endpoint has no admin auth requirement).
+- **Invariants:**
+  - BLD39: `GET /api/primitives/shared` does not require admin RBAC — consistent with BLD6, BLD11, BLD16, BLD21, BLD26, BLD31.
+  - BLD40: Shared Primitives page is purely read-only — no create, edit, or delete actions.
+  - BLD41: SLA policies and assignment rules are derived from record type configs — not stored in dedicated tables.
+  - BLD42: All primitive cards display "Tenant" scope badge — visual differentiation from app-scoped draft data.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 3.6 (Micro) — Lineage Metadata Hardening (Phase 3 Complete)
-- **Status:** Complete. All Phase 3 deliverables (3.1–3.6) delivered.
-- **Files added:** `migrations/0014_draft_lineage.sql`
-- **Files modified:** `schema.ts` (lineage column), `tenantStorage.ts` (update type), `vibeDraftService.ts` (lineage param), `routes.ts` (structured lineage in pull-down), `vibe.ts` (DraftLineage interface), `AppDraftShell.tsx` (lineage prop replaces prompt parsing)
-- **Endpoints modified:** `POST /api/builder/drafts/:appId/pull-down` (now stores structured lineage)
-- **Invariants:** BLD34 superseded by BLD36. BLD36–BLD38 established. BLD1–BLD33, BLD35 remain valid.
-- **What's stubbed:** Nothing. Lineage is a real JSONB column with migration.
-- **Next step:** Phase 4 — Shared Enterprise Primitives (Sprint 4). Phase 5 — Tenant Awareness (Sprint 4).
+- **Phase:** Sprint 4.1 — Shared Primitives Page (Phase 4 started)
+- **Status:** Sprint 4.1 complete. Shared Primitives page delivered.
+- **Files added:** `client/src/lib/api/primitives.ts`, `client/src/hooks/useSharedPrimitives.ts`, `client/src/pages/SharedPrimitives.tsx`
+- **Files modified:** `server/routes.ts` (1 endpoint), `App.tsx` (route), `Sidebar.tsx` (nav item)
+- **Endpoints added:** `GET /api/primitives/shared`
+- **Invariants:** BLD39–BLD42 established. All prior invariants remain valid.
+- **What's stubbed:** Nothing. Endpoint aggregates real data from RBAC, record types, and workflow definitions.
+- **Assumptions:** SLA policies and assignment rules are extracted from record type JSONB configs (no dedicated tables exist). Notifications excluded (no first-class notification entity in the platform).
+- **Next step:** Sprint 4.2+ — composition UX, shared primitive reuse in Builder drafts. Phase 5 — Tenant Awareness.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

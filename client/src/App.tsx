@@ -20,6 +20,7 @@ import WorkflowMonitor from "@/pages/workflow-monitor";
 import Records from "@/pages/records";
 import VibeStudio from "@/pages/vibe-studio";
 import Primitives from "@/pages/primitives";
+import SharedPrimitives from "@/pages/SharedPrimitives";
 import BuilderLanding from "@/pages/BuilderLanding";
 import BuilderProposal from "@/pages/BuilderProposal";
 import AppDraftShell from "@/pages/AppDraftShell";
@@ -44,6 +45,7 @@ function Router() {
       <Route path="/records" component={Records} />
       <Route path="/vibe-studio" component={VibeStudio} />
       <Route path="/primitives" component={Primitives} />
+      <Route path="/shared-primitives" component={SharedPrimitives} />
       <Route component={NotFound} />
     </Switch>
   );

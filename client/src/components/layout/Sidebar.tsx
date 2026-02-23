@@ -41,6 +41,7 @@ function useVisibleSections(): NavSection[] {
         items: [
           { title: "Changes", url: "/changes" },
           { title: "Primitives", url: "/primitives" },
+          { title: "Shared Primitives", url: "/shared-primitives" },
           { title: "Form Studio", url: "/studio/forms" },
           { title: "Runner", url: "/runner" },
         ],
