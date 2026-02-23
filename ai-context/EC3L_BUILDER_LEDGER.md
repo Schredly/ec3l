@@ -20,7 +20,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 |-------|-------|--------|--------|
 | 1 | Guided Onboarding Builder | Sprint 1 | Complete (UI scaffolding) |
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
-| 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.5) |
+| 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | Not Started |
 | 5 | Tenant Awareness | Sprint 4 | Not Started |
 | 6 | Change Timeline Upgrade | — | Not Started |
@@ -61,6 +61,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 3.3 | Testing mode: simulate workflows, validate access, automated test hooks | Complete (preflight validation) |
 | 3.4 | Publish modal shows diff from PROD with impact summary | Complete (promote modal + intent creation) |
 | 3.5 | Pull Down Production: clone PROD snapshot to new DEV draft with lineage tracking | Complete |
+| 3.6 | Lineage Metadata Hardening: structured JSONB lineage column replaces prompt-prefix encoding | Complete |
 
 **Backend dependencies:** Patch ops (exists), Draft versioning (exists), Graph diff (exists), Promotion execute (exists). Pull-down-from-PROD may need a new service operation.
 
@@ -248,19 +249,36 @@ These backend services and UI components already exist and can be composed into 
   - BLD34: Lineage metadata stored in draft `prompt` field — no schema changes required.
   - BLD35: "Pull Down PROD" button hidden when no PROD install exists for draft's packageKey.
 
+### Sprint 3.6 (Micro) — Lineage Metadata Hardening
+- **Date:** 2026-02-23
+- **Files:**
+  - `migrations/0014_draft_lineage.sql` (NEW) — `ALTER TABLE vibe_package_drafts ADD COLUMN lineage JSONB;`
+  - `shared/schema.ts` (MODIFIED) — Added `lineage: jsonb("lineage")` to `vibePackageDrafts` table definition. Column is nullable, not omitted from insert schema (available at creation time).
+  - `server/tenantStorage.ts` (MODIFIED) — Added `"lineage"` to `updateVibeDraft` Pick type so lineage can be updated after creation.
+  - `server/vibe/vibeDraftService.ts` (MODIFIED) — `createDraftFromVariant()` now accepts optional `lineage?: Record<string, unknown>` parameter, spreads into `createVibeDraft` call.
+  - `server/routes.ts` (MODIFIED) — `POST /api/builder/drafts/:appId/pull-down` now stores lineage as structured JSONB object (`{ pulledFromProd, sourceEnvironment, sourceVersion, sourceChecksum, sourceInstalledAt, sourceDraftId, pulledAt }`) passed to `createDraftFromVariant`. Prompt changed from `[Pull-down from PROD]\nSource...` multi-line encoding to clean `"Pulled from PROD (v1.0.0) at 2026-02-23T..."`.
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `DraftLineage` interface, added `lineage: DraftLineage | null` to `VibeDraft` interface.
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — `OverviewTab` now accepts `lineage` prop. Lineage banner uses `lineage?.pulledFromProd` instead of `prompt.startsWith("[Pull-down from PROD]")`. Banner shows version number and pull date from structured lineage data.
+- **Summary:** Sprint 3.6 (micro) hardens lineage tracking by moving it from fragile prompt-prefix encoding to a dedicated nullable JSONB column on `vibe_package_drafts`. The pull-down endpoint now stores structured lineage metadata (source environment, version, checksum, timestamp, source draft ID) directly in the database column, and the client reads `draft.lineage` instead of parsing the prompt string. The prompt field is restored to a clean human-readable string. This is a non-breaking change — existing drafts without lineage simply have `null`.
+- **Invariants:**
+  - BLD34 (SUPERSEDED): Was "Lineage metadata stored in draft `prompt` field." Now superseded by BLD36.
+  - BLD36: Lineage stored in dedicated `lineage` JSONB column — nullable, structured, queryable.
+  - BLD37: Lineage column is nullable — existing drafts without lineage are unaffected (`null`).
+  - BLD38: Pull-down prompt is now human-readable — no longer contains machine-parseable lineage markers.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 3.5 — Pull Down from PROD (Phase 3 Complete)
-- **Status:** Complete. All Phase 3 deliverables (3.1–3.5) delivered.
-- **Files added:** `useProdState.ts`, `usePullDownDraft.ts`
-- **Files modified:** `routes.ts` (2 endpoints), `vibe.ts` (2 interfaces + 2 functions), `AppDraftShell.tsx` (Pull Down button, PullDownModal, lineage banner)
-- **Endpoints added:** `GET /api/builder/drafts/:appId/prod-state`, `POST /api/builder/drafts/:appId/pull-down`
-- **Invariants:** BLD31–BLD35 established. BLD1–BLD30 from prior sprints remain valid.
-- **What's stubbed:** Nothing. Pull-down reads real PROD install data and creates real drafts via `createDraftFromVariant`.
+- **Phase:** Sprint 3.6 (Micro) — Lineage Metadata Hardening (Phase 3 Complete)
+- **Status:** Complete. All Phase 3 deliverables (3.1–3.6) delivered.
+- **Files added:** `migrations/0014_draft_lineage.sql`
+- **Files modified:** `schema.ts` (lineage column), `tenantStorage.ts` (update type), `vibeDraftService.ts` (lineage param), `routes.ts` (structured lineage in pull-down), `vibe.ts` (DraftLineage interface), `AppDraftShell.tsx` (lineage prop replaces prompt parsing)
+- **Endpoints modified:** `POST /api/builder/drafts/:appId/pull-down` (now stores structured lineage)
+- **Invariants:** BLD34 superseded by BLD36. BLD36–BLD38 established. BLD1–BLD33, BLD35 remain valid.
+- **What's stubbed:** Nothing. Lineage is a real JSONB column with migration.
 - **Next step:** Phase 4 — Shared Enterprise Primitives (Sprint 4). Phase 5 — Tenant Awareness (Sprint 4).
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->

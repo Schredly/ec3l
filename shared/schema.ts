@@ -1179,6 +1179,7 @@ export const vibePackageDrafts = pgTable("vibe_package_drafts", {
   checksum: text("checksum").notNull(),
   lastPreviewDiff: jsonb("last_preview_diff"),
   lastPreviewErrors: jsonb("last_preview_errors"),
+  lineage: jsonb("lineage"),
 });
 
 // Vibe Package Draft Versions — version history for iterative draft editing

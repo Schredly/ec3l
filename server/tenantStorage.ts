@@ -1033,7 +1033,7 @@ export function getTenantStorage(ctx: TenantContext) {
 
     async updateVibeDraft(
       id: string,
-      updates: Partial<Pick<VibePackageDraft, "status" | "prompt" | "package" | "checksum" | "lastPreviewDiff" | "lastPreviewErrors" | "updatedAt">>,
+      updates: Partial<Pick<VibePackageDraft, "status" | "prompt" | "package" | "checksum" | "lastPreviewDiff" | "lastPreviewErrors" | "lineage" | "updatedAt">>,
     ): Promise<VibePackageDraft | undefined> {
       const existing = await this.getVibeDraft(id);
       if (!existing) return undefined;

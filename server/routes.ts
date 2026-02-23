@@ -3508,21 +3508,24 @@ export async function registerRoutes(
 
       const prodPackage = install.packageContents as unknown as import("./graph/installGraphService").GraphPackage;
 
-      const lineagePrompt = [
-        `[Pull-down from PROD]`,
-        `Source environment: prod`,
-        `Source version: ${install.version}`,
-        `Source checksum: ${install.checksum}`,
-        `Pulled at: ${new Date().toISOString()}`,
-        `Source draft: ${req.params.appId}`,
-      ].join("\n");
+      const pulledAt = new Date().toISOString();
+      const lineage = {
+        pulledFromProd: true,
+        sourceEnvironment: "prod",
+        sourceVersion: install.version,
+        sourceChecksum: install.checksum,
+        sourceInstalledAt: install.installedAt,
+        sourceDraftId: req.params.appId,
+        pulledAt,
+      };
 
       const newDraft = await ec3l.vibeDraft.createDraftFromVariant(
         req.tenantContext,
         draft.projectId,
         null,
         prodPackage,
-        lineagePrompt,
+        `Pulled from PROD (v${install.version}) at ${pulledAt}`,
+        lineage,
       );
 
       return res.json({

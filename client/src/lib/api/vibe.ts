@@ -14,6 +14,17 @@ export interface VibeDraft {
   checksum: string;
   lastPreviewDiff: GraphDiffResult | null;
   lastPreviewErrors: GraphValidationError[] | null;
+  lineage: DraftLineage | null;
+}
+
+export interface DraftLineage {
+  pulledFromProd: boolean;
+  sourceEnvironment: string;
+  sourceVersion: string;
+  sourceChecksum: string;
+  sourceInstalledAt: string;
+  sourceDraftId: string;
+  pulledAt: string;
 }
 
 export interface GraphPackageJson {

@@ -408,6 +408,7 @@ export async function createDraftFromVariant(
   environmentId: string | null,
   pkg: GraphPackage,
   prompt: string,
+  lineage?: Record<string, unknown>,
 ): Promise<VibePackageDraft> {
   const checksum = computePackageChecksum(pkg);
   const ts = getTenantStorage(ctx);
@@ -419,6 +420,7 @@ export async function createDraftFromVariant(
     package: pkg as unknown as Record<string, unknown>,
     checksum,
     createdBy: ctx.userId ?? ctx.agentId ?? null,
+    ...(lineage ? { lineage } : {}),
   });
 
   emitDomainEvent(ctx, {

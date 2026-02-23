@@ -517,12 +517,13 @@ function DiffChangeSection({ label, tone, items, expanded, onToggle }: {
 
 // --- Tab Content Components ---
 
-function OverviewTab({ pkg, prompt, status, createdAt, appId }: {
+function OverviewTab({ pkg, prompt, status, createdAt, appId, lineage }: {
   pkg: GraphPackageJson;
   prompt: string;
   status: string;
   createdAt: string;
   appId: string;
+  lineage?: { pulledFromProd: boolean; sourceVersion: string; pulledAt: string } | null;
 }) {
   return (
     <div className="mt-2 space-y-4">
@@ -554,10 +555,13 @@ function OverviewTab({ pkg, prompt, status, createdAt, appId }: {
           </div>
         </div>
 
-        {prompt.startsWith("[Pull-down from PROD]") && (
+        {lineage?.pulledFromProd && (
           <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-xs text-emerald-800">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span className="font-medium">Pulled from PROD — this draft was cloned from the production environment.</span>
+            <span className="font-medium">
+              Pulled from PROD v{lineage.sourceVersion} on{" "}
+              {new Date(lineage.pulledAt).toLocaleDateString()}
+            </span>
           </div>
         )}
 
@@ -1279,6 +1283,7 @@ export default function AppDraftShell() {
             status={draft.status}
             createdAt={draft.createdAt}
             appId={appId!}
+            lineage={draft.lineage}
           />
         </TabsContent>
 
