@@ -20,7 +20,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 |-------|-------|--------|--------|
 | 1 | Guided Onboarding Builder | Sprint 1 | Complete (UI scaffolding) |
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
-| 3 | Draft → Test → Publish Flow | Sprint 3 | Not Started |
+| 3 | Draft → Test → Publish Flow | Sprint 3 | In Progress (3.1 complete) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | Not Started |
 | 5 | Tenant Awareness | Sprint 4 | Not Started |
 | 6 | Change Timeline Upgrade | — | Not Started |
@@ -56,8 +56,8 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 
 | Deliverable | Description | Status |
 |-------------|-------------|--------|
-| 3.1 | Draft state allows AI + manual modifications | Not Started |
-| 3.2 | Every modification generates Patch + Snapshot + Change record | Not Started |
+| 3.1 | Draft state allows AI + manual modifications | Complete (refinement loop + version history) |
+| 3.2 | Every modification generates Patch + Snapshot + Change record | Partial (version snapshots created on refine) |
 | 3.3 | Testing mode: simulate workflows, validate access, automated test hooks | Not Started |
 | 3.4 | Publish modal shows diff from PROD with impact summary | Not Started |
 | 3.5 | Pull Down Production: clone PROD snapshot to new DEV draft with lineage tracking | Not Started |
@@ -168,6 +168,23 @@ These backend services and UI components already exist and can be composed into 
   - BLD8: Proposal endpoint is read-only — no DB writes, no side effects beyond domain events.
   - BLD9: Draft creation reuses `vibeDraftService.createDraftFromPrompt` — full vibe draft lifecycle (preview, refine, install, discard) available on created drafts.
   - BLD10: All Draft Shell tabs are read-only — no editing capabilities in Sprint 2.
+
+### Sprint 3.1 — Refinement Loop + Version History
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added 3 builder endpoints: `POST /api/builder/drafts/:appId/refine` (calls `vibeDraftService.refineDraft`, supports LLM + deterministic pattern refinement), `GET /api/builder/drafts/:appId/versions` (lists all version snapshots), `GET /api/builder/drafts/:appId/versions/:version` (fetches single immutable version). None require admin auth.
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `refineBuilderDraft()`, `fetchBuilderDraftVersions()`, `fetchBuilderDraftVersion()`.
+  - `client/src/hooks/useRefineDraft.ts` (NEW) — `useMutation` hook wrapping refine endpoint. On success invalidates both `builder-draft` and `builder-draft-versions` query caches.
+  - `client/src/hooks/useDraftVersions.ts` (NEW) — `useQuery` hook for version list. 10-second stale time.
+  - `client/src/hooks/useDraftVersion.ts` (NEW) — `useQuery` hook for single version. `staleTime: Infinity` since versions are immutable.
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — Added two new sections to Overview tab: **Refinement Panel** (compact textarea + "Generate Refinement" button with loading spinner, success toast showing package key, error toast on failure, clears prompt on success) and **Version History Panel** (sorted newest-first, each row shows version number + reason label + "current" badge on latest + truncated checksum + relative timestamp, clicking a version expands inline preview card with record type/workflow/role/SLA counts + package key + creator).
+- **Summary:** Sprint 3.1 adds the refinement loop and version history to the Draft Shell. Users can submit a refinement prompt (e.g. "add field priority to ticket", "rename to helpdesk") which calls `vibeDraftService.refineDraft` — this supports both LLM-based refinement (if API key configured) and deterministic pattern matching (add field, rename, add sla). Each refinement creates an immutable version snapshot. Version history is displayed as a clickable list with metadata preview. No restore functionality yet — read-only version inspection only.
+- **Invariants:**
+  - BLD11: Builder refinement/versioning endpoints do not require admin RBAC — consistent with BLD6.
+  - BLD12: Each refinement creates an immutable version snapshot via `vibeDraftService` — reuses existing draft versioning infrastructure.
+  - BLD13: Version snapshots are immutable (`staleTime: Infinity` on client) — versions are never modified after creation.
+  - BLD14: Refinement resets draft status to "draft" if previously "previewed" — forces re-preview before install.
+  - BLD15: Version history is read-only — no restore or rollback from the Builder UI in Sprint 3.1.
 
 ---
 
