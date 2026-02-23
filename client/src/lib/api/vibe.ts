@@ -117,6 +117,25 @@ export async function fetchBuilderDraftPreflight(appId: string): Promise<Preflig
   return res.json();
 }
 
+export interface BuilderPromotionIntent {
+  intentId: string;
+  status: string;
+  fromEnv: string;
+  toEnv: string;
+  createdAt: string;
+  createdBy: string | null;
+}
+
+export async function createBuilderPromotionIntent(appId: string): Promise<BuilderPromotionIntent> {
+  const res = await apiRequest("POST", `/api/builder/drafts/${appId}/promote-intent`);
+  return res.json();
+}
+
+export async function fetchBuilderPromotionIntents(appId: string): Promise<BuilderPromotionIntent[]> {
+  const res = await apiRequest("GET", `/api/builder/drafts/${appId}/promote-intents`);
+  return res.json();
+}
+
 export interface BuilderDiffChange {
   category: string;
   key: string;

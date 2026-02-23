@@ -9,13 +9,18 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AlertCircle, CheckCircle2, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppDraft } from "@/hooks/useAppDraft";
 import { useRefineDraft } from "@/hooks/useRefineDraft";
 import { useDraftVersions } from "@/hooks/useDraftVersions";
 import { useDraftVersion } from "@/hooks/useDraftVersion";
 import { useDraftDiff } from "@/hooks/useDraftDiff";
 import { useDraftPreflight } from "@/hooks/useDraftPreflight";
-import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange, PreflightCheck } from "@/lib/api/vibe";
+import { usePromotionIntents } from "@/hooks/usePromotionIntents";
+import { useCreatePromotionIntent } from "@/hooks/useCreatePromotionIntent";
+import { PromotionIntentStatusBadge } from "@/components/status/PromotionIntentStatusBadge";
+import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange, PreflightCheck, PreflightResult } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
 
 function EnvironmentPipeline({ active }: { active: "DEV" | "TEST" | "PROD" }) {
@@ -566,6 +571,7 @@ function OverviewTab({ pkg, prompt, status, createdAt, appId }: {
       <RefinementPanel appId={appId} />
       <VersionHistoryPanel appId={appId} />
       <CompareVersionsPanel appId={appId} />
+      <PromotionIntentsPanel appId={appId} />
     </div>
   );
 }
@@ -905,11 +911,186 @@ function DraftSkeleton() {
   );
 }
 
+// --- Promote Modal ---
+
+function PromoteModal({ appId, open, onOpenChange }: {
+  appId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const createIntent = useCreatePromotionIntent(appId);
+
+  // Peek at cached preflight result
+  const preflightData = queryClient.getQueryData<PreflightResult>(["builder-draft-preflight", appId]);
+  const [runningPreflight, setRunningPreflight] = useState(false);
+  const preflight = useDraftPreflight(appId, runningPreflight);
+
+  // Use cached or freshly fetched data
+  const preflightResult = preflight.data ?? preflightData;
+
+  // Peek at cached version diff (latest two versions)
+  const versions = queryClient.getQueryData<Array<{ versionNumber: number }>>(["builder-draft-versions", appId]);
+  const sorted = versions ? [...versions].sort((a, b) => b.versionNumber - a.versionNumber) : [];
+  const hasDiff = sorted.length >= 2;
+  const diffFrom = hasDiff ? sorted[1]!.versionNumber : null;
+  const diffTo = hasDiff ? sorted[0]!.versionNumber : null;
+  const cachedDiff = hasDiff
+    ? queryClient.getQueryData<BuilderDiffResult>(["builder-draft-diff", appId, diffFrom, diffTo])
+    : null;
+
+  function handleCreate() {
+    createIntent.mutate(undefined, {
+      onSuccess: () => {
+        toast({ title: "Promotion intent created", description: "DEV → TEST intent is now draft." });
+        onOpenChange(false);
+      },
+      onError: (err: Error) => {
+        toast({ title: "Failed to create intent", description: err.message, variant: "destructive" });
+      },
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Promote to TEST</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-5">
+          {/* Target */}
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Target</p>
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <StatusBadge label="DEV" tone="warning" size="sm" />
+              <span className="text-muted-foreground">&rarr;</span>
+              <StatusBadge label="TEST" tone="info" size="sm" />
+            </div>
+          </div>
+
+          {/* Readiness */}
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Readiness</p>
+            {preflightResult ? (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs font-medium ${
+                preflightResult.status === "ready" ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  : preflightResult.status === "warning" ? "bg-amber-50 border-amber-200 text-amber-800"
+                  : "bg-red-50 border-red-200 text-red-800"
+              }`}>
+                {preflightResult.status === "ready" && <CheckCircle2 className="w-4 h-4" />}
+                {preflightResult.status === "warning" && <TriangleAlert className="w-4 h-4" />}
+                {preflightResult.status === "error" && <ShieldAlert className="w-4 h-4" />}
+                {preflightResult.status === "ready"
+                  ? "All checks passed"
+                  : `${preflightResult.summary.errors} errors, ${preflightResult.summary.warnings} warnings`}
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setRunningPreflight(true)}
+                disabled={preflight.isLoading}
+              >
+                {preflight.isLoading ? (
+                  <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Running...</>
+                ) : (
+                  "Run Preflight"
+                )}
+              </Button>
+            )}
+          </div>
+
+          {/* Impact Preview */}
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Impact Preview</p>
+            {cachedDiff ? (
+              <div className="grid grid-cols-4 gap-2 text-xs">
+                <DiffSummaryCell label="Record Types" added={cachedDiff.summary.recordTypesAdded} removed={cachedDiff.summary.recordTypesRemoved} modified={cachedDiff.summary.recordTypesModified} />
+                <DiffSummaryCell label="Workflows" added={cachedDiff.summary.workflowsAdded} removed={cachedDiff.summary.workflowsRemoved} modified={0} />
+                <DiffSummaryCell label="SLAs" added={cachedDiff.summary.slasAdded} removed={cachedDiff.summary.slasRemoved} modified={0} />
+                <DiffSummaryCell label="Assignments" added={cachedDiff.summary.assignmentsAdded} removed={cachedDiff.summary.assignmentsRemoved} modified={0} />
+              </div>
+            ) : hasDiff ? (
+              <p className="text-xs text-muted-foreground">Run a version comparison from the Overview tab to see impact preview here.</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">No version diff available yet (only one version exists).</p>
+            )}
+          </div>
+
+          {/* Create Intent */}
+          <Button
+            onClick={handleCreate}
+            disabled={createIntent.isPending || (preflightResult?.status === "error")}
+            className="w-full"
+          >
+            {createIntent.isPending ? (
+              <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Creating...</>
+            ) : (
+              "Create Promotion Intent"
+            )}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- Promotion Intents Section ---
+
+function PromotionIntentsPanel({ appId }: { appId: string }) {
+  const { data: intents, isLoading } = usePromotionIntents(appId);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-36" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (!intents || intents.length === 0) {
+    return null;
+  }
+
+  const sorted = [...intents].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
+  return (
+    <div className="border rounded-md p-4 space-y-3">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Promotion Intents
+      </p>
+      <div className="space-y-1">
+        {sorted.map((intent) => (
+          <div
+            key={intent.intentId}
+            className="flex items-center justify-between px-3 py-2 rounded-md border border-transparent hover:bg-muted/50 text-xs"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-muted-foreground">{intent.intentId.slice(0, 8)}</span>
+              <PromotionIntentStatusBadge status={intent.status} size="sm" />
+              <span className="text-muted-foreground">
+                {intent.fromEnv.toUpperCase()} → {intent.toEnv.toUpperCase()}
+              </span>
+            </div>
+            <span className="text-muted-foreground">{relativeTime(intent.createdAt)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // --- Main Component ---
 
 export default function AppDraftShell() {
   const { appId } = useParams<{ appId: string }>();
   const { data: draft, isLoading, isError, error } = useAppDraft(appId);
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   if (isLoading) {
     return <DraftSkeleton />;
@@ -930,6 +1111,10 @@ export default function AppDraftShell() {
   const pkg = draft.package as unknown as GraphPackageJson;
   const appName = humanizeKey(pkg.packageKey);
 
+  // Check preflight cache for promote button gating
+  const preflightData = queryClient.getQueryData<PreflightResult>(["builder-draft-preflight", appId]);
+  const canPromote = preflightData && preflightData.status !== "error";
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -943,7 +1128,17 @@ export default function AppDraftShell() {
           />
           <StatusBadge label="DEV" tone="info" size="md" />
         </div>
+        <Button
+          onClick={() => setPromoteOpen(true)}
+          disabled={!canPromote}
+          size="sm"
+          variant={canPromote ? "default" : "outline"}
+        >
+          Promote&hellip;
+        </Button>
       </div>
+
+      <PromoteModal appId={appId!} open={promoteOpen} onOpenChange={setPromoteOpen} />
 
       {/* Environment pipeline */}
       <EnvironmentPipeline active="DEV" />

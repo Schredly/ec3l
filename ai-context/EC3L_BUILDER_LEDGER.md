@@ -59,7 +59,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 3.1 | Draft state allows AI + manual modifications | Complete (refinement loop + version history) |
 | 3.2 | Every modification generates Patch + Snapshot + Change record | Complete (version snapshots + version diff) |
 | 3.3 | Testing mode: simulate workflows, validate access, automated test hooks | Complete (preflight validation) |
-| 3.4 | Publish modal shows diff from PROD with impact summary | Not Started |
+| 3.4 | Publish modal shows diff from PROD with impact summary | Complete (promote modal + intent creation) |
 | 3.5 | Pull Down Production: clone PROD snapshot to new DEV draft with lineage tracking | Not Started |
 
 **Backend dependencies:** Patch ops (exists), Draft versioning (exists), Graph diff (exists), Promotion execute (exists). Pull-down-from-PROD may need a new service operation.
@@ -216,20 +216,36 @@ These backend services and UI components already exist and can be composed into 
   - BLD24: RBAC group-to-role matching is a warning, not an error — groups and roles are conceptually separate.
   - BLD25: Preflight result is not cached (`staleTime: 0`) — always reflects current draft state.
 
+### Sprint 3.4 — Promotion UX Skeleton (DEV → TEST)
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added 2 builder endpoints: `POST /api/builder/drafts/:appId/promote-intent` (loads draft, resolves DEV/TEST environments by project, creates promotion intent via `ec3l.graph.createPromotionIntent`, returns `{ intentId, status, fromEnv, toEnv, createdAt, createdBy }`), `GET /api/builder/drafts/:appId/promote-intents` (lists project-scoped intents with human-readable env names). No admin auth. No execute action.
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `BuilderPromotionIntent` interface, `createBuilderPromotionIntent()`, `fetchBuilderPromotionIntents()`.
+  - `client/src/hooks/usePromotionIntents.ts` (NEW) — `useQuery` hook for intent list. 15-second stale time.
+  - `client/src/hooks/useCreatePromotionIntent.ts` (NEW) — `useMutation` hook for creating intent. Invalidates `builder-promotion-intents` query on success.
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — Header: "Promote..." button (disabled unless preflight ran and status is not error, uses `queryClient.getQueryData` to peek at preflight cache). `PromoteModal` with Dialog: target display (DEV → TEST badges), readiness section (shows cached preflight result or inline "Run Preflight" CTA), impact preview (shows cached diff summary or guidance message), "Create Promotion Intent" button with spinner/toast. `PromotionIntentsPanel` in Overview tab: newest-first list with short ID, `PromotionIntentStatusBadge`, from→to, relative timestamp.
+- **Summary:** Sprint 3.4 adds the promotion UX skeleton for builders. The "Promote..." button in the header is gated by preflight status — disabled until preflight has been run with a non-error result. The modal shows readiness (preflight), impact (cached version diff), and a create-intent action. Intent creation calls the existing `promotionIntentService.createPromotionIntent` which validates environments and emits domain events. No execute, approve, or reject actions — intent is created in "draft" status only. Promotion intents are listed in the Overview tab with the existing `PromotionIntentStatusBadge` component for consistent visual language.
+- **Invariants:**
+  - BLD26: Builder promote-intent endpoints do not require admin RBAC — consistent with BLD6, BLD11, BLD16, BLD21.
+  - BLD27: Promote-intent creation is DEV → TEST only — hardcoded direction, no PROD promotion in Builder UI.
+  - BLD28: No execute/approve/reject actions in Builder UI — intent is created as "draft" only.
+  - BLD29: Promote button gated by preflight cache — disabled when no preflight result or status is "error".
+  - BLD30: Intent creation reuses `promotionIntentService.createPromotionIntent` — full lifecycle (preview, approve, execute) available via admin endpoints.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 3.3 — Draft Preflight Validation
-- **Status:** Complete. Preflight endpoint + Preflight tab UI delivered.
-- **Files added:** `useDraftPreflight.ts`
-- **Files modified:** `routes.ts` (1 endpoint), `vibe.ts` (3 types + 1 function), `AppDraftShell.tsx` (Preflight tab + 2 components)
-- **Endpoints added:** `GET /api/builder/drafts/:appId/preflight`
-- **Invariants:** BLD21–BLD25 established. BLD1–BLD20 from prior sprints remain valid.
-- **What's stubbed:** Nothing. Preflight runs real structural validation against draft package and real tenant RBAC roles.
-- **Next step:** Sprint 3.4 — Publish modal with diff from PROD + impact summary. Sprint 3.5 — Pull Down Production.
+- **Phase:** Sprint 3.4 — Promotion UX Skeleton (DEV → TEST)
+- **Status:** Complete. Promote modal + intent creation + intent list delivered.
+- **Files added:** `usePromotionIntents.ts`, `useCreatePromotionIntent.ts`
+- **Files modified:** `routes.ts` (2 endpoints), `vibe.ts` (1 interface + 2 functions), `AppDraftShell.tsx` (Promote button, PromoteModal, PromotionIntentsPanel)
+- **Endpoints added:** `POST /api/builder/drafts/:appId/promote-intent`, `GET /api/builder/drafts/:appId/promote-intents`
+- **Invariants:** BLD26–BLD30 established. BLD1–BLD25 from prior sprints remain valid.
+- **What's stubbed:** Nothing. Intent creation uses real `promotionIntentService`. No execute/approve/reject — intent stays in "draft" status.
+- **Next step:** Sprint 3.5 — Pull Down Production (clone PROD snapshot to new DEV draft with lineage tracking).
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

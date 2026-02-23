@@ -3360,6 +3360,80 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * POST /api/builder/drafts/:appId/promote-intent
+   * Create a promotion intent DEV → TEST for the draft's project. No admin auth.
+   */
+  app.post("/api/builder/drafts/:appId/promote-intent", async (req, res) => {
+    try {
+      const ts = getTenantStorage(req.tenantContext);
+      const draft = await ts.getVibeDraft(req.params.appId);
+      if (!draft) {
+        return res.status(404).json({ message: "Draft not found" });
+      }
+
+      const envs = await ts.getEnvironmentsByProject(draft.projectId);
+      const devEnv = envs.find((e) => e.name === "dev");
+      const testEnv = envs.find((e) => e.name === "test");
+      if (!devEnv || !testEnv) {
+        return res.status(400).json({ message: "DEV and TEST environments must exist for this project." });
+      }
+
+      const intent = await ec3l.graph.createPromotionIntent(req.tenantContext, {
+        projectId: draft.projectId,
+        fromEnvironmentId: devEnv.id,
+        toEnvironmentId: testEnv.id,
+        createdBy: req.tenantContext.userId ?? undefined,
+      });
+
+      return res.json({
+        intentId: intent.id,
+        status: intent.status,
+        fromEnv: "dev",
+        toEnv: "test",
+        createdAt: intent.createdAt,
+        createdBy: intent.createdBy,
+      });
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "statusCode" in err) {
+        const e = err as { statusCode: number; message: string };
+        return res.status(e.statusCode).json({ message: e.message });
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * GET /api/builder/drafts/:appId/promote-intents
+   * List promotion intents for the draft's project. No admin auth.
+   */
+  app.get("/api/builder/drafts/:appId/promote-intents", async (req, res) => {
+    try {
+      const ts = getTenantStorage(req.tenantContext);
+      const draft = await ts.getVibeDraft(req.params.appId);
+      if (!draft) {
+        return res.status(404).json({ message: "Draft not found" });
+      }
+
+      const intents = await ts.listPromotionIntents(draft.projectId);
+      const envs = await ts.getEnvironmentsByProject(draft.projectId);
+      const envMap = new Map(envs.map((e) => [e.id, e.name]));
+
+      return res.json(
+        intents.map((i) => ({
+          intentId: i.id,
+          status: i.status,
+          fromEnv: envMap.get(i.fromEnvironmentId) ?? i.fromEnvironmentId,
+          toEnv: envMap.get(i.toEnvironmentId) ?? i.toEnvironmentId,
+          createdAt: i.createdAt,
+          createdBy: i.createdBy,
+        })),
+      );
+    } catch (err) {
+      throw err;
+    }
+  });
+
   ec3l.scheduler.startScheduler();
 
   return httpServer;
