@@ -20,7 +20,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 |-------|-------|--------|--------|
 | 1 | Guided Onboarding Builder | Sprint 1 | Complete (UI scaffolding) |
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
-| 3 | Draft → Test → Publish Flow | Sprint 3 | In Progress (3.1 complete) |
+| 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.5) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | Not Started |
 | 5 | Tenant Awareness | Sprint 4 | Not Started |
 | 6 | Change Timeline Upgrade | — | Not Started |
@@ -60,7 +60,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 3.2 | Every modification generates Patch + Snapshot + Change record | Complete (version snapshots + version diff) |
 | 3.3 | Testing mode: simulate workflows, validate access, automated test hooks | Complete (preflight validation) |
 | 3.4 | Publish modal shows diff from PROD with impact summary | Complete (promote modal + intent creation) |
-| 3.5 | Pull Down Production: clone PROD snapshot to new DEV draft with lineage tracking | Not Started |
+| 3.5 | Pull Down Production: clone PROD snapshot to new DEV draft with lineage tracking | Complete |
 
 **Backend dependencies:** Patch ops (exists), Draft versioning (exists), Graph diff (exists), Promotion execute (exists). Pull-down-from-PROD may need a new service operation.
 
@@ -232,20 +232,36 @@ These backend services and UI components already exist and can be composed into 
   - BLD29: Promote button gated by preflight cache — disabled when no preflight result or status is "error".
   - BLD30: Intent creation reuses `promotionIntentService.createPromotionIntent` — full lifecycle (preview, approve, execute) available via admin endpoints.
 
+### Sprint 3.5 — Pull Down from PROD
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added 2 builder endpoints: `GET /api/builder/drafts/:appId/prod-state` (checks if PROD has an installed package matching draft's packageKey, returns version/checksum/install metadata or `{ available: false }`), `POST /api/builder/drafts/:appId/pull-down` (loads PROD package contents from `environment_package_installs`, creates new draft via `vibeDraftService.createDraftFromVariant` with lineage prompt, returns `{ newAppId, version, lineage }`). No admin auth. No PROD mutation.
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `ProdState` interface, `fetchBuilderProdState()`, `PullDownResult` interface, `pullDownFromProd()`.
+  - `client/src/hooks/useProdState.ts` (NEW) — `useQuery` hook for PROD state. 30-second stale time.
+  - `client/src/hooks/usePullDownDraft.ts` (NEW) — `useMutation` hook for pull-down. Invalidates draft and version queries on success.
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — Header: "Pull Down PROD" button (visible only when `prodState.available`). `PullDownModal` with Dialog: PROD info grid (package, version, install timestamp, source), amber warning ("existing DEV draft remains unchanged"), "Create DEV Draft from PROD" button with spinner. On success navigates to new draft and shows toast. Overview tab: lineage badge (green banner with "Pulled from PROD" when prompt starts with `[Pull-down from PROD]`).
+- **Summary:** Sprint 3.5 adds the ability to clone a production-installed package into a new DEV draft. The flow: builder clicks "Pull Down PROD" → sees current PROD state and warning → confirms → server loads full `packageContents` from `environment_package_installs`, creates new draft via `createDraftFromVariant` with lineage metadata encoded in the prompt, returns new draft ID → client navigates to new draft. Existing DEV draft is never modified. New draft shows lineage banner in Overview. Lineage metadata includes source environment, version, checksum, timestamp, and source draft ID.
+- **Invariants:**
+  - BLD31: Pull-down endpoints do not require admin RBAC — consistent with BLD6, BLD11, BLD16, BLD21, BLD26.
+  - BLD32: Pull-down never mutates PROD — reads `environment_package_installs` only.
+  - BLD33: Pull-down does not overwrite or modify existing DEV draft — creates a new draft.
+  - BLD34: Lineage metadata stored in draft `prompt` field — no schema changes required.
+  - BLD35: "Pull Down PROD" button hidden when no PROD install exists for draft's packageKey.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 3.4 — Promotion UX Skeleton (DEV → TEST)
-- **Status:** Complete. Promote modal + intent creation + intent list delivered.
-- **Files added:** `usePromotionIntents.ts`, `useCreatePromotionIntent.ts`
-- **Files modified:** `routes.ts` (2 endpoints), `vibe.ts` (1 interface + 2 functions), `AppDraftShell.tsx` (Promote button, PromoteModal, PromotionIntentsPanel)
-- **Endpoints added:** `POST /api/builder/drafts/:appId/promote-intent`, `GET /api/builder/drafts/:appId/promote-intents`
-- **Invariants:** BLD26–BLD30 established. BLD1–BLD25 from prior sprints remain valid.
-- **What's stubbed:** Nothing. Intent creation uses real `promotionIntentService`. No execute/approve/reject — intent stays in "draft" status.
-- **Next step:** Sprint 3.5 — Pull Down Production (clone PROD snapshot to new DEV draft with lineage tracking).
+- **Phase:** Sprint 3.5 — Pull Down from PROD (Phase 3 Complete)
+- **Status:** Complete. All Phase 3 deliverables (3.1–3.5) delivered.
+- **Files added:** `useProdState.ts`, `usePullDownDraft.ts`
+- **Files modified:** `routes.ts` (2 endpoints), `vibe.ts` (2 interfaces + 2 functions), `AppDraftShell.tsx` (Pull Down button, PullDownModal, lineage banner)
+- **Endpoints added:** `GET /api/builder/drafts/:appId/prod-state`, `POST /api/builder/drafts/:appId/pull-down`
+- **Invariants:** BLD31–BLD35 established. BLD1–BLD30 from prior sprints remain valid.
+- **What's stubbed:** Nothing. Pull-down reads real PROD install data and creates real drafts via `createDraftFromVariant`.
+- **Next step:** Phase 4 — Shared Enterprise Primitives (Sprint 4). Phase 5 — Tenant Awareness (Sprint 4).
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

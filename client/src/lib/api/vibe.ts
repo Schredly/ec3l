@@ -136,6 +136,38 @@ export async function fetchBuilderPromotionIntents(appId: string): Promise<Build
   return res.json();
 }
 
+export interface ProdState {
+  available: boolean;
+  packageKey?: string;
+  version?: string;
+  checksum?: string;
+  installedAt?: string;
+  installedBy?: string | null;
+  source?: string;
+}
+
+export async function fetchBuilderProdState(appId: string): Promise<ProdState> {
+  const res = await apiRequest("GET", `/api/builder/drafts/${appId}/prod-state`);
+  return res.json();
+}
+
+export interface PullDownResult {
+  newAppId: string;
+  version: string;
+  lineage: {
+    pulledFromProd: boolean;
+    sourceVersion: string;
+    sourceChecksum: string;
+    sourceInstalledAt: string;
+    sourceDraftId: string;
+  };
+}
+
+export async function pullDownFromProd(appId: string): Promise<PullDownResult> {
+  const res = await apiRequest("POST", `/api/builder/drafts/${appId}/pull-down`);
+  return res.json();
+}
+
 export interface BuilderDiffChange {
   category: string;
   key: string;

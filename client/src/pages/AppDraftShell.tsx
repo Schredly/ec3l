@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "wouter";
+import { useParams, useLocation } from "wouter";
 import { StatusBadge } from "@/components/status/StatusBadge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +19,8 @@ import { useDraftDiff } from "@/hooks/useDraftDiff";
 import { useDraftPreflight } from "@/hooks/useDraftPreflight";
 import { usePromotionIntents } from "@/hooks/usePromotionIntents";
 import { useCreatePromotionIntent } from "@/hooks/useCreatePromotionIntent";
+import { useProdState } from "@/hooks/useProdState";
+import { usePullDownDraft } from "@/hooks/usePullDownDraft";
 import { PromotionIntentStatusBadge } from "@/components/status/PromotionIntentStatusBadge";
 import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange, PreflightCheck, PreflightResult } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
@@ -552,6 +554,13 @@ function OverviewTab({ pkg, prompt, status, createdAt, appId }: {
           </div>
         </div>
 
+        {prompt.startsWith("[Pull-down from PROD]") && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-xs text-emerald-800">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span className="font-medium">Pulled from PROD — this draft was cloned from the production environment.</span>
+          </div>
+        )}
+
         <div>
           <span className="text-xs text-muted-foreground">Latest Prompt</span>
           <p className="text-sm mt-1 whitespace-pre-wrap bg-muted/50 rounded-md p-3">{prompt}</p>
@@ -1084,13 +1093,102 @@ function PromotionIntentsPanel({ appId }: { appId: string }) {
   );
 }
 
+// --- Pull Down Modal ---
+
+function PullDownModal({ appId, open, onOpenChange }: {
+  appId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const { data: prodState } = useProdState(appId);
+  const pullDown = usePullDownDraft(appId);
+  const [, navigate] = useLocation();
+
+  function handlePullDown() {
+    pullDown.mutate(undefined, {
+      onSuccess: (result) => {
+        toast({
+          title: "New DEV draft created from PROD",
+          description: `Cloned ${result.lineage.sourceVersion} → new draft.`,
+        });
+        onOpenChange(false);
+        navigate(`/apps/${result.newAppId}`);
+      },
+      onError: (err: Error) => {
+        toast({ title: "Pull-down failed", description: err.message, variant: "destructive" });
+      },
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Pull Down from PROD</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-5">
+          {/* PROD Info */}
+          {prodState?.available && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">Current PROD State</p>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs border rounded-md p-3">
+                <div>
+                  <span className="text-muted-foreground">Package</span>
+                  <p className="font-mono font-medium">{prodState.packageKey}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Version</span>
+                  <p className="font-medium">{prodState.version}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Installed</span>
+                  <p className="font-medium">{prodState.installedAt ? relativeTime(prodState.installedAt) : "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Source</span>
+                  <p className="font-medium capitalize">{prodState.source ?? "—"}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Warning */}
+          <div className="flex items-start gap-2 px-3 py-2.5 rounded-md border border-amber-200 bg-amber-50 text-xs text-amber-800">
+            <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">This will create a new DEV draft from current PROD state.</p>
+              <p className="mt-0.5 text-amber-700">Your existing DEV draft remains unchanged.</p>
+            </div>
+          </div>
+
+          {/* Action */}
+          <Button
+            onClick={handlePullDown}
+            disabled={pullDown.isPending}
+            className="w-full"
+          >
+            {pullDown.isPending ? (
+              <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Creating Draft...</>
+            ) : (
+              "Create DEV Draft from PROD"
+            )}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // --- Main Component ---
 
 export default function AppDraftShell() {
   const { appId } = useParams<{ appId: string }>();
   const { data: draft, isLoading, isError, error } = useAppDraft(appId);
   const [promoteOpen, setPromoteOpen] = useState(false);
+  const [pullDownOpen, setPullDownOpen] = useState(false);
   const queryClient = useQueryClient();
+  const { data: prodState } = useProdState(appId);
 
   if (isLoading) {
     return <DraftSkeleton />;
@@ -1128,17 +1226,31 @@ export default function AppDraftShell() {
           />
           <StatusBadge label="DEV" tone="info" size="md" />
         </div>
-        <Button
-          onClick={() => setPromoteOpen(true)}
-          disabled={!canPromote}
-          size="sm"
-          variant={canPromote ? "default" : "outline"}
-        >
-          Promote&hellip;
-        </Button>
+        <div className="flex items-center gap-2">
+          {prodState?.available && (
+            <Button
+              onClick={() => setPullDownOpen(true)}
+              size="sm"
+              variant="outline"
+            >
+              Pull Down PROD
+            </Button>
+          )}
+          <Button
+            onClick={() => setPromoteOpen(true)}
+            disabled={!canPromote}
+            size="sm"
+            variant={canPromote ? "default" : "outline"}
+          >
+            Promote&hellip;
+          </Button>
+        </div>
       </div>
 
       <PromoteModal appId={appId!} open={promoteOpen} onOpenChange={setPromoteOpen} />
+      {prodState?.available && (
+        <PullDownModal appId={appId!} open={pullDownOpen} onOpenChange={setPullDownOpen} />
+      )}
 
       {/* Environment pipeline */}
       <EnvironmentPipeline active="DEV" />

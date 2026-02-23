@@ -3434,6 +3434,117 @@ export async function registerRoutes(
     }
   });
 
+  /**
+   * GET /api/builder/drafts/:appId/prod-state
+   * Check if PROD has an installed package matching this draft's packageKey.
+   * Returns PROD info or null. No admin auth.
+   */
+  app.get("/api/builder/drafts/:appId/prod-state", async (req, res) => {
+    try {
+      const ts = getTenantStorage(req.tenantContext);
+      const draft = await ts.getVibeDraft(req.params.appId);
+      if (!draft) {
+        return res.status(404).json({ message: "Draft not found" });
+      }
+
+      const pkg = draft.package as { packageKey?: string };
+      if (!pkg.packageKey) {
+        return res.json({ available: false });
+      }
+
+      const envs = await ts.getEnvironmentsByProject(draft.projectId);
+      const prodEnv = envs.find((e) => e.name === "prod");
+      if (!prodEnv) {
+        return res.json({ available: false });
+      }
+
+      const install = await ts.getLatestEnvironmentPackageInstall(prodEnv.id, pkg.packageKey);
+      if (!install) {
+        return res.json({ available: false });
+      }
+
+      return res.json({
+        available: true,
+        packageKey: install.packageKey,
+        version: install.version,
+        checksum: install.checksum,
+        installedAt: install.installedAt,
+        installedBy: install.installedBy,
+        source: install.source,
+      });
+    } catch (err) {
+      throw err;
+    }
+  });
+
+  /**
+   * POST /api/builder/drafts/:appId/pull-down
+   * Clone PROD package into a new DEV draft. No admin auth.
+   * Does not modify PROD or existing draft.
+   */
+  app.post("/api/builder/drafts/:appId/pull-down", async (req, res) => {
+    try {
+      const ts = getTenantStorage(req.tenantContext);
+      const draft = await ts.getVibeDraft(req.params.appId);
+      if (!draft) {
+        return res.status(404).json({ message: "Draft not found" });
+      }
+
+      const pkg = draft.package as { packageKey?: string };
+      if (!pkg.packageKey) {
+        return res.status(400).json({ message: "Draft has no packageKey" });
+      }
+
+      const envs = await ts.getEnvironmentsByProject(draft.projectId);
+      const prodEnv = envs.find((e) => e.name === "prod");
+      if (!prodEnv) {
+        return res.status(400).json({ message: "No PROD environment found for this project." });
+      }
+
+      const install = await ts.getLatestEnvironmentPackageInstall(prodEnv.id, pkg.packageKey);
+      if (!install) {
+        return res.status(400).json({ message: `No installed package "${pkg.packageKey}" found in PROD.` });
+      }
+
+      const prodPackage = install.packageContents as unknown as import("./graph/installGraphService").GraphPackage;
+
+      const lineagePrompt = [
+        `[Pull-down from PROD]`,
+        `Source environment: prod`,
+        `Source version: ${install.version}`,
+        `Source checksum: ${install.checksum}`,
+        `Pulled at: ${new Date().toISOString()}`,
+        `Source draft: ${req.params.appId}`,
+      ].join("\n");
+
+      const newDraft = await ec3l.vibeDraft.createDraftFromVariant(
+        req.tenantContext,
+        draft.projectId,
+        null,
+        prodPackage,
+        lineagePrompt,
+      );
+
+      return res.json({
+        newAppId: newDraft.id,
+        version: install.version,
+        lineage: {
+          pulledFromProd: true,
+          sourceVersion: install.version,
+          sourceChecksum: install.checksum,
+          sourceInstalledAt: install.installedAt,
+          sourceDraftId: req.params.appId,
+        },
+      });
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "statusCode" in err) {
+        const e = err as { statusCode: number; message: string };
+        return res.status(e.statusCode).json({ message: e.message });
+      }
+      throw err;
+    }
+  });
+
   ec3l.scheduler.startScheduler();
 
   return httpServer;
