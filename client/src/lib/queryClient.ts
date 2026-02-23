@@ -1,23 +1,22 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { getActiveTenantSlug, setActiveTenantSlug, getActiveUserId, setActiveUserId } from "./activeTenant";
 
-function getTenantId(): string {
-  return localStorage.getItem("tenantId") || "default";
-}
-
-export function setTenantId(id: string) {
-  localStorage.setItem("tenantId", id);
-}
-
-function getUserId(): string {
-  return localStorage.getItem("userId") || "user-admin";
+/**
+ * Persist tenant slug to localStorage (for bootstrap across page reloads).
+ * Also updates the module-level getter so headers reflect the change immediately.
+ */
+export function setTenantId(slug: string) {
+  setActiveTenantSlug(slug);
+  localStorage.setItem("tenantId", slug);
 }
 
 export function setUserId(id: string) {
+  setActiveUserId(id);
   localStorage.setItem("userId", id);
 }
 
 function tenantHeaders(): Record<string, string> {
-  return { "x-tenant-id": getTenantId(), "x-user-id": getUserId() };
+  return { "x-tenant-id": getActiveTenantSlug(), "x-user-id": getActiveUserId() };
 }
 
 async function throwIfResNotOk(res: Response) {

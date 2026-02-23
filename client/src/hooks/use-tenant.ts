@@ -15,12 +15,12 @@ export function useTenantBootstrap() {
 
   useEffect(() => {
     if (stored && !isUUID(stored)) {
-      // Already have a valid slug — ensure context is populated
+      // Already have a valid slug — TenantProvider already hydrated
+      // module-level state from localStorage in its initializer.
+      // Just ensure React context is populated if needed.
       if (!activeTenant) {
-        // Hydrate context from localStorage without clearing queries
         const name = localStorage.getItem("tenantName") || stored;
         const id = localStorage.getItem("tenantUuid") || "";
-        // Set directly via context internals (don't trigger navigate/clear)
         setActiveTenant({ id, slug: stored, name });
       }
       setReady(true);
@@ -40,6 +40,7 @@ export function useTenantBootstrap() {
       .then((tenants: { id: string; slug: string; name: string }[]) => {
         if (tenants.length > 0) {
           const preferred = tenants.find((t) => t.slug === "default") ?? tenants[0];
+          // setTenantId writes to both module-level state and localStorage
           setTenantId(preferred.slug);
           localStorage.setItem("tenantName", preferred.name);
           localStorage.setItem("tenantUuid", preferred.id);

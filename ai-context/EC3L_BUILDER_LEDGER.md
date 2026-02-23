@@ -22,7 +22,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
-| 5 | Tenant Awareness | Sprint 5 | In Progress (5.1 complete) |
+| 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b complete) |
 | 6 | Change Timeline Upgrade | — | Not Started |
 
 ---
@@ -330,20 +330,35 @@ These backend services and UI components already exist and can be composed into 
   - BLD50: `GET /api/tenants` is above tenant middleware — no chicken-and-egg problem.
   - BLD51: No cookies, no sessions — tenant identity is slug in localStorage + x-tenant-id header.
 
+### Sprint 5.1b — Tenant Hardening (Module-Level State Bridge)
+- **Date:** 2026-02-23
+- **Files:**
+  - `client/src/lib/activeTenant.ts` (NEW) — Module-level getter/setter bridge for tenant slug and user ID. Avoids circular dependency between `tenantStore.tsx` and `queryClient.ts`. Default values: `"default"` for slug, `"user-admin"` for userId. Both `queryClient.ts` and `tenantStore.tsx` import from this module without depending on each other.
+  - `client/src/lib/queryClient.ts` (MODIFIED) — `tenantHeaders()` now reads from `getActiveTenantSlug()` and `getActiveUserId()` (module-level getters) instead of `localStorage.getItem()`. `setTenantId()` writes to both module state via `setActiveTenantSlug()` and localStorage. `setUserId()` writes to both module state via `setActiveUserId()` and localStorage. Removed direct localStorage reads from live header injection path.
+  - `client/src/tenant/tenantStore.tsx` (MODIFIED) — `TenantProvider` initializer now calls `setActiveTenantSlug(slug)` during bootstrap to hydrate module-level state from localStorage. `setActiveTenant()` calls `setTenantId()` (which updates both module state and localStorage), then updates React state, then calls `queryClient.clear()`.
+  - `client/src/hooks/use-tenant.ts` (MODIFIED) — Minor comment updates. No functional changes since `setTenantId()` was refactored upstream to handle both module state and localStorage writes.
+- **Summary:** Sprint 5.1b hardens tenant header injection by removing direct localStorage reads from the live request path. A new `activeTenant.ts` module provides dependency-free getter/setter functions for tenant slug and user ID. `queryClient.ts` reads from these module-level getters (synchronous, no I/O) instead of `localStorage.getItem()`. The write path (`setTenantId()`) updates both module state and localStorage for persistence. This eliminates the risk of stale localStorage reads and avoids a circular dependency between `tenantStore.tsx` and `queryClient.ts`.
+- **Circular dependency resolution:** `tenantStore.tsx` imports from `queryClient.ts` (for `queryClient` and `setTenantId`). If `queryClient.ts` imported from `tenantStore.tsx`, it would create a cycle. `activeTenant.ts` is a leaf module with no imports — both `queryClient.ts` and `tenantStore.tsx` can safely import from it.
+- **Invariants:**
+  - BLD48 (SUPERSEDED): Was "Header injection reads localStorage." Now superseded by BLD52.
+  - BLD52: Header injection reads from module-level getters (`getActiveTenantSlug()`, `getActiveUserId()`) — no localStorage in the hot path.
+  - BLD53: `activeTenant.ts` is a dependency-free leaf module — no imports, avoids circular dependency.
+  - BLD54: Write path (`setTenantId()`) updates both module state and localStorage — module state for immediate header injection, localStorage for persistence across page reloads.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 5.1 — Tenant Selector + Header Auto-Injection (Phase 5 started)
-- **Status:** Sprint 5.1 complete. Tenant selector in top bar with context-based switching.
-- **Files added:** `client/src/tenant/tenantStore.tsx`, `client/src/components/layout/TenantSelector.tsx`
-- **Files modified:** `TopContextBar.tsx` (TenantSelector inserted), `use-tenant.ts` (context hydration), `App.tsx` (TenantProvider wrapper)
-- **Endpoints reused:** `GET /api/tenants` (already existed above tenant middleware)
-- **Invariants:** BLD47–BLD51 established. All prior invariants remain valid.
-- **What's stubbed:** Nothing. Tenant selector is fully functional with real tenant list.
-- **Assumptions:** `queryClient.ts tenantHeaders()` remains the centralized header injection point. TenantProvider writes to localStorage first, then clears cache — `tenantHeaders()` reads localStorage synchronously so all subsequent requests use the new slug.
+- **Phase:** Sprint 5.1b — Tenant Hardening (Phase 5 continued)
+- **Status:** Sprint 5.1b complete. Header injection reads from module-level state, not localStorage.
+- **Files added:** `client/src/lib/activeTenant.ts`
+- **Files modified:** `queryClient.ts` (module-level reads), `tenantStore.tsx` (hydrates module state), `use-tenant.ts` (comments)
+- **Endpoints reused:** None — client-only refactor.
+- **Invariants:** BLD52–BLD54 established. BLD48 superseded. All other invariants remain valid.
+- **What's stubbed:** Nothing.
+- **Assumptions:** `activeTenant.ts` is the single source of truth for live header values. `tenantStore.tsx` (React context) and `queryClient.ts` (request layer) both depend on it without depending on each other.
 - **Next step:** Sprint 5.2+ — remove hardcoded tenant defaults, real user identity. Phase 6 — Change Timeline.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
