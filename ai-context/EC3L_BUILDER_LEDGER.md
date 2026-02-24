@@ -23,7 +23,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
 | 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b, 5.2 complete) |
-| 6 | Change Timeline Upgrade | Sprint 6 | In Progress (6.1 complete) |
+| 6 | Change Timeline Upgrade | Sprint 6 | In Progress (6.1, 6.2 complete) |
 
 ---
 
@@ -90,9 +90,9 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 
 | Deliverable | Description | Status |
 |-------------|-------------|--------|
-| 6.1 | Changes page becomes version control timeline | Not Started |
-| 6.2 | Diff viewer inline | Not Started |
-| 6.3 | AI proposed badge + Human approved badge | Not Started |
+| 6.1 | Changes page becomes version control timeline | Complete |
+| 6.2 | Inline diff + attribution badges | Complete |
+| 6.3 | AI proposed badge + Human approved badge | Complete (merged into 6.2) |
 | 6.4 | Inline Promote button | Not Started |
 | 6.5 | Clear audit visibility | Not Started |
 
@@ -400,21 +400,36 @@ These backend services and UI components already exist and can be composed into 
   - BLD64: Route ordering: `/api/changes/timeline` registered before `/api/changes/:id` to prevent param capture.
   - BLD65: No inline diff in Sprint 6.1 — read-only cards with navigation links to detail views.
 
+### Sprint 6.2 — Inline Diff + Attribution
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Extended `GET /api/changes/timeline` endpoint with three enhancements: (1) `?limit` query param (default 50, max 200, clamped), (2) `aiGenerated` boolean on every entry via regex heuristic (`/agent|vibe|builder/i.test(createdBy)`), (3) `diff` object on every entry — for draft entries with `version > 1`, computes lightweight package-level diff by comparing consecutive version packages (recordTypes by key, workflows by key, slaPolicies by recordTypeKey, assignmentRules by recordTypeKey; modified recordTypes detected by field JSON comparison). For changes, promotions, pull-downs, and version 1 drafts: `{ available: false, kind: "..." }`.
+  - `client/src/lib/api/timeline.ts` (MODIFIED) — Added `DiffSummarySection`, `DiffSummary`, `TimelineEntryDiff` interfaces. Extended `TimelineEntry` with `aiGenerated?: boolean` and `diff?: TimelineEntryDiff`.
+  - `client/src/pages/changes.tsx` (MODIFIED) — Full rewrite of `TimelineEntryCard` with expand/collapse. Added `DiffCountChip` component for inline summary counts (added/removed/modified with colored icons). Added `DiffSummaryGrid` component with 2-column grid showing per-category diff counts (Record Types, Workflows, SLA Policies, Assignment Rules) with add/remove/modify chips. Added attribution badge per entry (AI with Bot icon in violet, Human with User icon in gray) via `StatusBadge`. Expand chevron visible on entries with `diff.available && diff.summary`. Expanded view shows `DiffSummaryGrid` below a border separator with from/to version labels.
+- **Summary:** Sprint 6.2 enhances the unified timeline with three capabilities: (1) Attribution — every entry shows an AI or Human badge based on createdBy heuristic, (2) Diff summary — draft entries with version > 1 show inline add/remove/modify count chips, (3) Expand/collapse — expandable entries reveal a full diff summary grid with per-category breakdowns. The diff computation is lightweight — compares GraphPackage JSON arrays directly by key matching instead of using the expensive `diffDraftVersions` graph projection service. The `?limit` param caps response size (default 50, max 200).
+- **Lightweight diff strategy:** Instead of calling `diffDraftVersions()` which requires `buildGraphSnapshot()` + `projectPackageOntoSnapshot()` + `diffGraphSnapshots()` (expensive for per-entry computation), the timeline endpoint compares consecutive version packages directly: keys in `recordTypes[]`, `workflows[]`, `slaPolicies[]`, `assignmentRules[]` arrays are compared by identity (`key` or `recordTypeKey`). Modified record types detected by JSON comparison of `fields[]` arrays.
+- **Invariants:**
+  - BLD65 (SUPERSEDED): Was "No inline diff in Sprint 6.1." Now superseded by BLD66.
+  - BLD66: Timeline entries include `aiGenerated` (boolean) and `diff` (summary object) — diff available only for draft entries with version > 1.
+  - BLD67: AI attribution heuristic: `createdBy` matches `/agent|vibe|builder/i` → AI, else Human. Simple, extensible.
+  - BLD68: Lightweight diff compares package JSON arrays by key — no graph projection, no snapshot building. O(n) per version pair.
+  - BLD69: `?limit` query param with default 50, max 200 — prevents unbounded timeline responses.
+  - BLD70: Expand/collapse is client-only state — no additional API calls on expand.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 6.1 — Unified Change Timeline (Phase 6 started)
-- **Status:** Sprint 6.1 complete. /changes page is now a unified timeline.
-- **Files added:** `client/src/lib/api/timeline.ts`, `client/src/hooks/useTimeline.ts`
-- **Files modified:** `server/routes.ts` (timeline aggregation endpoint), `client/src/pages/changes.tsx` (timeline UI)
-- **Endpoints added:** `GET /api/changes/timeline` (aggregates changes, promotions, drafts, pull-downs)
-- **Invariants:** BLD61–BLD65 established. All prior invariants remain valid.
-- **What's stubbed:** Inline diff expansion not yet implemented (cards link to detail views instead). Pagination not implemented.
-- **Assumptions:** Draft version queries are per-draft (N+1 pattern) — acceptable for tenant-scoped data volume. Environment name resolution cached per request. Pull-down entries derived from `lineage.pulledFromProd` JSONB field.
-- **Next step:** Sprint 6.2+ — inline diff viewer, AI/Human badges, promote button. Sprint 5.3+ — remove hardcoded defaults.
+- **Phase:** Sprint 6.2 — Inline Diff + Attribution (Phase 6 continued)
+- **Status:** Sprint 6.2 complete. Timeline entries now show AI/Human attribution, inline diff counts, and expand/collapse diff grid.
+- **Files modified:** `server/routes.ts` (extended timeline endpoint), `client/src/lib/api/timeline.ts` (new types), `client/src/pages/changes.tsx` (expand/collapse UI)
+- **Endpoints modified:** `GET /api/changes/timeline?limit=N` (added aiGenerated, diff fields, limit param)
+- **Invariants:** BLD66–BLD70 established. BLD65 superseded. All prior invariants remain valid.
+- **What's stubbed:** No inline promote button yet (Sprint 6.4). No full audit detail view yet (Sprint 6.5).
+- **Assumptions:** Lightweight diff is sufficient for timeline summary — full graph-projected diff still available via `/api/builder/drafts/:appId/diff` for detailed view. AI heuristic is simple regex — can be refined when user identity model matures.
+- **Next step:** Sprint 6.4 — inline promote button. Sprint 5.3+ — remove hardcoded defaults.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

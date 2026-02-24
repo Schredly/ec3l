@@ -81,6 +81,12 @@ export async function registerRoutes(
   app.get("/api/changes/timeline", async (req, res) => {
     try {
       const ts = getTenantStorage(req.tenantContext);
+      const limitParam = Number(req.query.limit) || 50;
+      const limit = Math.min(Math.max(limitParam, 1), 200);
+
+      // Helper: AI-generated heuristic
+      const isAiGenerated = (createdBy: string): boolean =>
+        /agent|vibe|builder/i.test(createdBy);
 
       // 1. Changes
       const changes = await ts.getChanges();
@@ -91,6 +97,8 @@ export async function registerRoutes(
         createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
         createdBy: c.modulePath || "system",
         status: c.status,
+        aiGenerated: isAiGenerated(c.modulePath || "system"),
+        diff: { available: false as const, kind: "change" as const },
       }));
 
       // 2. Promotion intents (resolve environment names)
@@ -112,38 +120,151 @@ export async function registerRoutes(
         status: i.status ?? undefined,
         fromEnv: envCache.get(i.fromEnvironmentId),
         toEnv: envCache.get(i.toEnvironmentId),
+        aiGenerated: isAiGenerated(i.createdBy || "system"),
+        diff: { available: false as const, kind: "promotion" as const },
       }));
 
-      // 3. Draft versions (across all drafts)
+      // 3. Draft versions (across all drafts) — with lightweight package-level diff
       const drafts = await ts.listVibeDrafts();
       const draftMap = new Map(drafts.map((d) => [d.id, d]));
-      const versionEntries: Array<{
+
+      interface DiffSummary {
+        recordTypes: { added: number; removed: number; modified: number };
+        workflows: { added: number; removed: number };
+        slaPolicies: { added: number; removed: number };
+        assignmentRules: { added: number; removed: number };
+      }
+
+      // Build version map per draft for diff computation
+      const versionsByDraft = new Map<string, Array<{ versionNumber: number; package: unknown }>>();
+      const rawVersionEntries: Array<{
         id: string;
         type: "draft";
         title: string;
         createdAt: string;
         createdBy: string;
-        status?: string | null;
-        draftId?: string;
-        version?: number;
+        status?: string;
+        draftId: string;
+        version: number;
+        pkg: unknown;
       }> = [];
+
       for (const draft of drafts) {
         const versions = await ts.listVibeDraftVersions(draft.id);
+        const mapped = versions.map((v) => ({ versionNumber: v.versionNumber, package: v.package }));
+        versionsByDraft.set(draft.id, mapped);
         for (const v of versions) {
           const pkg = v.package as Record<string, unknown> | null;
           const pkgKey = pkg && typeof pkg === "object" ? (pkg as { packageKey?: string }).packageKey : undefined;
-          versionEntries.push({
+          rawVersionEntries.push({
             id: v.id,
             type: "draft" as const,
             title: `v${v.versionNumber} — ${v.reason}${pkgKey ? ` (${pkgKey})` : ""}`,
             createdAt: v.createdAt instanceof Date ? v.createdAt.toISOString() : String(v.createdAt),
             createdBy: v.createdBy || "system",
-            status: draftMap.get(v.draftId)?.status ?? undefined,
+            status: (draftMap.get(v.draftId)?.status ?? undefined) as string | undefined,
             draftId: v.draftId,
             version: v.versionNumber,
+            pkg: v.package,
           });
         }
       }
+
+      // Lightweight package diff: compare array keys between two versions
+      const computeLightweightDiff = (prevPkg: unknown, currPkg: unknown): DiffSummary => {
+        const prev = (prevPkg ?? {}) as Record<string, unknown>;
+        const curr = (currPkg ?? {}) as Record<string, unknown>;
+
+        const diffByKey = (
+          prevArr: Array<{ key?: string; recordTypeKey?: string }>,
+          currArr: Array<{ key?: string; recordTypeKey?: string }>,
+          keyField: "key" | "recordTypeKey",
+        ): { added: number; removed: number; modified?: number } => {
+          const prevKeys = new Set(prevArr.map((x) => x[keyField] ?? ""));
+          const currKeys = new Set(currArr.map((x) => x[keyField] ?? ""));
+          let added = 0, removed = 0;
+          for (const k of Array.from(currKeys)) { if (!prevKeys.has(k)) added++; }
+          for (const k of Array.from(prevKeys)) { if (!currKeys.has(k)) removed++; }
+          return { added, removed };
+        };
+
+        const prevRts = (prev.recordTypes ?? []) as Array<{ key: string; fields?: unknown[] }>;
+        const currRts = (curr.recordTypes ?? []) as Array<{ key: string; fields?: unknown[] }>;
+        const rtDiff = diffByKey(prevRts, currRts, "key");
+        // Detect modified record types (same key, different field count or content)
+        const prevRtMap = new Map(prevRts.map((r) => [r.key, r]));
+        let modified = 0;
+        for (const rt of currRts) {
+          const prevRt = prevRtMap.get(rt.key);
+          if (prevRt) {
+            if (JSON.stringify(prevRt.fields ?? []) !== JSON.stringify(rt.fields ?? [])) {
+              modified++;
+            }
+          }
+        }
+
+        const wfDiff = diffByKey(
+          (prev.workflows ?? []) as Array<{ key: string }>,
+          (curr.workflows ?? []) as Array<{ key: string }>,
+          "key",
+        );
+        const slaDiff = diffByKey(
+          (prev.slaPolicies ?? []) as Array<{ recordTypeKey: string }>,
+          (curr.slaPolicies ?? []) as Array<{ recordTypeKey: string }>,
+          "recordTypeKey",
+        );
+        const assignDiff = diffByKey(
+          (prev.assignmentRules ?? []) as Array<{ recordTypeKey: string }>,
+          (curr.assignmentRules ?? []) as Array<{ recordTypeKey: string }>,
+          "recordTypeKey",
+        );
+
+        return {
+          recordTypes: { added: rtDiff.added, removed: rtDiff.removed, modified },
+          workflows: { added: wfDiff.added, removed: wfDiff.removed },
+          slaPolicies: { added: slaDiff.added, removed: slaDiff.removed },
+          assignmentRules: { added: assignDiff.added, removed: assignDiff.removed },
+        };
+      }
+
+      const versionEntries = rawVersionEntries.map((v) => {
+        const createdBy = v.createdBy;
+        const aiGenerated = isAiGenerated(createdBy);
+
+        // Compute diff for versions > 1
+        let diff: { available: boolean; kind: string; fromLabel?: string; toLabel?: string; summary?: DiffSummary };
+        if (v.version <= 1) {
+          diff = { available: false, kind: "none" };
+        } else {
+          const siblings = versionsByDraft.get(v.draftId) ?? [];
+          const prevVersion = siblings.find((s) => s.versionNumber === v.version - 1);
+          if (prevVersion) {
+            const summary = computeLightweightDiff(prevVersion.package, v.pkg);
+            diff = {
+              available: true,
+              kind: "draft-version",
+              fromLabel: `v${v.version - 1}`,
+              toLabel: `v${v.version}`,
+              summary,
+            };
+          } else {
+            diff = { available: false, kind: "none" };
+          }
+        }
+
+        return {
+          id: v.id,
+          type: v.type,
+          title: v.title,
+          createdAt: v.createdAt,
+          createdBy: v.createdBy,
+          status: v.status,
+          draftId: v.draftId,
+          version: v.version,
+          aiGenerated,
+          diff,
+        };
+      });
 
       // 4. Pull-down lineage entries (drafts with lineage.pulledFromProd === true)
       const pullDownEntries = drafts
@@ -160,20 +281,24 @@ export async function registerRoutes(
             title: `Pull down from PROD${pkgKey ? ` (${pkgKey})` : ""}`,
             createdAt: d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt),
             createdBy: d.createdBy || "system",
-            status: d.status ?? undefined,
+            status: (d.status ?? undefined) as string | undefined,
             draftId: d.id,
             fromEnv: "PROD",
             toEnv: "DEV",
+            aiGenerated: isAiGenerated(d.createdBy || "system"),
+            diff: { available: false as const, kind: "pull-down" as const },
           };
         });
 
-      // Merge and sort newest-first
+      // Merge, sort newest-first, apply limit
       const timeline = [
         ...changeEntries,
         ...intentEntries,
         ...versionEntries,
         ...pullDownEntries,
-      ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      ]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, limit);
 
       res.json(timeline);
     } catch (err) {

@@ -2,6 +2,27 @@ import { apiRequest } from "@/lib/queryClient";
 
 export type TimelineEntryType = "change" | "draft" | "promotion-intent" | "pull-down";
 
+export interface DiffSummarySection {
+  added: number;
+  removed: number;
+  modified?: number;
+}
+
+export interface DiffSummary {
+  recordTypes: DiffSummarySection & { modified: number };
+  workflows: DiffSummarySection;
+  slaPolicies: DiffSummarySection;
+  assignmentRules: DiffSummarySection;
+}
+
+export interface TimelineEntryDiff {
+  available: boolean;
+  kind: string;
+  fromLabel?: string;
+  toLabel?: string;
+  summary?: DiffSummary;
+}
+
 export interface TimelineEntry {
   id: string;
   type: TimelineEntryType;
@@ -13,6 +34,8 @@ export interface TimelineEntry {
   toEnv?: string;
   draftId?: string;
   version?: number;
+  aiGenerated?: boolean;
+  diff?: TimelineEntryDiff;
 }
 
 export async function fetchTimeline(): Promise<TimelineEntry[]> {
