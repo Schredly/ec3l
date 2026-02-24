@@ -77,6 +77,111 @@ export async function registerRoutes(
     res.json(changes);
   });
 
+  // Unified Change Timeline — aggregates changes, promotion intents, draft versions, pull-downs
+  app.get("/api/changes/timeline", async (req, res) => {
+    try {
+      const ts = getTenantStorage(req.tenantContext);
+
+      // 1. Changes
+      const changes = await ts.getChanges();
+      const changeEntries = changes.map((c) => ({
+        id: c.id,
+        type: "change" as const,
+        title: c.title,
+        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
+        createdBy: c.modulePath || "system",
+        status: c.status,
+      }));
+
+      // 2. Promotion intents (resolve environment names)
+      const intents = await ts.listPromotionIntents();
+      const allProjectIds = Array.from(new Set(intents.map((i) => i.projectId)));
+      const envCache = new Map<string, string>();
+      for (const pid of allProjectIds) {
+        const envs = await ts.getEnvironmentsByProject(pid);
+        for (const e of envs) {
+          envCache.set(e.id, e.name);
+        }
+      }
+      const intentEntries = intents.map((i) => ({
+        id: i.id,
+        type: "promotion-intent" as const,
+        title: `Promote ${envCache.get(i.fromEnvironmentId) || "?"} → ${envCache.get(i.toEnvironmentId) || "?"}`,
+        createdAt: i.createdAt instanceof Date ? i.createdAt.toISOString() : String(i.createdAt ?? ""),
+        createdBy: i.createdBy || "system",
+        status: i.status ?? undefined,
+        fromEnv: envCache.get(i.fromEnvironmentId),
+        toEnv: envCache.get(i.toEnvironmentId),
+      }));
+
+      // 3. Draft versions (across all drafts)
+      const drafts = await ts.listVibeDrafts();
+      const draftMap = new Map(drafts.map((d) => [d.id, d]));
+      const versionEntries: Array<{
+        id: string;
+        type: "draft";
+        title: string;
+        createdAt: string;
+        createdBy: string;
+        status?: string | null;
+        draftId?: string;
+        version?: number;
+      }> = [];
+      for (const draft of drafts) {
+        const versions = await ts.listVibeDraftVersions(draft.id);
+        for (const v of versions) {
+          const pkg = v.package as Record<string, unknown> | null;
+          const pkgKey = pkg && typeof pkg === "object" ? (pkg as { packageKey?: string }).packageKey : undefined;
+          versionEntries.push({
+            id: v.id,
+            type: "draft" as const,
+            title: `v${v.versionNumber} — ${v.reason}${pkgKey ? ` (${pkgKey})` : ""}`,
+            createdAt: v.createdAt instanceof Date ? v.createdAt.toISOString() : String(v.createdAt),
+            createdBy: v.createdBy || "system",
+            status: draftMap.get(v.draftId)?.status ?? undefined,
+            draftId: v.draftId,
+            version: v.versionNumber,
+          });
+        }
+      }
+
+      // 4. Pull-down lineage entries (drafts with lineage.pulledFromProd === true)
+      const pullDownEntries = drafts
+        .filter((d) => {
+          const lin = d.lineage as Record<string, unknown> | null;
+          return lin && lin.pulledFromProd === true;
+        })
+        .map((d) => {
+          const pkg = d.package as Record<string, unknown> | null;
+          const pkgKey = pkg && typeof pkg === "object" ? (pkg as { packageKey?: string }).packageKey : undefined;
+          return {
+            id: `pulldown-${d.id}`,
+            type: "pull-down" as const,
+            title: `Pull down from PROD${pkgKey ? ` (${pkgKey})` : ""}`,
+            createdAt: d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt),
+            createdBy: d.createdBy || "system",
+            status: d.status ?? undefined,
+            draftId: d.id,
+            fromEnv: "PROD",
+            toEnv: "DEV",
+          };
+        });
+
+      // Merge and sort newest-first
+      const timeline = [
+        ...changeEntries,
+        ...intentEntries,
+        ...versionEntries,
+        ...pullDownEntries,
+      ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      res.json(timeline);
+    } catch (err) {
+      console.error("Timeline aggregation error:", err);
+      res.status(500).json({ message: "Failed to aggregate timeline" });
+    }
+  });
+
   app.get("/api/changes/:id", async (req, res) => {
     const change = await ec3l.change.getChange(req.tenantContext, req.params.id);
     if (!change) return res.status(404).json({ message: "Change not found" });

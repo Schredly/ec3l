@@ -23,7 +23,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
 | 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b, 5.2 complete) |
-| 6 | Change Timeline Upgrade | — | Not Started |
+| 6 | Change Timeline Upgrade | Sprint 6 | In Progress (6.1 complete) |
 
 ---
 
@@ -380,20 +380,41 @@ These backend services and UI components already exist and can be composed into 
   - BLD49 (UPDATED): Tenant switch now navigates to `/t/{slug}/builder` (was `navigate("/")`) — URL drives the switch, TenantRouteSync handles cache clear.
   - BLD51 (UPDATED): Tenant identity is URL slug + `x-tenant-id` header — localStorage is for persistence only, not for live header injection.
 
+### Sprint 6.1 — Unified Change Timeline (Read-Only)
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added `GET /api/changes/timeline` endpoint. Placed before `/api/changes/:id` to prevent `:id` param from capturing "timeline". Aggregates 4 data sources: (1) change records via `ts.getChanges()`, (2) promotion intents via `ts.listPromotionIntents()` with environment name resolution via `ts.getEnvironmentsByProject()`, (3) draft versions via `ts.listVibeDraftVersions()` for each draft from `ts.listVibeDrafts()`, (4) pull-down lineage entries filtered from drafts where `lineage.pulledFromProd === true`. Returns unified array sorted newest-first. No RBAC admin requirement. No DB writes.
+  - `client/src/lib/api/timeline.ts` (NEW) — `TimelineEntryType` union type (`"change" | "draft" | "promotion-intent" | "pull-down"`), `TimelineEntry` interface, `fetchTimeline()` function.
+  - `client/src/hooks/useTimeline.ts` (NEW) — `useQuery` hook for timeline data. 15-second staleTime.
+  - `client/src/pages/changes.tsx` (MODIFIED) — Replaced flat change list with unified timeline layout. `TimelineEntryCard` component with color-coded type badges (blue for change/draft, amber for promotion, violet for pull-down), status badges with tone mapping, environment arrow badges (from → to), relative timestamps, createdBy, and type-specific icons. Change entries link to `/changes/:id`, draft entries link to `/apps/:draftId`. Empty state updated for timeline context.
+- **Summary:** Sprint 6.1 upgrades the /changes page into a unified timeline view that aggregates all tenant activity into a single chronological stream. The endpoint queries 4 data sources (changes, promotion intents, draft versions, pull-down lineage) and merges them by timestamp. The UI uses color-coded cards with the existing `StatusBadge` system for consistent visual language. No mutation capability, no lifecycle changes — pure aggregation + visualization.
+- **Timeline entry types:**
+  - `change` — Change records with status lifecycle (Draft → Merged)
+  - `draft` — Vibe draft version snapshots with reason and package key
+  - `promotion-intent` — Environment promotion requests with from/to badges
+  - `pull-down` — PROD → DEV pull-down events from lineage metadata
+- **Invariants:**
+  - BLD61: Timeline endpoint is read-only — no DB writes, no state changes, no domain events.
+  - BLD62: Timeline endpoint does not require admin RBAC — consistent with BLD6, BLD11, BLD16, BLD21, BLD26, BLD31, BLD39.
+  - BLD63: Timeline is tenant-scoped — all data sources query via `getTenantStorage(ctx)`.
+  - BLD64: Route ordering: `/api/changes/timeline` registered before `/api/changes/:id` to prevent param capture.
+  - BLD65: No inline diff in Sprint 6.1 — read-only cards with navigation links to detail views.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 5.2 — URL-Scoped Tenancy (Phase 5 continued)
-- **Status:** Sprint 5.2 complete. All routes under `/t/:tenantSlug/...`. URL is source of truth.
-- **Files modified:** `App.tsx` (major restructure — nested routing + TenantRouteSync), `tenantStore.tsx` (URL-driven init, conditional cache clear), `TenantSelector.tsx` (absolute navigation), `Sidebar.tsx` (Builder URL)
-- **Endpoints reused:** `GET /api/tenants` (tenant list for validation + dropdown)
-- **Invariants:** BLD55–BLD60 established. BLD49, BLD51 updated. All other invariants remain valid.
-- **What's stubbed:** Nothing. Deep links, tenant switching, and refresh all functional.
-- **Assumptions:** Wouter v3 `<Route nest>` correctly strips prefix and creates sub-router for all child Link/useLocation/useParams calls. `setActiveTenantSlug()` during render is safe (module-level variable assignment, no React state side effects). `use-tenant.ts` (`useTenantBootstrap`) is now unused — superseded by `TenantRouteSync` in `App.tsx`.
-- **Next step:** Sprint 5.3+ — remove hardcoded tenant defaults, real user identity. Phase 6 — Change Timeline.
+- **Phase:** Sprint 6.1 — Unified Change Timeline (Phase 6 started)
+- **Status:** Sprint 6.1 complete. /changes page is now a unified timeline.
+- **Files added:** `client/src/lib/api/timeline.ts`, `client/src/hooks/useTimeline.ts`
+- **Files modified:** `server/routes.ts` (timeline aggregation endpoint), `client/src/pages/changes.tsx` (timeline UI)
+- **Endpoints added:** `GET /api/changes/timeline` (aggregates changes, promotions, drafts, pull-downs)
+- **Invariants:** BLD61–BLD65 established. All prior invariants remain valid.
+- **What's stubbed:** Inline diff expansion not yet implemented (cards link to detail views instead). Pagination not implemented.
+- **Assumptions:** Draft version queries are per-draft (N+1 pattern) — acceptable for tenant-scoped data volume. Environment name resolution cached per request. Pull-down entries derived from `lineage.pulledFromProd` JSONB field.
+- **Next step:** Sprint 6.2+ — inline diff viewer, AI/Human badges, promote button. Sprint 5.3+ — remove hardcoded defaults.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 
