@@ -1,8 +1,12 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { listDrafts, type VibeDraft } from "@/lib/api/vibe";
+import { VibeDraftStatusBadge } from "@/components/status/VibeDraftStatusBadge";
 
 const TEMPLATES: { name: string; description: string; prompt: string }[] = [
   {
@@ -29,6 +33,78 @@ const TEMPLATES: { name: string; description: string; prompt: string }[] = [
     prompt: "",
   },
 ];
+
+function humanizeKey(key: string): string {
+  return key
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function timeAgo(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function RecentDrafts() {
+  const { data: drafts, isLoading } = useQuery<VibeDraft[]>({
+    queryKey: ["/api/vibe/drafts"],
+    queryFn: () => listDrafts(),
+  });
+
+  const visible = drafts
+    ?.filter((d) => d.status !== "discarded")
+    .slice(0, 5);
+
+  if (isLoading) {
+    return (
+      <div className="w-full mt-12 space-y-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-12 w-full" />
+      </div>
+    );
+  }
+
+  if (!visible || visible.length === 0) return null;
+
+  return (
+    <div className="w-full mt-12">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-4">
+        Recent Drafts
+      </p>
+      <div className="space-y-2">
+        {visible.map((draft) => (
+          <Link key={draft.id} href={`/apps/${draft.id}`}>
+            <Card className="cursor-pointer transition-colors hover:border-blue-300 hover:bg-blue-50/40">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    {humanizeKey(draft.package.packageKey)}
+                  </p>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    v{draft.package.version}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <VibeDraftStatusBadge status={draft.status} size="sm" />
+                  <span className="text-xs text-muted-foreground">
+                    {timeAgo(draft.updatedAt)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function BuilderLanding() {
   const [prompt, setPrompt] = useState("");
@@ -93,6 +169,8 @@ export default function BuilderLanding() {
           ))}
         </div>
       </div>
+
+      <RecentDrafts />
     </div>
   );
 }
