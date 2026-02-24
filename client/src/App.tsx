@@ -26,6 +26,13 @@ import SharedPrimitives from "@/pages/SharedPrimitives";
 import BuilderLanding from "@/pages/BuilderLanding";
 import BuilderProposal from "@/pages/BuilderProposal";
 import AppDraftShell from "@/pages/AppDraftShell";
+import AppsHomePage from "@/apps/AppsHomePage";
+import AppDashboardPage from "@/apps/AppDashboardPage";
+import RecordListPage from "@/apps/RecordListPage";
+import RecordDetailPage from "@/apps/RecordDetailPage";
+import AppManagePage from "@/apps/AppManagePage";
+import CreateAppWizard from "@/apps/CreateAppWizard";
+import WorkspacePage from "@/workspace/WorkspacePage";
 
 /**
  * Syncs the URL tenant slug to module-level state and TenantProvider context.
@@ -86,9 +93,16 @@ function TenantScopedRoutes({ tenantSlug }: { tenantSlug: string }) {
       <TenantRouteSync tenantSlug={tenantSlug} />
       <AppShell>
         <Switch>
+          <Route path="/workspace" component={WorkspacePage} />
           <Route path="/builder" component={BuilderLanding} />
           <Route path="/builder/proposal" component={BuilderProposal} />
-          <Route path="/apps/:appId" component={AppDraftShell} />
+          <Route path="/builder/drafts/:appId" component={AppDraftShell} />
+          <Route path="/build/apps/new" component={CreateAppWizard} />
+          <Route path="/apps" component={AppsHomePage} />
+          <Route path="/apps/:appKey/manage" component={AppManagePage} />
+          <Route path="/apps/:appKey/records/:recordTypeKey/:id" component={RecordDetailPage} />
+          <Route path="/apps/:appKey/records/:recordTypeKey" component={RecordListPage} />
+          <Route path="/apps/:appKey" component={AppDashboardPage} />
           <Route path="/dashboard" component={Dashboard} />
           <Route path="/projects" component={Projects} />
           <Route path="/projects/:id" component={ProjectDetail} />
@@ -103,9 +117,9 @@ function TenantScopedRoutes({ tenantSlug }: { tenantSlug: string }) {
           <Route path="/vibe-studio" component={VibeStudio} />
           <Route path="/primitives" component={Primitives} />
           <Route path="/shared-primitives" component={SharedPrimitives} />
-          {/* Bare /t/:tenantSlug/ → redirect to builder */}
+          {/* Bare /t/:tenantSlug/ → redirect to workspace */}
           <Route path="/">
-            <Redirect to="/builder" />
+            <Redirect to="/workspace" />
           </Route>
           <Route component={NotFound} />
         </Switch>
@@ -114,10 +128,10 @@ function TenantScopedRoutes({ tenantSlug }: { tenantSlug: string }) {
   );
 }
 
-/** Redirects bare "/" (or any non-scoped path) to /t/{slug}/builder. */
+/** Redirects bare "/" (or any non-scoped path) to /t/{slug}/workspace. */
 function RootRedirect() {
   const slug = localStorage.getItem("tenantId") || "default";
-  return <Redirect to={`/t/${slug}/builder`} />;
+  return <Redirect to={`/t/${slug}/workspace`} />;
 }
 
 function App() {

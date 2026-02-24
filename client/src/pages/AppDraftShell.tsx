@@ -1342,7 +1342,7 @@ function PullDownModal({ appId, open, onOpenChange }: {
           description: `Cloned ${result.lineage.sourceVersion} → new draft.`,
         });
         onOpenChange(false);
-        navigate(`/apps/${result.newAppId}`);
+        navigate(`/builder/drafts/${result.newAppId}`);
       },
       onError: (err: Error) => {
         toast({ title: "Pull-down failed", description: err.message, variant: "destructive" });

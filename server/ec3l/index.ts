@@ -34,6 +34,7 @@ import * as variantDiff from "../vibe/variantDiffService";
 import * as tokenStream from "../vibe/tokenStreamService";
 import * as draftVersionDiff from "../vibe/draftVersionDiffService";
 import * as notification from "../services/notificationService";
+import * as app from "../services/appService";
 
 export const ec3l = {
   project,
@@ -69,4 +70,5 @@ export const ec3l = {
   tokenStream,
   draftVersionDiff,
   notification,
+  app,
 } as const;

@@ -763,6 +763,40 @@ export async function registerRoutes(
     res.json(apps);
   });
 
+  // --- Apps Runtime ---
+  app.get("/api/apps", async (req, res) => {
+    try {
+      const apps = await ec3l.app.listApps(req.tenantContext);
+      res.json(apps);
+    } catch (err) {
+      if (err instanceof ec3l.app.AppServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/apps/:appKey", async (req, res) => {
+    try {
+      const detail = await ec3l.app.getAppByKey(req.tenantContext, req.params.appKey);
+      if (!detail) return res.status(404).json({ message: "App not found" });
+      res.json(detail);
+    } catch (err) {
+      if (err instanceof ec3l.app.AppServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/apps/:appKey/upgrade", async (req, res) => {
+    try {
+      const { targetVersion } = req.body;
+      if (!targetVersion) return res.status(400).json({ message: "targetVersion is required" });
+      const result = await ec3l.app.upgradeApp(req.tenantContext, req.params.appKey, targetVersion);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof ec3l.app.AppServiceError) return res.status(err.statusCode).json({ message: err.message });
+      throw err;
+    }
+  });
+
   // Module Overrides — tenant-scoped
   app.get("/api/overrides", async (req, res) => {
     const overrides = await ec3l.override.getOverridesByTenant(req.tenantContext);

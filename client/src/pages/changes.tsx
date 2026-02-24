@@ -307,7 +307,7 @@ function TimelineEntryCard({ entry, isLatestDraft }: { entry: TimelineEntry; isL
   const [showAudit, setShowAudit] = useState(false);
   const [promoteOpen, setPromoteOpen] = useState(false);
   const config = TYPE_CONFIG[entry.type];
-  const href = entry.type === "change" ? `/changes/${entry.id}` : entry.draftId ? `/apps/${entry.draftId}` : undefined;
+  const href = entry.type === "change" ? `/changes/${entry.id}` : entry.draftId ? `/builder/drafts/${entry.draftId}` : undefined;
   const hasDiff = entry.diff?.available && entry.diff.summary;
   const hasAudit = !!entry.audit;
   const canExpand = hasDiff || hasAudit;

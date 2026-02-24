@@ -234,7 +234,7 @@ export default function BuilderProposal() {
       return createBuilderDraft(submittedPrompt, refs.length > 0 ? refs : undefined);
     },
     onSuccess: (result) => {
-      navigate(`/apps/${result.appId}`);
+      navigate(`/builder/drafts/${result.appId}`);
     },
     onError: (err: Error) => {
       toast({ title: "Failed to create draft", description: err.message, variant: "destructive" });

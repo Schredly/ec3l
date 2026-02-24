@@ -18,17 +18,24 @@ function useVisibleSections(): NavSection[] {
   return useMemo(() => {
     const sections: NavSection[] = [];
 
-    // Workspace — always visible
+    // Workspace — always visible, default landing
     sections.push({
       label: "Workspace",
       items: [
-        { title: "Builder", url: "/builder" },
-        { title: "Projects", url: "/projects" },
+        { title: "Home", url: "/workspace" },
+      ],
+    });
+
+    // Apps — always visible (end-user facing)
+    sections.push({
+      label: "Apps",
+      items: [
+        { title: "My Apps", url: "/apps" },
+        { title: "Records", url: "/records" },
       ],
     });
 
     // Build — visible if user has change, form, or edit permissions
-    // For least-privilege: show if any build-related permission exists, or if still loading (show optimistically)
     if (
       rbac.isLoading ||
       rbac.isAdmin ||
@@ -39,41 +46,22 @@ function useVisibleSections(): NavSection[] {
       sections.push({
         label: "Build",
         items: [
+          { title: "Builder", url: "/builder" },
+          { title: "Create App", url: "/build/apps/new" },
           { title: "Changes", url: "/changes" },
+          { title: "Projects", url: "/projects" },
           { title: "Primitives", url: "/primitives" },
           { title: "Shared Primitives", url: "/shared-primitives" },
           { title: "Form Studio", url: "/studio/forms" },
-          { title: "Runner", url: "/runner" },
-        ],
-      });
-    }
-
-    // AI — visible if user can execute workflows or has edit permissions
-    // Agents can see AI section (they can execute workflows)
-    if (
-      rbac.isLoading ||
-      rbac.isAdmin ||
-      rbac.canExecuteWorkflow ||
-      rbac.canEditForm ||
-      rbac.canApproveWorkflow
-    ) {
-      sections.push({
-        label: "AI",
-        items: [
           { title: "Vibe Studio", url: "/vibe-studio" },
-          { title: "Agent Skills", url: "/skills" },
         ],
       });
     }
 
-    // Govern — visible if canViewAdmin or canPromoteEnvironment
+    // Govern — visible if user has governance-related permissions
     // Agents: hide entire Govern section
     if (!rbac.isAgent) {
       const governItems: NavItem[] = [];
-
-      if (rbac.isLoading || rbac.canViewAdmin) {
-        governItems.push({ title: "Admin", url: "/admin" });
-      }
 
       if (
         rbac.isLoading ||
@@ -84,12 +72,23 @@ function useVisibleSections(): NavSection[] {
         governItems.push({ title: "Workflow Monitor", url: "/workflow-monitor" });
       }
 
-      // Records — always visible for non-agents
-      governItems.push({ title: "Records", url: "/records" });
+      governItems.push({ title: "Runner", url: "/runner" });
+      governItems.push({ title: "Agent Skills", url: "/skills" });
 
       if (governItems.length > 0) {
         sections.push({ label: "Govern", items: governItems });
       }
+    }
+
+    // Admin — only for Admin role
+    if (!rbac.isAgent && (rbac.isLoading || rbac.isAdmin || rbac.canViewAdmin)) {
+      sections.push({
+        label: "Admin",
+        items: [
+          { title: "Admin Console", url: "/admin" },
+          { title: "Dashboard", url: "/dashboard" },
+        ],
+      });
     }
 
     return sections;

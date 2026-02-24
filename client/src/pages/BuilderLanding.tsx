@@ -84,7 +84,7 @@ function RecentDrafts() {
           <Card
             key={draft.id}
             className="cursor-pointer transition-colors hover:border-blue-300 hover:bg-blue-50/40"
-            onClick={() => navigate(`/apps/${draft.id}`)}
+            onClick={() => navigate(`/builder/drafts/${draft.id}`)}
           >
             <CardContent className="p-4 flex items-center justify-between">
               <div className="flex items-center gap-3 min-w-0">
@@ -122,7 +122,7 @@ export default function BuilderLanding() {
     if (template.prompt) {
       setPrompt(template.prompt);
     } else {
-      navigate("/apps/dev-draft");
+      navigate("/builder/drafts/dev-draft");
     }
   }
 

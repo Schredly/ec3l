@@ -50,7 +50,8 @@ export type DomainEventType =
   | "vibe.llm_token_stream_failed"
   | "vibe.draft_version_diff_computed"
   | "graph.promotion_notification_sent"
-  | "graph.promotion_notification_failed";
+  | "graph.promotion_notification_failed"
+  | "app.upgraded";
 
 export interface DomainEvent {
   type: DomainEventType;
