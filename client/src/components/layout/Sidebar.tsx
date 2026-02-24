@@ -22,7 +22,7 @@ function useVisibleSections(): NavSection[] {
     sections.push({
       label: "Workspace",
       items: [
-        { title: "Builder", url: "/" },
+        { title: "Builder", url: "/builder" },
         { title: "Projects", url: "/projects" },
       ],
     });

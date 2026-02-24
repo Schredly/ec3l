@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { navigate } from "wouter/use-browser-location";
 import {
   Select,
   SelectContent,
@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useTenantContext, type TenantInfo } from "@/tenant/tenantStore";
+import { useTenantContext } from "@/tenant/tenantStore";
 
 interface TenantListItem {
   id: string;
@@ -16,8 +16,7 @@ interface TenantListItem {
 }
 
 export function TenantSelector() {
-  const { activeTenant, setActiveTenant } = useTenantContext();
-  const [, navigate] = useLocation();
+  const { activeTenant } = useTenantContext();
 
   const { data: tenants } = useQuery<TenantListItem[]>({
     queryKey: ["tenants-list"],
@@ -45,10 +44,11 @@ export function TenantSelector() {
   }
 
   const handleChange = (slug: string) => {
-    const tenant = tenants.find((t) => t.slug === slug);
-    if (tenant && tenant.slug !== activeTenant?.slug) {
-      const info: TenantInfo = { id: tenant.id, slug: tenant.slug, name: tenant.name };
-      setActiveTenant(info, navigate);
+    if (slug !== activeTenant?.slug) {
+      // Absolute navigation — bypasses wouter's nested router base.
+      // TenantRouteSync will detect the slug change, update module state,
+      // clear caches, and hydrate TenantProvider.
+      navigate(`/t/${slug}/builder`);
     }
   };
 

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import { queryClient, setTenantId } from "@/lib/queryClient";
-import { setActiveTenantSlug } from "@/lib/activeTenant";
+import { getActiveTenantSlug } from "@/lib/activeTenant";
 
 export interface TenantInfo {
   id: string;
@@ -10,40 +10,31 @@ export interface TenantInfo {
 
 interface TenantContextValue {
   activeTenant: TenantInfo | null;
-  setActiveTenant: (tenant: TenantInfo, navigate?: (path: string) => void) => void;
+  setActiveTenant: (tenant: TenantInfo) => void;
 }
 
 const TenantContext = createContext<TenantContextValue | null>(null);
 
 export function TenantProvider({ children }: { children: ReactNode }) {
-  const [activeTenant, setActive] = useState<TenantInfo | null>(() => {
-    // Bootstrap: read from localStorage and hydrate module-level state
-    const slug = localStorage.getItem("tenantId");
-    const name = localStorage.getItem("tenantName");
-    const id = localStorage.getItem("tenantUuid");
-    if (slug) {
-      setActiveTenantSlug(slug);
-      return { id: id || "", slug, name: name || slug };
-    }
-    return null;
-  });
+  // Initial state is null — URL drives tenant identity via TenantRouteSync.
+  const [activeTenant, setActive] = useState<TenantInfo | null>(null);
 
   const setActiveTenant = useCallback(
-    (tenant: TenantInfo, navigate?: (path: string) => void) => {
-      // 1. Update module-level state + localStorage (so headers resolve immediately)
+    (tenant: TenantInfo) => {
+      // Only clear cache if the slug actually changed (avoids wiping
+      // freshly-fetched data when TenantRouteSync hydrates full info).
+      const slugChanged = getActiveTenantSlug() !== tenant.slug;
+
+      // Update module-level state + localStorage
       setTenantId(tenant.slug);
       localStorage.setItem("tenantName", tenant.name);
       localStorage.setItem("tenantUuid", tenant.id);
 
-      // 2. Update React context state
+      // Update React context state
       setActive(tenant);
 
-      // 3. Clear all cached queries so UI reloads in new tenant context
-      queryClient.clear();
-
-      // 4. Navigate to safe route to avoid broken cross-tenant paths
-      if (navigate) {
-        navigate("/");
+      if (slugChanged) {
+        queryClient.clear();
       }
     },
     [],

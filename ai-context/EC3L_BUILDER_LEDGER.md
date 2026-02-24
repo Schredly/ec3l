@@ -22,7 +22,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 2 | App Lifecycle Shell | Sprint 2 | Partial (draft shell delivered in Sprint 1) |
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
-| 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b complete) |
+| 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b, 5.2 complete) |
 | 6 | Change Timeline Upgrade | — | Not Started |
 
 ---
@@ -345,21 +345,55 @@ These backend services and UI components already exist and can be composed into 
   - BLD53: `activeTenant.ts` is a dependency-free leaf module — no imports, avoids circular dependency.
   - BLD54: Write path (`setTenantId()`) updates both module state and localStorage — module state for immediate header injection, localStorage for persistence across page reloads.
 
+### Sprint 5.2 — URL-Scoped Tenancy
+- **Date:** 2026-02-23
+- **Files:**
+  - `client/src/App.tsx` (MODIFIED) — Major restructure. Removed flat `Router` component and `AppContent` with `useTenantBootstrap`. Added `TenantRouteSync` component that syncs URL tenant slug to module-level state + TenantProvider: sets `setActiveTenantSlug()` synchronously during render for immediate header correctness, uses `useLayoutEffect` to persist to localStorage and clear cache on actual tenant switch (before paint), fetches tenant list via useQuery to validate slug and hydrate TenantProvider with full info (id, name). Added `TenantScopedRoutes` component containing all existing routes under `<Route path="/t/:tenantSlug" nest>` — wouter's nesting strips the prefix so all child routes, Links, and useLocation calls work with relative paths automatically. Added `RootRedirect` component that reads `localStorage.getItem("tenantId") || "default"` and redirects to `/t/{slug}/builder`. Top-level Switch: nested tenant route + catch-all redirect.
+  - `client/src/tenant/tenantStore.tsx` (MODIFIED) — Removed localStorage initialization from `TenantProvider` (URL drives state now, initial state is `null`). Removed `setActiveTenantSlug` import (no longer needed in initializer). Updated `setActiveTenant`: removed `navigate` parameter, added conditional `queryClient.clear()` that only fires when slug actually changed (`getActiveTenantSlug() !== tenant.slug`) — prevents wiping freshly-fetched queries when TenantRouteSync hydrates full info after module-level slug is already correct. Updated `TenantContextValue` interface to match.
+  - `client/src/components/layout/TenantSelector.tsx` (MODIFIED) — Replaced wouter `useLocation` navigate with `navigate` import from `wouter/use-browser-location` for absolute cross-tenant navigation. On tenant switch: calls `navigate(/t/${slug}/builder)` — bypasses wouter's nested router base prefix. Removed `setActiveTenant` call and `useLocation` hook — TenantRouteSync handles context sync when the URL changes.
+  - `client/src/components/layout/Sidebar.tsx` (MODIFIED) — Changed Builder nav item URL from `"/"` to `"/builder"`. Inside wouter's nested context, `<Link href="/builder">` automatically resolves to `/t/{slug}/builder`. All other nav URLs unchanged — wouter nesting handles the `/t/:tenantSlug` prefix transparently.
+- **Summary:** Sprint 5.2 moves tenant identity from localStorage-driven to URL-scoped. All builder routes are now under `/t/:tenantSlug/...` (e.g., `/t/acme/builder`, `/t/acme/apps/123`). Wouter v3's `<Route nest>` creates a sub-router that strips the `/t/:tenantSlug` prefix — all existing `Link`, `useLocation`, and `useParams` calls within pages work unchanged with relative paths. TenantRouteSync is the bridge between URL and application state: it sets the module-level slug synchronously (for headers), persists to localStorage (for root redirect on refresh), and hydrates TenantProvider context (for UI display). The TenantSelector uses absolute navigation (`wouter/use-browser-location`) to cross tenant boundaries. Bare `/` redirects to `/t/{lastSlug}/builder`.
+- **Routing architecture:**
+  ```
+  /                           → Redirect to /t/{localStorage.tenantId || "default"}/builder
+  /t/:tenantSlug/             → Redirect to /t/:tenantSlug/builder
+  /t/:tenantSlug/builder      → BuilderLanding
+  /t/:tenantSlug/apps/:appId  → AppDraftShell
+  /t/:tenantSlug/projects     → Projects
+  /t/:tenantSlug/changes/:id  → ChangeDetail
+  /t/:tenantSlug/admin        → AdminConsole
+  /t/:tenantSlug/*            → NotFound
+  /anything-else              → Redirect to /t/{slug}/builder
+  ```
+- **Tenant resolution flow:**
+  1. URL provides slug → `TenantRouteSync` sets module-level state synchronously during render
+  2. `useLayoutEffect` persists to localStorage + clears cache (only on actual slug change, before paint)
+  3. `useEffect` fetches `/api/tenants`, validates slug, hydrates TenantProvider with `{ id, slug, name }`
+  4. `tenantHeaders()` reads module-level slug for every API call — always correct from step 1
+- **Invariants:**
+  - BLD55: All routes scoped under `/t/:tenantSlug` — URL is the source of truth for tenant identity.
+  - BLD56: Wouter `<Route nest>` strips tenant prefix — all child components use relative paths. No page component changes required.
+  - BLD57: Module-level slug set synchronously during render — `tenantHeaders()` returns correct value before any child query fires.
+  - BLD58: Cache cleared only on actual tenant switch (slug diff) — prevents double-clear when TenantRouteSync hydrates full info.
+  - BLD59: TenantSelector uses absolute navigation (`wouter/use-browser-location`) — bypasses nested router base for cross-tenant URLs.
+  - BLD60: Root redirect reads localStorage for last-used tenant — no API call needed for redirect.
+  - BLD49 (UPDATED): Tenant switch now navigates to `/t/{slug}/builder` (was `navigate("/")`) — URL drives the switch, TenantRouteSync handles cache clear.
+  - BLD51 (UPDATED): Tenant identity is URL slug + `x-tenant-id` header — localStorage is for persistence only, not for live header injection.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 5.1b — Tenant Hardening (Phase 5 continued)
-- **Status:** Sprint 5.1b complete. Header injection reads from module-level state, not localStorage.
-- **Files added:** `client/src/lib/activeTenant.ts`
-- **Files modified:** `queryClient.ts` (module-level reads), `tenantStore.tsx` (hydrates module state), `use-tenant.ts` (comments)
-- **Endpoints reused:** None — client-only refactor.
-- **Invariants:** BLD52–BLD54 established. BLD48 superseded. All other invariants remain valid.
-- **What's stubbed:** Nothing.
-- **Assumptions:** `activeTenant.ts` is the single source of truth for live header values. `tenantStore.tsx` (React context) and `queryClient.ts` (request layer) both depend on it without depending on each other.
-- **Next step:** Sprint 5.2+ — remove hardcoded tenant defaults, real user identity. Phase 6 — Change Timeline.
+- **Phase:** Sprint 5.2 — URL-Scoped Tenancy (Phase 5 continued)
+- **Status:** Sprint 5.2 complete. All routes under `/t/:tenantSlug/...`. URL is source of truth.
+- **Files modified:** `App.tsx` (major restructure — nested routing + TenantRouteSync), `tenantStore.tsx` (URL-driven init, conditional cache clear), `TenantSelector.tsx` (absolute navigation), `Sidebar.tsx` (Builder URL)
+- **Endpoints reused:** `GET /api/tenants` (tenant list for validation + dropdown)
+- **Invariants:** BLD55–BLD60 established. BLD49, BLD51 updated. All other invariants remain valid.
+- **What's stubbed:** Nothing. Deep links, tenant switching, and refresh all functional.
+- **Assumptions:** Wouter v3 `<Route nest>` correctly strips prefix and creates sub-router for all child Link/useLocation/useParams calls. `setActiveTenantSlug()` during render is safe (module-level variable assignment, no React state side effects). `use-tenant.ts` (`useTenantBootstrap`) is now unused — superseded by `TenantRouteSync` in `App.tsx`.
+- **Next step:** Sprint 5.3+ — remove hardcoded tenant defaults, real user identity. Phase 6 — Change Timeline.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 
