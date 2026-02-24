@@ -23,7 +23,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
 | 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b, 5.2 complete) |
-| 6 | Change Timeline Upgrade | Sprint 6 | In Progress (6.1, 6.2 complete) |
+| 6 | Change Timeline Upgrade | Sprint 6 | In Progress (6.1, 6.2, 6.4 complete) |
 
 ---
 
@@ -93,7 +93,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 6.1 | Changes page becomes version control timeline | Complete |
 | 6.2 | Inline diff + attribution badges | Complete |
 | 6.3 | AI proposed badge + Human approved badge | Complete (merged into 6.2) |
-| 6.4 | Inline Promote button | Not Started |
+| 6.4 | Inline Promote button (DEV → TEST intent) | Complete |
 | 6.5 | Clear audit visibility | Not Started |
 
 **Backend dependencies:** Change events (exists), Change patch ops (exists), Graph diff (exists), Promotion intents (exists). StatusBadge system ready (UX Phase 1.3).
@@ -416,20 +416,34 @@ These backend services and UI components already exist and can be composed into 
   - BLD69: `?limit` query param with default 50, max 200 — prevents unbounded timeline responses.
   - BLD70: Expand/collapse is client-only state — no additional API calls on expand.
 
+### Sprint 6.4 — Inline Promote Button (Intent-Only, DEV → TEST)
+- **Date:** 2026-02-23
+- **Files:**
+  - `client/src/pages/changes.tsx` (MODIFIED) — Added `PromoteModal` component: shadcn Dialog with DEV/TEST environment badges, on-demand preflight readiness section (Run Preflight button → status banner: ready/warning/error), impact preview reusing existing `DiffSummaryGrid` from `entry.diff.summary`, and "Create Promotion Intent" button gated by preflight non-error. Added promote eligibility logic: "Promote" button shown only for draft entries where the entry is the latest version per draftId (computed via `latestDraftEntryIds` Set built from a `Map<draftId, { id, createdAt }>` pass over the timeline). `TimelineEntryCard` now accepts `isLatestDraft` prop. Link wrapping disabled for cards with promote button or expand chevron. Toast on success/error. Added `useState`/`useMemo` imports, `Dialog` component imports, `Button` import, icon imports (Rocket, Loader2, ShieldCheck, AlertTriangle, XCircle, CheckCircle2), `useToast`, `useDraftPreflight`, `useCreatePromotionIntent` hook imports.
+  - `client/src/hooks/useCreatePromotionIntent.ts` (MODIFIED) — Added `queryClient.invalidateQueries({ queryKey: ["/api/changes/timeline"] })` to `onSuccess` callback so the new promotion-intent entry appears in the timeline after creation.
+- **Summary:** Sprint 6.4 adds an inline "Promote" button on eligible draft timeline entries. Clicking it opens a modal that runs preflight validation on demand, shows impact using the existing diff summary from the timeline entry (no new API call), and creates a promotion intent (DEV → TEST, draft status only). The promote button is shown only on the latest version per draft — computed by a single pass over the rendered timeline entries, building a `Map<draftId, newestEntry>` and converting to a `Set<entryId>`. After intent creation, the timeline query is invalidated so the new promotion-intent entry appears.
+- **Latest-per-draft computation:** In the `Changes` component, `useMemo` iterates all timeline entries of type "draft", groups by `draftId`, and keeps the entry with the newest `createdAt` per group. The resulting `Set<string>` of entry IDs is passed to each `TimelineEntryCard` as `isLatestDraft`. This is O(n) and recomputed only when timeline data changes.
+- **Server changes:** None. Timeline endpoint remains read-only. Promote intent creation uses existing `POST /api/builder/drafts/:appId/promote-intent` from Sprint 3.4.
+- **Invariants:**
+  - BLD71: Inline promote creates a promotion intent only — no execute, no approve, no environment mutation.
+  - BLD72: Promote action gated by preflight non-error status — "Create Promotion Intent" button disabled until preflight runs and reports non-error.
+  - BLD73: Promote button shown only for the latest draft entry per draftId — historical versions cannot be promoted from the timeline.
+  - BLD74: Timeline endpoint remains read-only — promote action uses the existing `POST /api/builder/drafts/:appId/promote-intent` endpoint, not the timeline endpoint.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 6.2 — Inline Diff + Attribution (Phase 6 continued)
-- **Status:** Sprint 6.2 complete. Timeline entries now show AI/Human attribution, inline diff counts, and expand/collapse diff grid.
-- **Files modified:** `server/routes.ts` (extended timeline endpoint), `client/src/lib/api/timeline.ts` (new types), `client/src/pages/changes.tsx` (expand/collapse UI)
-- **Endpoints modified:** `GET /api/changes/timeline?limit=N` (added aiGenerated, diff fields, limit param)
-- **Invariants:** BLD66–BLD70 established. BLD65 superseded. All prior invariants remain valid.
-- **What's stubbed:** No inline promote button yet (Sprint 6.4). No full audit detail view yet (Sprint 6.5).
-- **Assumptions:** Lightweight diff is sufficient for timeline summary — full graph-projected diff still available via `/api/builder/drafts/:appId/diff` for detailed view. AI heuristic is simple regex — can be refined when user identity model matures.
-- **Next step:** Sprint 6.4 — inline promote button. Sprint 5.3+ — remove hardcoded defaults.
+- **Phase:** Sprint 6.4 — Inline Promote Button (Phase 6 continued)
+- **Status:** Sprint 6.4 complete. Latest draft entries now show inline "Promote" button with preflight-gated intent creation modal.
+- **Files modified:** `client/src/pages/changes.tsx` (promote button + modal), `client/src/hooks/useCreatePromotionIntent.ts` (timeline invalidation)
+- **Endpoints used:** `POST /api/builder/drafts/:appId/promote-intent` (existing), `GET /api/builder/drafts/:appId/preflight` (existing)
+- **Invariants:** BLD71–BLD74 established. All prior invariants remain valid.
+- **What's stubbed:** No full audit detail view yet (Sprint 6.5). Promote is intent-only — no execute/approve from timeline.
+- **Assumptions:** Latest-per-draft computed client-side from timeline entries (O(n) per render, memoized). Preflight runs on-demand per modal open. Impact preview reuses existing `entry.diff.summary` — no new API call.
+- **Next step:** Sprint 6.5 — audit visibility. Sprint 5.3+ — remove hardcoded defaults.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

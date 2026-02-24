@@ -1,8 +1,17 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/status/StatusBadge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   GitPullRequestArrow,
   Clock,
@@ -16,9 +25,18 @@ import {
   Plus,
   Minus,
   Pencil,
+  Rocket,
+  Loader2,
+  ShieldCheck,
+  AlertTriangle,
+  XCircle,
+  CheckCircle2,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
 import { useTimeline } from "@/hooks/useTimeline";
+import { useDraftPreflight } from "@/hooks/useDraftPreflight";
+import { useCreatePromotionIntent } from "@/hooks/useCreatePromotionIntent";
 import type { TimelineEntry, TimelineEntryType, DiffSummary } from "@/lib/api/timeline";
 
 const TYPE_CONFIG: Record<TimelineEntryType, { label: string; tone: StatusTone; color: string }> = {
@@ -105,11 +123,144 @@ function DiffSummaryGrid({ summary, fromLabel, toLabel }: { summary: DiffSummary
   );
 }
 
-function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
+// --- Promote Modal ---
+
+function PromoteModal({
+  open,
+  onOpenChange,
+  entry,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  entry: TimelineEntry;
+}) {
+  const { toast } = useToast();
+  const [preflightRequested, setPreflightRequested] = useState(false);
+  const preflight = useDraftPreflight(entry.draftId, preflightRequested);
+  const createIntent = useCreatePromotionIntent(entry.draftId);
+
+  const preflightStatus = preflight.data?.status;
+  const canCreate = preflightRequested && !preflight.isLoading && preflightStatus !== "error";
+
+  const handleCreate = () => {
+    createIntent.mutate(undefined, {
+      onSuccess: () => {
+        toast({ title: "Promotion intent created", description: "DEV \u2192 TEST intent is now in draft status." });
+        onOpenChange(false);
+        setPreflightRequested(false);
+      },
+      onError: (err) => {
+        toast({ title: "Failed to create intent", description: String(err), variant: "destructive" });
+      },
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setPreflightRequested(false); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Rocket className="w-5 h-5 text-amber-500" />
+            Promote DEV &rarr; TEST
+          </DialogTitle>
+          <DialogDescription>
+            Create a promotion intent for <span className="font-medium">{entry.title}</span>
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Environment badges */}
+          <div className="flex items-center justify-center gap-3 py-2">
+            <EnvBadge env="DEV" />
+            <ArrowRightLeft className="w-4 h-4 text-muted-foreground" />
+            <EnvBadge env="TEST" />
+          </div>
+
+          {/* Preflight readiness */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Readiness</p>
+            {!preflightRequested ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => setPreflightRequested(true)}
+              >
+                <ShieldCheck className="w-4 h-4 mr-1.5" />
+                Run Preflight
+              </Button>
+            ) : preflight.isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground p-2 border rounded-md bg-gray-50">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Running preflight checks...
+              </div>
+            ) : preflight.error ? (
+              <div className="flex items-center gap-2 text-sm text-red-600 p-2 border border-red-200 rounded-md bg-red-50">
+                <XCircle className="w-4 h-4" />
+                Preflight failed to load
+              </div>
+            ) : preflightStatus === "ready" ? (
+              <div className="flex items-center gap-2 text-sm text-emerald-700 p-2 border border-emerald-200 rounded-md bg-emerald-50">
+                <CheckCircle2 className="w-4 h-4" />
+                All checks passed ({preflight.data!.summary.warnings} warnings)
+              </div>
+            ) : preflightStatus === "warning" ? (
+              <div className="flex items-center gap-2 text-sm text-amber-700 p-2 border border-amber-200 rounded-md bg-amber-50">
+                <AlertTriangle className="w-4 h-4" />
+                {preflight.data!.summary.warnings} warning(s) — promotion allowed
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-red-600 p-2 border border-red-200 rounded-md bg-red-50">
+                <XCircle className="w-4 h-4" />
+                {preflight.data!.summary.errors} error(s) — resolve before promoting
+              </div>
+            )}
+          </div>
+
+          {/* Impact preview from existing diff */}
+          {entry.diff?.available && entry.diff.summary && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Impact (latest draft diff)</p>
+              <DiffSummaryGrid
+                summary={entry.diff.summary}
+                fromLabel={entry.diff.fromLabel}
+                toLabel={entry.diff.toLabel}
+              />
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={!canCreate || createIntent.isPending}
+            onClick={handleCreate}
+          >
+            {createIntent.isPending ? (
+              <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            ) : (
+              <Rocket className="w-4 h-4 mr-1.5" />
+            )}
+            Create Promotion Intent
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- Timeline Entry Card ---
+
+function TimelineEntryCard({ entry, isLatestDraft }: { entry: TimelineEntry; isLatestDraft: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const [promoteOpen, setPromoteOpen] = useState(false);
   const config = TYPE_CONFIG[entry.type];
   const href = entry.type === "change" ? `/changes/${entry.id}` : entry.draftId ? `/apps/${entry.draftId}` : undefined;
   const canExpand = entry.diff?.available && entry.diff.summary;
+  const canPromote = entry.type === "draft" && entry.draftId && isLatestDraft;
 
   const header = (
     <div className="min-w-0 flex-1 space-y-1.5">
@@ -171,11 +322,22 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
   );
 
   const inner = (
-    <Card className={`border-l-4 ${config.color} ${href && !canExpand ? "hover:bg-muted/30 cursor-pointer" : ""} transition-colors`}>
+    <Card className={`border-l-4 ${config.color} ${href && !canExpand && !canPromote ? "hover:bg-muted/30 cursor-pointer" : ""} transition-colors`}>
       <CardContent className="py-3 px-4">
         <div className="flex items-start justify-between gap-4">
           {header}
           <div className="shrink-0 mt-0.5 flex items-center gap-1">
+            {canPromote && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPromoteOpen(true); }}
+              >
+                <Rocket className="w-3 h-3 mr-1" />
+                Promote
+              </Button>
+            )}
             {entry.type === "change" && <GitPullRequestArrow className="w-4 h-4 text-blue-500" />}
             {entry.type === "draft" && <FileCode2 className="w-4 h-4 text-blue-500" />}
             {entry.type === "promotion-intent" && <ArrowRightLeft className="w-4 h-4 text-amber-500" />}
@@ -206,14 +368,38 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
     </Card>
   );
 
-  if (href && !canExpand) {
-    return <Link href={href}>{inner}</Link>;
-  }
-  return inner;
+  return (
+    <>
+      {href && !canExpand && !canPromote ? (
+        <Link href={href}>{inner}</Link>
+      ) : (
+        inner
+      )}
+      {canPromote && (
+        <PromoteModal open={promoteOpen} onOpenChange={setPromoteOpen} entry={entry} />
+      )}
+    </>
+  );
 }
+
+// --- Page ---
 
 export default function Changes() {
   const { data: timeline, isLoading } = useTimeline();
+
+  // Compute latest version per draftId: newest createdAt wins
+  const latestDraftEntryIds = useMemo(() => {
+    if (!timeline) return new Set<string>();
+    const newestByDraft = new Map<string, { id: string; createdAt: string }>();
+    for (const entry of timeline) {
+      if (entry.type !== "draft" || !entry.draftId) continue;
+      const current = newestByDraft.get(entry.draftId);
+      if (!current || new Date(entry.createdAt).getTime() > new Date(current.createdAt).getTime()) {
+        newestByDraft.set(entry.draftId, { id: entry.id, createdAt: entry.createdAt });
+      }
+    }
+    return new Set(Array.from(newestByDraft.values()).map((v) => v.id));
+  }, [timeline]);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -243,7 +429,11 @@ export default function Changes() {
       ) : (
         <div className="space-y-2">
           {timeline.map((entry) => (
-            <TimelineEntryCard key={entry.id} entry={entry} />
+            <TimelineEntryCard
+              key={entry.id}
+              entry={entry}
+              isLatestDraft={latestDraftEntryIds.has(entry.id)}
+            />
           ))}
         </div>
       )}

@@ -8,6 +8,7 @@ export function useCreatePromotionIntent(appId: string | undefined) {
     mutationFn: () => createBuilderPromotionIntent(appId!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["builder-promotion-intents", appId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/changes/timeline"] });
     },
   });
 }
