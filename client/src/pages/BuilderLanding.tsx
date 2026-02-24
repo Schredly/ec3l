@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, Link } from "wouter";
+import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -52,6 +52,7 @@ function timeAgo(dateStr: string): string {
 }
 
 function RecentDrafts() {
+  const [, navigate] = useLocation();
   const { data: drafts, isLoading } = useQuery<VibeDraft[]>({
     queryKey: ["/api/vibe/drafts"],
     queryFn: () => listDrafts(),
@@ -80,26 +81,28 @@ function RecentDrafts() {
       </p>
       <div className="space-y-2">
         {visible.map((draft) => (
-          <Link key={draft.id} href={`/apps/${draft.id}`}>
-            <Card className="cursor-pointer transition-colors hover:border-blue-300 hover:bg-blue-50/40">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3 min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {humanizeKey(draft.package.packageKey)}
-                  </p>
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    v{draft.package.version}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <VibeDraftStatusBadge status={draft.status} size="sm" />
-                  <span className="text-xs text-muted-foreground">
-                    {timeAgo(draft.updatedAt)}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
+          <Card
+            key={draft.id}
+            className="cursor-pointer transition-colors hover:border-blue-300 hover:bg-blue-50/40"
+            onClick={() => navigate(`/apps/${draft.id}`)}
+          >
+            <CardContent className="p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <p className="text-sm font-medium truncate">
+                  {humanizeKey(draft.package.packageKey)}
+                </p>
+                <span className="text-xs text-muted-foreground shrink-0">
+                  v{draft.package.version}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <VibeDraftStatusBadge status={draft.status} size="sm" />
+                <span className="text-xs text-muted-foreground">
+                  {timeAgo(draft.updatedAt)}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
     </div>
