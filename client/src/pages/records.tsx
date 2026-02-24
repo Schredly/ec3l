@@ -1,10 +1,15 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Database, User, Users, Play, ChevronRight } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Database, User, Users, Play, ChevronRight, Plus, Loader2 } from "lucide-react";
 import { SlaStatusBadge } from "@/components/status/SlaStatusBadge";
 import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -37,10 +42,184 @@ function AssignedCell({ assignedTo, assignedGroup }: { assignedTo: string | null
   return <span className="text-xs text-muted-foreground">Unassigned</span>;
 }
 
+interface SchemaField {
+  name: string;
+  type: string;
+  required?: boolean;
+}
+
+function CreateRecordDialog({
+  open,
+  onOpenChange,
+  recordType,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  recordType: RecordType;
+}) {
+  const { toast } = useToast();
+  const schema = recordType.schema as { fields?: SchemaField[] } | null;
+  const fields: SchemaField[] = schema?.fields ?? [];
+
+  const [formData, setFormData] = useState<Record<string, unknown>>({});
+
+  // Reset form when dialog opens or record type changes
+  useEffect(() => {
+    if (open) {
+      const initial: Record<string, unknown> = {};
+      for (const field of fields) {
+        if (field.type === "boolean") initial[field.name] = false;
+        else if (field.type === "number") initial[field.name] = "";
+        else initial[field.name] = "";
+      }
+      setFormData(initial);
+    }
+  }, [open, recordType.id]);
+
+  const createMutation = useMutation({
+    mutationFn: async (data: Record<string, unknown>) => {
+      const res = await apiRequest("POST", "/api/record-instances", {
+        recordTypeId: recordType.id,
+        data,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: [`/api/record-instances?recordTypeId=${recordType.id}`],
+      });
+      toast({ title: "Record created", description: `New ${recordType.name} record created.` });
+      onOpenChange(false);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to create record", description: err.message, variant: "destructive" });
+    },
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    // Build cleaned data — convert number fields, strip empty strings
+    const cleaned: Record<string, unknown> = {};
+    for (const field of fields) {
+      const value = formData[field.name];
+      if (field.type === "number") {
+        const num = Number(value);
+        if (value !== "" && !isNaN(num)) cleaned[field.name] = num;
+      } else if (field.type === "boolean") {
+        cleaned[field.name] = value;
+      } else {
+        if (typeof value === "string" && value.trim() !== "") {
+          cleaned[field.name] = value.trim();
+        }
+      }
+    }
+    createMutation.mutate(cleaned);
+  }
+
+  function updateField(name: string, value: unknown) {
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New {recordType.name} Record</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {fields.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              This record type has no fields defined.
+            </p>
+          ) : (
+            fields.map((field) => (
+              <div key={field.name} className="space-y-1.5">
+                <Label htmlFor={`field-${field.name}`} className="text-sm">
+                  {field.name}
+                  {field.required && <span className="text-destructive ml-0.5">*</span>}
+                  <span className="text-xs text-muted-foreground ml-2">({field.type})</span>
+                </Label>
+                {field.type === "boolean" ? (
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={`field-${field.name}`}
+                      checked={formData[field.name] === true}
+                      onCheckedChange={(checked) => updateField(field.name, checked)}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {formData[field.name] ? "True" : "False"}
+                    </span>
+                  </div>
+                ) : field.type === "text" ? (
+                  <Textarea
+                    id={`field-${field.name}`}
+                    value={(formData[field.name] as string) ?? ""}
+                    onChange={(e) => updateField(field.name, e.target.value)}
+                    placeholder={`Enter ${field.name}...`}
+                    className="min-h-[80px] text-sm"
+                    required={field.required}
+                  />
+                ) : field.type === "number" ? (
+                  <Input
+                    id={`field-${field.name}`}
+                    type="number"
+                    value={(formData[field.name] as string) ?? ""}
+                    onChange={(e) => updateField(field.name, e.target.value)}
+                    placeholder={`Enter ${field.name}...`}
+                    required={field.required}
+                  />
+                ) : field.type === "date" ? (
+                  <Input
+                    id={`field-${field.name}`}
+                    type="date"
+                    value={(formData[field.name] as string) ?? ""}
+                    onChange={(e) => updateField(field.name, e.target.value)}
+                    required={field.required}
+                  />
+                ) : field.type === "datetime" ? (
+                  <Input
+                    id={`field-${field.name}`}
+                    type="datetime-local"
+                    value={(formData[field.name] as string) ?? ""}
+                    onChange={(e) => updateField(field.name, e.target.value)}
+                    required={field.required}
+                  />
+                ) : (
+                  // string, reference, choice — all rendered as text input
+                  <Input
+                    id={`field-${field.name}`}
+                    type="text"
+                    value={(formData[field.name] as string) ?? ""}
+                    onChange={(e) => updateField(field.name, e.target.value)}
+                    placeholder={`Enter ${field.name}...`}
+                    required={field.required}
+                  />
+                )}
+              </div>
+            ))
+          )}
+          <Button
+            type="submit"
+            disabled={createMutation.isPending}
+            className="w-full"
+          >
+            {createMutation.isPending ? (
+              <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Creating...</>
+            ) : (
+              "Create Record"
+            )}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Records() {
   const [selectedTypeId, setSelectedTypeId] = useState<string>("");
   const [selectedInstance, setSelectedInstance] = useState<RecordInstanceWithSla | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const { toast } = useToast();
 
   const { data: recordTypes, isLoading: typesLoading } = useQuery<RecordType[]>({
@@ -121,26 +300,45 @@ export default function Records() {
         </Button>
       </div>
 
-      <div>
-        <label className="text-sm font-medium text-muted-foreground block mb-1.5">Record Type</label>
-        {typesLoading ? (
-          <Skeleton className="h-9 w-64" />
-        ) : (
-          <select
-            value={selectedTypeId}
-            onChange={(e) => setSelectedTypeId(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm bg-background"
-            data-testid="select-record-type"
-          >
-            <option value="">Select a record type…</option>
-            {recordTypes?.map((rt) => (
-              <option key={rt.id} value={rt.id}>
-                {rt.name} ({rt.key})
-              </option>
-            ))}
-          </select>
-        )}
+      <div className="flex items-end gap-3">
+        <div>
+          <label className="text-sm font-medium text-muted-foreground block mb-1.5">Record Type</label>
+          {typesLoading ? (
+            <Skeleton className="h-9 w-64" />
+          ) : (
+            <select
+              value={selectedTypeId}
+              onChange={(e) => setSelectedTypeId(e.target.value)}
+              className="border rounded-md px-3 py-2 text-sm bg-background"
+              data-testid="select-record-type"
+            >
+              <option value="">Select a record type…</option>
+              {recordTypes?.map((rt) => (
+                <option key={rt.id} value={rt.id}>
+                  {rt.name} ({rt.key})
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <Button
+          size="sm"
+          disabled={!selectedTypeId}
+          onClick={() => setCreateDialogOpen(true)}
+          className="gap-1.5"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          New Record
+        </Button>
       </div>
+
+      {selectedRecordType && (
+        <CreateRecordDialog
+          open={createDialogOpen}
+          onOpenChange={setCreateDialogOpen}
+          recordType={selectedRecordType}
+        />
+      )}
 
       {!selectedTypeId ? (
         <Card>

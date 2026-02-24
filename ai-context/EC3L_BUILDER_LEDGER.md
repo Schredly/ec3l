@@ -24,6 +24,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
 | 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b, 5.2 complete) |
 | 6 | Change Timeline Upgrade | Sprint 6 | Complete (6.1, 6.2, 6.4, 6.5) |
+| 7 | End-to-End Testing UX | Sprint 7 | In Progress (7.1 complete) |
 
 ---
 
@@ -444,22 +445,38 @@ These backend services and UI components already exist and can be composed into 
   - BLD77: Audit toggle is secondary — hidden behind "View Audit Details" button within expanded section to avoid visual noise.
   - BLD78: `requestId` field is structurally present but currently unpopulated — ready for when request tracing is added to change/promotion services.
 
+### Sprint 7.1 — Install to DEV Button + Create Record Form
+- **Date:** 2026-02-24
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Added `POST /api/builder/drafts/:appId/install` endpoint. Calls `ec3l.vibeDraft.installDraft(req.tenantContext, appId)` to install the draft package into the DEV environment. Returns `{ ok: true }`. Error handling matches existing builder endpoint pattern (statusCode-aware catch). No admin auth. Placed near the existing promote-intent endpoint.
+  - `client/src/lib/api/vibe.ts` (MODIFIED) — Added `installBuilderDraft(appId: string): Promise<{ ok: boolean }>` function. Calls `POST /api/builder/drafts/${appId}/install` via `apiRequest`.
+  - `client/src/hooks/useInstallDraft.ts` (NEW) — `useMutation` hook wrapping `installBuilderDraft()`. On success invalidates `["builder-draft", appId]`, `["builder-drafts"]`, `["/api/changes/timeline"]` query caches. Modeled after `useCreatePromotionIntent` pattern.
+  - `client/src/pages/AppDraftShell.tsx` (MODIFIED) — Added "Install to DEV" button in header actions row, visible when `status === "draft" || status === "previewed"`. Wrapped in `AlertDialog` with confirmation message ("This will install the package into DEV. This action is terminal — the draft cannot be modified after installation."). On confirm calls `installDraft.mutateAsync()`, shows success/error toast. Button disappears after install (status transitions to "installed", `STATUS_TONE` already handles "installed" → success styling). Added imports for `AlertDialog` component set, `Download` icon, `Loader2` icon, `useInstallDraft` hook.
+  - `client/src/pages/records.tsx` (MODIFIED) — Added `CreateRecordDialog` component (~130 lines): dynamic form built from selected record type's `schema.fields` array. Field type → input mapping: `boolean` → `Switch`, `text` → `Textarea`, `number` → `Input[number]`, `date` → `Input[date]`, `datetime` → `Input[datetime-local]`, `string`/`reference`/`choice` → `Input[text]`. Controlled state with `formData` Record, reset on dialog open. `useMutation` calls `POST /api/record-instances` with `{ recordTypeId, data }`. On success invalidates instances query, closes dialog, shows toast. Added "New Record" button (with Plus icon) next to record type selector, disabled when no type selected. Added imports for `useMutation`, `Input`, `Textarea`, `Switch`, `Label`, `Dialog`/`DialogContent`/`DialogHeader`/`DialogTitle`, `Plus`, `Loader2`.
+- **Summary:** Sprint 7.1 closes the end-to-end testing gap in the Builder workflow. After building and refining a draft, users can now: (1) install it into DEV directly from the Draft Shell header via a confirmation dialog, and (2) create record instances on the Records page to test their schema with real data. No new database tables, no migrations — both features compose existing backend services (`vibeDraftService.installDraft` and `POST /api/record-instances`).
+- **Invariants:**
+  - BLD79: Builder install endpoint (`POST /api/builder/drafts/:appId/install`) does not require admin RBAC — consistent with BLD6, BLD11, BLD16, BLD21, BLD26, BLD31, BLD39, BLD62.
+  - BLD80: Install action is terminal — draft transitions to "installed" status and cannot be modified. AlertDialog warns the user before proceeding.
+  - BLD81: Install reuses `vibeDraftService.installDraft()` — full graph package install lifecycle including atomic record type + workflow creation.
+  - BLD82: Create Record form is schema-driven — field list and types derived from `recordType.schema.fields` JSONB, no hardcoded field names.
+  - BLD83: Create Record uses existing `POST /api/record-instances` endpoint — no new server endpoint needed.
+  - BLD84: "New Record" button disabled when no record type is selected — prevents empty form state.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
-- **Date:** 2026-02-23
-- **Phase:** Phase 6 — Change Timeline Upgrade (Complete)
-- **Status:** Phase 6 complete. All 5 sprints delivered: unified timeline (6.1), inline diff + attribution (6.2), inline promote intent (6.4), audit visibility (6.5).
-- **Files modified:** `server/routes.ts` (audit fields), `client/src/lib/api/timeline.ts` (TimelineEntryAudit type), `client/src/pages/changes.tsx` (AuditPanel + expand-all)
-- **Endpoints modified:** `GET /api/changes/timeline` (added audit object per entry)
-- **Invariants:** BLD75–BLD78 established. BLD74 reaffirmed. All prior invariants remain valid.
-- **Phase 6 complete deliverables:**
-  - 6.1: Unified change timeline (4-source aggregation)
-  - 6.2: Inline diff + AI/Human attribution badges
-  - 6.4: Inline promote button (preflight-gated, intent-only)
-  - 6.5: Audit visibility per entry (tenant, entity, source, timestamp)
+- **Date:** 2026-02-24
+- **Phase:** Sprint 7.1 — Install to DEV + Create Record (Complete)
+- **Status:** Sprint 7.1 complete. Two features delivered: Install to DEV button in AppDraftShell, Create Record form on Records page.
+- **Files modified:** `server/routes.ts` (install endpoint), `client/src/lib/api/vibe.ts` (installBuilderDraft), `client/src/hooks/useInstallDraft.ts` (NEW), `client/src/pages/AppDraftShell.tsx` (Install button + AlertDialog), `client/src/pages/records.tsx` (CreateRecordDialog + New Record button)
+- **Endpoints added:** `POST /api/builder/drafts/:appId/install`
+- **Endpoints reused:** `POST /api/record-instances`
+- **Invariants:** BLD79–BLD84 established. All prior invariants remain valid.
+- **Sprint 7.1 deliverables:**
+  - Install to DEV button (AlertDialog-confirmed, terminal action, status-gated visibility)
+  - Create Record form (schema-driven dynamic form, field type mapping, mutation with cache invalidation)
 - **Next step:** Phase 7+ (TBD). Sprint 5.3+ — remove hardcoded defaults.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->

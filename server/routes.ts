@@ -3778,6 +3778,24 @@ export async function registerRoutes(
   });
 
   /**
+   * POST /api/builder/drafts/:appId/install
+   * Install the draft package into DEV. No admin auth.
+   * Delegates to vibeDraftService.installDraft (preview → install lifecycle).
+   */
+  app.post("/api/builder/drafts/:appId/install", async (req, res) => {
+    try {
+      await ec3l.vibeDraft.installDraft(req.tenantContext, req.params.appId);
+      return res.json({ ok: true });
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "statusCode" in err) {
+        const e = err as { statusCode: number; message: string };
+        return res.status(e.statusCode).json({ message: e.message });
+      }
+      throw err;
+    }
+  });
+
+  /**
    * POST /api/builder/drafts/:appId/promote-intent
    * Create a promotion intent DEV → TEST for the draft's project. No admin auth.
    */

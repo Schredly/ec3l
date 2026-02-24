@@ -6,7 +6,18 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { AlertCircle, CheckCircle2, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,6 +32,7 @@ import { usePromotionIntents } from "@/hooks/usePromotionIntents";
 import { useCreatePromotionIntent } from "@/hooks/useCreatePromotionIntent";
 import { useProdState } from "@/hooks/useProdState";
 import { usePullDownDraft } from "@/hooks/usePullDownDraft";
+import { useInstallDraft } from "@/hooks/useInstallDraft";
 import { PromotionIntentStatusBadge } from "@/components/status/PromotionIntentStatusBadge";
 import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange, PreflightCheck, PreflightResult } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
@@ -1212,6 +1224,8 @@ export default function AppDraftShell() {
   const [pullDownOpen, setPullDownOpen] = useState(false);
   const queryClient = useQueryClient();
   const { data: prodState } = useProdState(appId);
+  const installDraft = useInstallDraft(appId);
+  const { toast } = useToast();
 
   if (isLoading) {
     return <DraftSkeleton />;
@@ -1250,6 +1264,45 @@ export default function AppDraftShell() {
           <StatusBadge label="DEV" tone="info" size="md" />
         </div>
         <div className="flex items-center gap-2">
+          {(draft.status === "draft" || draft.status === "previewed") && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={installDraft.isPending}
+                >
+                  {installDraft.isPending ? (
+                    <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Installing...</>
+                  ) : (
+                    <><Download className="w-3.5 h-3.5 mr-1.5" />Install to DEV</>
+                  )}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Install to DEV?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will install the package into DEV. This action is terminal — the draft cannot be modified after installation.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      installDraft.mutateAsync().then(() => {
+                        toast({ title: "Installed", description: "Package installed to DEV successfully." });
+                      }).catch((err: Error) => {
+                        toast({ title: "Install failed", description: err.message, variant: "destructive" });
+                      });
+                    }}
+                  >
+                    Install
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           {prodState?.available && (
             <Button
               onClick={() => setPullDownOpen(true)}

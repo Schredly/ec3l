@@ -150,6 +150,11 @@ export interface BuilderPromotionIntent {
   createdBy: string | null;
 }
 
+export async function installBuilderDraft(appId: string): Promise<{ ok: boolean }> {
+  const res = await apiRequest("POST", `/api/builder/drafts/${appId}/install`);
+  return res.json();
+}
+
 export async function createBuilderPromotionIntent(appId: string): Promise<BuilderPromotionIntent> {
   const res = await apiRequest("POST", `/api/builder/drafts/${appId}/promote-intent`);
   return res.json();
