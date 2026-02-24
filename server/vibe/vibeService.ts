@@ -276,8 +276,80 @@ function refinePackageDeterministic(
     return refined;
   }
 
+  // Pattern: flexible "add field" — "add field company to ticket as text",
+  // "add a company field to ticket", "I need a field called company on ticket"
+  const flexAddFieldMatch = lower.match(
+    /(?:add|create|need)\s+(?:a\s+)?(?:field\s+(?:called\s+)?)?(\w+)\s+(?:field\s+)?(?:to|on|for)\s+(\w+)/,
+  );
+  if (flexAddFieldMatch) {
+    const [, fieldName, rtKey] = flexAddFieldMatch;
+    const rt = refined.recordTypes.find((r) => r.key === rtKey);
+    if (!rt) {
+      throw new VibeServiceError(
+        `Record type "${rtKey}" not found in package. Available: ${refined.recordTypes.map((r) => r.key).join(", ")}`,
+      );
+    }
+    if (rt.fields.some((f) => f.name === fieldName)) {
+      throw new VibeServiceError(`Field "${fieldName}" already exists on "${rtKey}"`);
+    }
+    // Infer field type from optional suffix ("as text", "as number", etc.) or keywords
+    const typeMatch = lower.match(/\s+(?:as|type)\s+(string|text|number|boolean|date|datetime|reference|choice)/);
+    const TYPE_MAP: Record<string, string> = { text: "string", datetime: "date" };
+    const rawType = typeMatch ? typeMatch[1]! : "string";
+    const fieldType = TYPE_MAP[rawType] ?? rawType;
+    rt.fields.push({ name: fieldName!, type: fieldType });
+    return refined;
+  }
+
+  // Pattern: "remove field X from Y" / "drop X from Y"
+  const removeFieldMatch = lower.match(
+    /(?:remove|drop|delete)\s+(?:field\s+)?(\w+)\s+(?:from|on)\s+(\w+)/,
+  );
+  if (removeFieldMatch) {
+    const [, fieldName, rtKey] = removeFieldMatch;
+    const rt = refined.recordTypes.find((r) => r.key === rtKey);
+    if (!rt) {
+      throw new VibeServiceError(
+        `Record type "${rtKey}" not found in package. Available: ${refined.recordTypes.map((r) => r.key).join(", ")}`,
+      );
+    }
+    const fieldIdx = rt.fields.findIndex((f) => f.name === fieldName);
+    if (fieldIdx < 0) {
+      throw new VibeServiceError(
+        `Field "${fieldName}" not found on "${rtKey}". Available: ${rt.fields.map((f) => f.name).join(", ")}`,
+      );
+    }
+    rt.fields.splice(fieldIdx, 1);
+    return refined;
+  }
+
+  // Pattern: "add record type X" / "add table X" / "create entity X"
+  const addRtMatch = lower.match(
+    /(?:add|create)\s+(?:a\s+)?(?:record\s*type|table|entity)\s+(\w+)/,
+  );
+  if (addRtMatch) {
+    const [, rtName] = addRtMatch;
+    const rtKey = rtName!;
+    if (refined.recordTypes.some((r) => r.key === rtKey)) {
+      throw new VibeServiceError(`Record type "${rtKey}" already exists in package`);
+    }
+    refined.recordTypes.push({
+      key: rtKey,
+      name: rtName!.charAt(0).toUpperCase() + rtName!.slice(1),
+      fields: [
+        { name: "name", type: "string", required: true },
+      ],
+    });
+    return refined;
+  }
+
+  // Catch-all with helpful error
+  const rtKeys = refined.recordTypes.map((r) => r.key).join(", ");
   throw new VibeServiceError(
-    `Could not parse refinement: "${refinementPrompt}". Supported: "add field <name> to <type>", "rename to <name>", "add sla <minutes> on <type>".`,
+    `Could not parse refinement: "${refinementPrompt}". ` +
+    `Supported: "add field <name> to <type>", "remove field <name> from <type>", ` +
+    `"add record type <name>", "rename to <name>", "add sla <minutes> on <type>". ` +
+    `Available record types: ${rtKeys}`,
   );
 }
 

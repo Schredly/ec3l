@@ -21,7 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAppDraft } from "@/hooks/useAppDraft";
 import { useRefineDraft } from "@/hooks/useRefineDraft";
 import { useDraftVersions } from "@/hooks/useDraftVersions";
@@ -36,6 +36,7 @@ import { useInstallDraft } from "@/hooks/useInstallDraft";
 import { PromotionIntentStatusBadge } from "@/components/status/PromotionIntentStatusBadge";
 import { previewPromotionIntent, approvePromotionIntent, executePromotionIntent } from "@/lib/api/promotion";
 import type { EnvironmentDiffResult } from "@/lib/api/promotion";
+import { fetchBuilderDraftPreflight } from "@/lib/api/vibe";
 import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange, PreflightCheck, PreflightResult } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
 
@@ -899,6 +900,11 @@ function PreflightResults({ result }: { result: { status: string; summary: { err
         {banner.icon}
         <span className={`text-sm font-medium ${banner.text}`}>{banner.label}</span>
       </div>
+      {result.status === "warning" && (
+        <p className="text-xs text-muted-foreground">
+          Warnings are advisory — you can still promote with warnings.
+        </p>
+      )}
 
       {result.checks.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-6">
@@ -1411,8 +1417,12 @@ export default function AppDraftShell() {
   const [promoteOpen, setPromoteOpen] = useState(false);
   const [pullDownOpen, setPullDownOpen] = useState(false);
   const [selectedIntentId, setSelectedIntentId] = useState<string | null>(null);
-  const queryClient = useQueryClient();
   const { data: prodState } = useProdState(appId);
+  const { data: preflightData } = useQuery<PreflightResult>({
+    queryKey: ["builder-draft-preflight", appId],
+    queryFn: () => fetchBuilderDraftPreflight(appId!),
+    enabled: false,
+  });
   const installDraft = useInstallDraft(appId);
   const { toast } = useToast();
 
@@ -1435,8 +1445,6 @@ export default function AppDraftShell() {
   const pkg = draft.package as unknown as GraphPackageJson;
   const appName = humanizeKey(pkg.packageKey);
 
-  // Check preflight cache for promote button gating
-  const preflightData = queryClient.getQueryData<PreflightResult>(["builder-draft-preflight", appId]);
   const canPromote = preflightData && preflightData.status !== "error";
 
   return (
