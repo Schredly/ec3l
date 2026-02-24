@@ -23,7 +23,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 3 | Draft → Test → Publish Flow | Sprint 3 | Complete (3.1–3.6) |
 | 4 | Shared Enterprise Primitives | Sprint 4 | In Progress (4.1–4.2 complete) |
 | 5 | Tenant Awareness | Sprint 5 | In Progress (5.1, 5.1b, 5.2 complete) |
-| 6 | Change Timeline Upgrade | Sprint 6 | In Progress (6.1, 6.2, 6.4 complete) |
+| 6 | Change Timeline Upgrade | Sprint 6 | Complete (6.1, 6.2, 6.4, 6.5) |
 
 ---
 
@@ -94,7 +94,7 @@ The platform UI is not a configuration console. It is a guided AI-powered assemb
 | 6.2 | Inline diff + attribution badges | Complete |
 | 6.3 | AI proposed badge + Human approved badge | Complete (merged into 6.2) |
 | 6.4 | Inline Promote button (DEV → TEST intent) | Complete |
-| 6.5 | Clear audit visibility | Not Started |
+| 6.5 | Audit visibility on timeline entries | Complete |
 
 **Backend dependencies:** Change events (exists), Change patch ops (exists), Graph diff (exists), Promotion intents (exists). StatusBadge system ready (UX Phase 1.3).
 
@@ -430,20 +430,37 @@ These backend services and UI components already exist and can be composed into 
   - BLD73: Promote button shown only for the latest draft entry per draftId — historical versions cannot be promoted from the timeline.
   - BLD74: Timeline endpoint remains read-only — promote action uses the existing `POST /api/builder/drafts/:appId/promote-intent` endpoint, not the timeline endpoint.
 
+### Sprint 6.5 — Audit Visibility on Timeline Entries
+- **Date:** 2026-02-23
+- **Files:**
+  - `server/routes.ts` (MODIFIED) — Extended `GET /api/changes/timeline` endpoint to include `audit` object on every entry. Fields: `tenantSlug` (from `x-tenant-id` header), `entityId` (underlying object ID), `entityType` (maps to entry type), `createdAtIso` (ISO 8601 timestamp), `createdBy` (actor), `source` (origin system: `"change-engine"`, `"promotion"`, `"builder"`, or `"pull-down"`). `requestId` omitted (not available on current data sources). Endpoint remains read-only.
+  - `client/src/lib/api/timeline.ts` (MODIFIED) — Added `TimelineEntryAudit` interface with `tenantSlug`, `entityId`, `entityType`, `createdAtIso`, `createdBy`, `source?`, `requestId?`. Extended `TimelineEntry` with `audit?: TimelineEntryAudit`.
+  - `client/src/pages/changes.tsx` (MODIFIED) — Added `AuditPanel` component: subtle gray background card with definition list grid showing Actor (with AI/Human badge), Tenant (monospace slug), Entity ID (monospace, break-all), Entity Type, Source, Created At (absolute timestamp), and optional Request ID. Added `ScrollText` icon import. Every timeline entry card is now expandable (not just diff-available ones). Expanded section shows diff grid (if available) followed by "View Audit Details" toggle button. Clicking toggle reveals `AuditPanel`. Added `showAudit` state to `TimelineEntryCard`. Updated `canExpand` logic: `hasDiff || hasAudit`.
+- **Summary:** Sprint 6.5 adds observational audit metadata to every timeline entry. The backend populates tenant slug, entity identity, creation timestamp, actor, and source system on each entry. The frontend renders a collapsible audit detail panel within the card's expanded section, behind a secondary "View Audit Details" toggle to keep the default view clean. No additional API calls — all audit data comes from the timeline response. No lifecycle changes, no mutations, no new tables.
+- **Invariants:**
+  - BLD74 (REAFFIRMED): Timeline endpoint remains read-only — audit data is populated from existing objects during aggregation.
+  - BLD75: Every timeline entry includes `audit` object — tenant slug, entity ID, entity type, timestamp, actor, source.
+  - BLD76: Audit panel is purely observational — no mutations, no lifecycle changes, no additional API calls.
+  - BLD77: Audit toggle is secondary — hidden behind "View Audit Details" button within expanded section to avoid visual noise.
+  - BLD78: `requestId` field is structurally present but currently unpopulated — ready for when request tracing is added to change/promotion services.
+
 ---
 
 ## Latest Status (Overwritten Each Time)
 
 <!-- CLAUDE_BUILDER_OVERWRITE_START -->
 - **Date:** 2026-02-23
-- **Phase:** Sprint 6.4 — Inline Promote Button (Phase 6 continued)
-- **Status:** Sprint 6.4 complete. Latest draft entries now show inline "Promote" button with preflight-gated intent creation modal.
-- **Files modified:** `client/src/pages/changes.tsx` (promote button + modal), `client/src/hooks/useCreatePromotionIntent.ts` (timeline invalidation)
-- **Endpoints used:** `POST /api/builder/drafts/:appId/promote-intent` (existing), `GET /api/builder/drafts/:appId/preflight` (existing)
-- **Invariants:** BLD71–BLD74 established. All prior invariants remain valid.
-- **What's stubbed:** No full audit detail view yet (Sprint 6.5). Promote is intent-only — no execute/approve from timeline.
-- **Assumptions:** Latest-per-draft computed client-side from timeline entries (O(n) per render, memoized). Preflight runs on-demand per modal open. Impact preview reuses existing `entry.diff.summary` — no new API call.
-- **Next step:** Sprint 6.5 — audit visibility. Sprint 5.3+ — remove hardcoded defaults.
+- **Phase:** Phase 6 — Change Timeline Upgrade (Complete)
+- **Status:** Phase 6 complete. All 5 sprints delivered: unified timeline (6.1), inline diff + attribution (6.2), inline promote intent (6.4), audit visibility (6.5).
+- **Files modified:** `server/routes.ts` (audit fields), `client/src/lib/api/timeline.ts` (TimelineEntryAudit type), `client/src/pages/changes.tsx` (AuditPanel + expand-all)
+- **Endpoints modified:** `GET /api/changes/timeline` (added audit object per entry)
+- **Invariants:** BLD75–BLD78 established. BLD74 reaffirmed. All prior invariants remain valid.
+- **Phase 6 complete deliverables:**
+  - 6.1: Unified change timeline (4-source aggregation)
+  - 6.2: Inline diff + AI/Human attribution badges
+  - 6.4: Inline promote button (preflight-gated, intent-only)
+  - 6.5: Audit visibility per entry (tenant, entity, source, timestamp)
+- **Next step:** Phase 7+ (TBD). Sprint 5.3+ — remove hardcoded defaults.
 - **Blockers:** None.
 <!-- CLAUDE_BUILDER_OVERWRITE_END -->
 

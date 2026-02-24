@@ -83,6 +83,7 @@ export async function registerRoutes(
       const ts = getTenantStorage(req.tenantContext);
       const limitParam = Number(req.query.limit) || 50;
       const limit = Math.min(Math.max(limitParam, 1), 200);
+      const tenantSlug = (req.headers["x-tenant-id"] as string) || "unknown";
 
       // Helper: AI-generated heuristic
       const isAiGenerated = (createdBy: string): boolean =>
@@ -90,16 +91,28 @@ export async function registerRoutes(
 
       // 1. Changes
       const changes = await ts.getChanges();
-      const changeEntries = changes.map((c) => ({
-        id: c.id,
-        type: "change" as const,
-        title: c.title,
-        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
-        createdBy: c.modulePath || "system",
-        status: c.status,
-        aiGenerated: isAiGenerated(c.modulePath || "system"),
-        diff: { available: false as const, kind: "change" as const },
-      }));
+      const changeEntries = changes.map((c) => {
+        const createdAt = c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt);
+        const createdBy = c.modulePath || "system";
+        return {
+          id: c.id,
+          type: "change" as const,
+          title: c.title,
+          createdAt,
+          createdBy,
+          status: c.status,
+          aiGenerated: isAiGenerated(createdBy),
+          diff: { available: false as const, kind: "change" as const },
+          audit: {
+            tenantSlug,
+            entityId: c.id,
+            entityType: "change" as const,
+            createdAtIso: createdAt,
+            createdBy,
+            source: "change-engine" as const,
+          },
+        };
+      });
 
       // 2. Promotion intents (resolve environment names)
       const intents = await ts.listPromotionIntents();
@@ -111,18 +124,30 @@ export async function registerRoutes(
           envCache.set(e.id, e.name);
         }
       }
-      const intentEntries = intents.map((i) => ({
-        id: i.id,
-        type: "promotion-intent" as const,
-        title: `Promote ${envCache.get(i.fromEnvironmentId) || "?"} → ${envCache.get(i.toEnvironmentId) || "?"}`,
-        createdAt: i.createdAt instanceof Date ? i.createdAt.toISOString() : String(i.createdAt ?? ""),
-        createdBy: i.createdBy || "system",
-        status: i.status ?? undefined,
-        fromEnv: envCache.get(i.fromEnvironmentId),
-        toEnv: envCache.get(i.toEnvironmentId),
-        aiGenerated: isAiGenerated(i.createdBy || "system"),
-        diff: { available: false as const, kind: "promotion" as const },
-      }));
+      const intentEntries = intents.map((i) => {
+        const createdAt = i.createdAt instanceof Date ? i.createdAt.toISOString() : String(i.createdAt ?? "");
+        const createdBy = i.createdBy || "system";
+        return {
+          id: i.id,
+          type: "promotion-intent" as const,
+          title: `Promote ${envCache.get(i.fromEnvironmentId) || "?"} → ${envCache.get(i.toEnvironmentId) || "?"}`,
+          createdAt,
+          createdBy,
+          status: i.status ?? undefined,
+          fromEnv: envCache.get(i.fromEnvironmentId),
+          toEnv: envCache.get(i.toEnvironmentId),
+          aiGenerated: isAiGenerated(createdBy),
+          diff: { available: false as const, kind: "promotion" as const },
+          audit: {
+            tenantSlug,
+            entityId: i.id,
+            entityType: "promotion-intent" as const,
+            createdAtIso: createdAt,
+            createdBy,
+            source: "promotion" as const,
+          },
+        };
+      });
 
       // 3. Draft versions (across all drafts) — with lightweight package-level diff
       const drafts = await ts.listVibeDrafts();
@@ -263,6 +288,14 @@ export async function registerRoutes(
           version: v.version,
           aiGenerated,
           diff,
+          audit: {
+            tenantSlug,
+            entityId: v.id,
+            entityType: "draft" as const,
+            createdAtIso: v.createdAt,
+            createdBy: v.createdBy,
+            source: "builder" as const,
+          },
         };
       });
 
@@ -275,18 +308,28 @@ export async function registerRoutes(
         .map((d) => {
           const pkg = d.package as Record<string, unknown> | null;
           const pkgKey = pkg && typeof pkg === "object" ? (pkg as { packageKey?: string }).packageKey : undefined;
+          const createdAt = d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt);
+          const createdBy = d.createdBy || "system";
           return {
             id: `pulldown-${d.id}`,
             type: "pull-down" as const,
             title: `Pull down from PROD${pkgKey ? ` (${pkgKey})` : ""}`,
-            createdAt: d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt),
-            createdBy: d.createdBy || "system",
+            createdAt,
+            createdBy,
             status: (d.status ?? undefined) as string | undefined,
             draftId: d.id,
             fromEnv: "PROD",
             toEnv: "DEV",
-            aiGenerated: isAiGenerated(d.createdBy || "system"),
+            aiGenerated: isAiGenerated(createdBy),
             diff: { available: false as const, kind: "pull-down" as const },
+            audit: {
+              tenantSlug,
+              entityId: d.id,
+              entityType: "pull-down" as const,
+              createdAtIso: createdAt,
+              createdBy,
+              source: "pull-down" as const,
+            },
           };
         });
 

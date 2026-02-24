@@ -23,6 +23,16 @@ export interface TimelineEntryDiff {
   summary?: DiffSummary;
 }
 
+export interface TimelineEntryAudit {
+  tenantSlug: string;
+  entityId: string;
+  entityType: TimelineEntryType;
+  createdAtIso: string;
+  createdBy: string;
+  source?: string;
+  requestId?: string;
+}
+
 export interface TimelineEntry {
   id: string;
   type: TimelineEntryType;
@@ -36,6 +46,7 @@ export interface TimelineEntry {
   version?: number;
   aiGenerated?: boolean;
   diff?: TimelineEntryDiff;
+  audit?: TimelineEntryAudit;
 }
 
 export async function fetchTimeline(): Promise<TimelineEntry[]> {

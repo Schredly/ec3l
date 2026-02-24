@@ -31,13 +31,14 @@ import {
   AlertTriangle,
   XCircle,
   CheckCircle2,
+  ScrollText,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useTimeline } from "@/hooks/useTimeline";
 import { useDraftPreflight } from "@/hooks/useDraftPreflight";
 import { useCreatePromotionIntent } from "@/hooks/useCreatePromotionIntent";
-import type { TimelineEntry, TimelineEntryType, DiffSummary } from "@/lib/api/timeline";
+import type { TimelineEntry, TimelineEntryType, DiffSummary, TimelineEntryAudit } from "@/lib/api/timeline";
 
 const TYPE_CONFIG: Record<TimelineEntryType, { label: string; tone: StatusTone; color: string }> = {
   change: { label: "Change", tone: "info", color: "border-l-blue-400" },
@@ -119,6 +120,53 @@ function DiffSummaryGrid({ summary, fromLabel, toLabel }: { summary: DiffSummary
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// --- Audit Panel ---
+
+function AuditPanel({ audit, aiGenerated }: { audit: TimelineEntryAudit; aiGenerated?: boolean }) {
+  const rows: Array<{ label: string; value: React.ReactNode }> = [
+    {
+      label: "Actor",
+      value: (
+        <span className="flex items-center gap-1.5">
+          {audit.createdBy}
+          <StatusBadge
+            label={aiGenerated ? "AI" : "Human"}
+            tone={aiGenerated ? "ai" : "neutral"}
+            size="sm"
+            icon={aiGenerated ? <Bot className="w-3 h-3" /> : <User className="w-3 h-3" />}
+          />
+        </span>
+      ),
+    },
+    { label: "Tenant", value: <span className="font-mono">{audit.tenantSlug}</span> },
+    { label: "Entity ID", value: <span className="font-mono text-[10px] break-all">{audit.entityId}</span> },
+    { label: "Entity Type", value: audit.entityType },
+    { label: "Source", value: audit.source || "unknown" },
+    { label: "Created At", value: new Date(audit.createdAtIso).toLocaleString() },
+  ];
+
+  if (audit.requestId) {
+    rows.push({ label: "Request ID", value: <span className="font-mono text-[10px] break-all">{audit.requestId}</span> });
+  }
+
+  return (
+    <div className="rounded-md border border-gray-100 bg-gray-50/60 p-3 space-y-1.5">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+        <ScrollText className="w-3 h-3" />
+        Audit Trail
+      </p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[11px]">
+        {rows.map((r) => (
+          <div key={r.label} className="contents">
+            <dt className="text-muted-foreground font-medium">{r.label}</dt>
+            <dd className="text-foreground">{r.value}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
@@ -256,10 +304,13 @@ function PromoteModal({
 
 function TimelineEntryCard({ entry, isLatestDraft }: { entry: TimelineEntry; isLatestDraft: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
   const [promoteOpen, setPromoteOpen] = useState(false);
   const config = TYPE_CONFIG[entry.type];
   const href = entry.type === "change" ? `/changes/${entry.id}` : entry.draftId ? `/apps/${entry.draftId}` : undefined;
-  const canExpand = entry.diff?.available && entry.diff.summary;
+  const hasDiff = entry.diff?.available && entry.diff.summary;
+  const hasAudit = !!entry.audit;
+  const canExpand = hasDiff || hasAudit;
   const canPromote = entry.type === "draft" && entry.draftId && isLatestDraft;
 
   const header = (
@@ -355,13 +406,29 @@ function TimelineEntryCard({ entry, isLatestDraft }: { entry: TimelineEntry; isL
             )}
           </div>
         </div>
-        {expanded && entry.diff?.summary && (
-          <div className="mt-3 pt-3 border-t border-gray-100">
-            <DiffSummaryGrid
-              summary={entry.diff.summary}
-              fromLabel={entry.diff.fromLabel}
-              toLabel={entry.diff.toLabel}
-            />
+        {expanded && (
+          <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+            {hasDiff && entry.diff?.summary && (
+              <DiffSummaryGrid
+                summary={entry.diff.summary}
+                fromLabel={entry.diff.fromLabel}
+                toLabel={entry.diff.toLabel}
+              />
+            )}
+            {hasAudit && (
+              <>
+                <button
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAudit(!showAudit); }}
+                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                >
+                  <ScrollText className="w-3 h-3" />
+                  {showAudit ? "Hide Audit Details" : "View Audit Details"}
+                </button>
+                {showAudit && entry.audit && (
+                  <AuditPanel audit={entry.audit} aiGenerated={entry.aiGenerated} />
+                )}
+              </>
+            )}
           </div>
         )}
       </CardContent>
