@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { AlertCircle, CheckCircle2, Download, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Eye, Loader2, Play, ShieldAlert, ThumbsUp, TriangleAlert } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,7 +21,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAppDraft } from "@/hooks/useAppDraft";
 import { useRefineDraft } from "@/hooks/useRefineDraft";
 import { useDraftVersions } from "@/hooks/useDraftVersions";
@@ -34,6 +34,8 @@ import { useProdState } from "@/hooks/useProdState";
 import { usePullDownDraft } from "@/hooks/usePullDownDraft";
 import { useInstallDraft } from "@/hooks/useInstallDraft";
 import { PromotionIntentStatusBadge } from "@/components/status/PromotionIntentStatusBadge";
+import { previewPromotionIntent, approvePromotionIntent, executePromotionIntent } from "@/lib/api/promotion";
+import type { EnvironmentDiffResult } from "@/lib/api/promotion";
 import type { GraphPackageJson, BuilderDiffResult, BuilderDiffChange, PreflightCheck, PreflightResult } from "@/lib/api/vibe";
 import type { StatusTone } from "@/components/status/StatusBadge";
 
@@ -529,13 +531,15 @@ function DiffChangeSection({ label, tone, items, expanded, onToggle }: {
 
 // --- Tab Content Components ---
 
-function OverviewTab({ pkg, prompt, status, createdAt, appId, lineage }: {
+function OverviewTab({ pkg, prompt, status, createdAt, appId, lineage, selectedIntentId, onSelectIntent }: {
   pkg: GraphPackageJson;
   prompt: string;
   status: string;
   createdAt: string;
   appId: string;
   lineage?: { pulledFromProd: boolean; sourceVersion: string; pulledAt: string } | null;
+  selectedIntentId: string | null;
+  onSelectIntent: (id: string | null) => void;
 }) {
   return (
     <div className="mt-2 space-y-4">
@@ -615,7 +619,7 @@ function OverviewTab({ pkg, prompt, status, createdAt, appId, lineage }: {
       <RefinementPanel appId={appId} />
       <VersionHistoryPanel appId={appId} />
       <CompareVersionsPanel appId={appId} />
-      <PromotionIntentsPanel appId={appId} />
+      <PromotionIntentsPanel appId={appId} selectedIntentId={selectedIntentId} onSelectIntent={onSelectIntent} />
     </div>
   );
 }
@@ -957,10 +961,11 @@ function DraftSkeleton() {
 
 // --- Promote Modal ---
 
-function PromoteModal({ appId, open, onOpenChange }: {
+function PromoteModal({ appId, open, onOpenChange, onIntentCreated }: {
   appId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onIntentCreated?: (intentId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -986,8 +991,9 @@ function PromoteModal({ appId, open, onOpenChange }: {
 
   function handleCreate() {
     createIntent.mutate(undefined, {
-      onSuccess: () => {
+      onSuccess: (intent) => {
         toast({ title: "Promotion intent created", description: "DEV → TEST intent is now draft." });
+        onIntentCreated?.(intent.intentId);
         onOpenChange(false);
       },
       onError: (err: Error) => {
@@ -1082,8 +1088,67 @@ function PromoteModal({ appId, open, onOpenChange }: {
 
 // --- Promotion Intents Section ---
 
-function PromotionIntentsPanel({ appId }: { appId: string }) {
+function PromotionIntentsPanel({ appId, selectedIntentId, onSelectIntent }: {
+  appId: string;
+  selectedIntentId: string | null;
+  onSelectIntent: (id: string | null) => void;
+}) {
   const { data: intents, isLoading } = usePromotionIntents(appId);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [previewDiff, setPreviewDiff] = useState<EnvironmentDiffResult | null>(null);
+
+  const previewMutation = useMutation({
+    mutationFn: (id: string) => previewPromotionIntent(id),
+    onSuccess: (intent) => {
+      queryClient.invalidateQueries({ queryKey: ["builder-promotion-intents", appId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/changes/timeline"] });
+      if (intent.diff) {
+        setPreviewDiff(intent.diff as EnvironmentDiffResult);
+      }
+      toast({ title: "Preview computed" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Preview failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => approvePromotionIntent(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["builder-promotion-intents", appId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/changes/timeline"] });
+      toast({ title: "Intent approved" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Approve failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const executeMutation = useMutation({
+    mutationFn: (id: string) => executePromotionIntent(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["builder-promotion-intents", appId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/changes/timeline"] });
+      queryClient.invalidateQueries({ queryKey: ["builder-draft", appId] });
+      toast({ title: "Promotion executed" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Execute failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const anyMutating = previewMutation.isPending || approveMutation.isPending || executeMutation.isPending;
+
+  function handleSelectIntent(id: string) {
+    if (selectedIntentId === id) {
+      onSelectIntent(null);
+      setPreviewDiff(null);
+    } else {
+      onSelectIntent(id);
+      setPreviewDiff(null);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -1102,6 +1167,9 @@ function PromotionIntentsPanel({ appId }: { appId: string }) {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
 
+  const selectedIntent = sorted.find((i) => i.intentId === selectedIntentId);
+  const isTerminal = selectedIntent?.status === "executed" || selectedIntent?.status === "rejected";
+
   return (
     <div className="border rounded-md p-4 space-y-3">
       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -1109,9 +1177,15 @@ function PromotionIntentsPanel({ appId }: { appId: string }) {
       </p>
       <div className="space-y-1">
         {sorted.map((intent) => (
-          <div
+          <button
             key={intent.intentId}
-            className="flex items-center justify-between px-3 py-2 rounded-md border border-transparent hover:bg-muted/50 text-xs"
+            type="button"
+            onClick={() => handleSelectIntent(intent.intentId)}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-left text-xs transition-colors ${
+              selectedIntentId === intent.intentId
+                ? "bg-blue-50 border border-blue-200"
+                : "hover:bg-muted/50 border border-transparent"
+            }`}
           >
             <div className="flex items-center gap-2">
               <span className="font-mono text-muted-foreground">{intent.intentId.slice(0, 8)}</span>
@@ -1121,9 +1195,123 @@ function PromotionIntentsPanel({ appId }: { appId: string }) {
               </span>
             </div>
             <span className="text-muted-foreground">{relativeTime(intent.createdAt)}</span>
-          </div>
+          </button>
         ))}
       </div>
+
+      {/* Expanded detail for selected intent */}
+      {selectedIntent && (
+        <div className="border-t pt-3 space-y-3">
+          {/* Action buttons */}
+          {!isTerminal && (
+            <div className="flex items-center gap-2">
+              {(selectedIntent.status === "draft" || selectedIntent.status === "previewed") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={anyMutating}
+                  onClick={() => previewMutation.mutate(selectedIntent.intentId)}
+                >
+                  <Eye className={`w-3.5 h-3.5 mr-1.5 ${previewMutation.isPending ? "animate-spin" : ""}`} />
+                  {previewMutation.isPending ? "Previewing..." : "Preview"}
+                </Button>
+              )}
+              {selectedIntent.status === "previewed" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={anyMutating}
+                  onClick={() => approveMutation.mutate(selectedIntent.intentId)}
+                >
+                  <ThumbsUp className={`w-3.5 h-3.5 mr-1.5 ${approveMutation.isPending ? "animate-spin" : ""}`} />
+                  {approveMutation.isPending ? "Approving..." : "Approve"}
+                </Button>
+              )}
+              {selectedIntent.status === "approved" && (
+                <Button
+                  size="sm"
+                  disabled={anyMutating}
+                  onClick={() => executeMutation.mutate(selectedIntent.intentId)}
+                >
+                  <Play className={`w-3.5 h-3.5 mr-1.5 ${executeMutation.isPending ? "animate-spin" : ""}`} />
+                  {executeMutation.isPending ? "Executing..." : "Execute"}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {isTerminal && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>
+                This intent is <strong>{selectedIntent.status}</strong> (terminal).
+              </span>
+            </div>
+          )}
+
+          {/* Diff summary from preview */}
+          {previewDiff && <PromotionDiffSummary diff={previewDiff} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PromotionDiffSummary({ diff }: { diff: EnvironmentDiffResult }) {
+  const actionable = diff.deltas.filter((d) => d.status !== "same");
+  const inSync = diff.deltas.filter((d) => d.status === "same");
+
+  if (diff.deltas.length === 0) {
+    return (
+      <div className="text-xs text-muted-foreground text-center py-3">
+        No packages to compare.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        Preview Diff
+      </p>
+      {actionable.length > 0 && (
+        <div className="space-y-1">
+          {actionable.map((d) => (
+            <div
+              key={d.packageKey}
+              className={`flex items-center justify-between px-3 py-1.5 rounded-md text-xs ${
+                d.status === "missing"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-amber-50 text-amber-700"
+              }`}
+            >
+              <span className="font-mono">{d.packageKey}</span>
+              <span>
+                {d.status === "missing" ? "new" : `${d.fromVersion} → ${d.toVersion}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {inSync.length > 0 && (
+        <div className="space-y-1">
+          {inSync.map((d) => (
+            <div
+              key={d.packageKey}
+              className="flex items-center justify-between px-3 py-1.5 rounded-md text-xs bg-muted/50"
+            >
+              <span className="font-mono text-muted-foreground">{d.packageKey}</span>
+              <span className="text-muted-foreground">{d.toVersion}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {actionable.length === 0 && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>All packages in sync — nothing to promote.</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1222,6 +1410,7 @@ export default function AppDraftShell() {
   const { data: draft, isLoading, isError, error } = useAppDraft(appId);
   const [promoteOpen, setPromoteOpen] = useState(false);
   const [pullDownOpen, setPullDownOpen] = useState(false);
+  const [selectedIntentId, setSelectedIntentId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { data: prodState } = useProdState(appId);
   const installDraft = useInstallDraft(appId);
@@ -1323,7 +1512,7 @@ export default function AppDraftShell() {
         </div>
       </div>
 
-      <PromoteModal appId={appId!} open={promoteOpen} onOpenChange={setPromoteOpen} />
+      <PromoteModal appId={appId!} open={promoteOpen} onOpenChange={setPromoteOpen} onIntentCreated={setSelectedIntentId} />
       {prodState?.available && (
         <PullDownModal appId={appId!} open={pullDownOpen} onOpenChange={setPullDownOpen} />
       )}
@@ -1356,6 +1545,8 @@ export default function AppDraftShell() {
             createdAt={draft.createdAt}
             appId={appId!}
             lineage={draft.lineage}
+            selectedIntentId={selectedIntentId}
+            onSelectIntent={setSelectedIntentId}
           />
         </TabsContent>
 
